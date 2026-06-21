@@ -1,43 +1,120 @@
-Project: ShiftPay
-1. Brief Project Description
+# ShiftPay
 
-ShiftPay is a mobile app for tracking work shifts, hours worked, and automatically calculating pay for hourly employees.
+ShiftPay is a cross-platform application for tracking work shifts, worked hours, and salary calculations.
 
-The main idea behind the app is that a supervisor creates a work shift as a “session,” and employees join it from their devices. Once the shift is over, the app automatically calculates the time worked, breaks, hourly rate, and total pay.
+The main idea is simple:
 
-In the future, the app will include an API and a web dashboard where a foreman or administrator can view statistics, manage shifts and employees, and generate reports in PDF or Excel.
+- A foreman creates a work shift session.
+- Workers join the session.
+- The system tracks worked time.
+- The system calculates salary based on hourly rate, breaks, and approved work time.
 
-2. Target Audience
+## Project Status
 
-Primary users:
+This project is in MVP development.
 
--foremen;
--hourly-paid workers;
--small construction crews;
--tradespeople;
--freelance teams;
--small companies where work hours are tracked manually.
+The first MVP goal is to build:
 
-3. The Problem the App Solves
+- Spring Boot backend
+- PostgreSQL database
+- JWT authentication
+- Role-based access
+- Shift session management
+- Salary calculation
+- Basic mobile app for Android and iOS
 
-In many work crews, time tracking is done manually: in a notebook, in Excel, via messaging apps, or “by heart.” This leads to several problems:
+## Main Roles
 
--it’s difficult to accurately count hours;
--it’s easy to make mistakes when calculating pay;
--employees don’t always see how much they’ve actually earned;
--it’s difficult for the crew leader to keep track of all employees;
--there are no convenient statistics for the day, week, or month;
--it’s difficult to generate a report for yourself, an employee, or the employer.
+### Worker
 
-4. ShiftPay’s Core Value
+A worker can:
 
-ShiftPay allows you to:
+- register and log in
+- join a shift session
+- see their worked hours
+- see calculated salary
+- see shift history
 
--quickly start a work shift;
--add employees to a shift using a code or QR code;
--automatically track working hours;
--automatically account for standard breaks;
--calculate pay for a shift, week, or month;
--view shift history;
--reduce errors in payroll calculations;
--and, in the future, generate PDF/Excel reports.
+### Foreman
+
+A foreman can:
+
+- create shift sessions
+- start and close shifts
+- allow workers to join
+- approve worker attendance
+- see daily shift summary
+- see salary summary for workers
+
+### Admin
+
+An admin can:
+
+- manage companies
+- manage users
+- manage roles
+- view reports
+- configure system settings
+
+## Planned Monorepo Structure
+
+ShiftPay/
+  backend/      Spring Boot REST API
+  mobile/       React Native / Expo mobile app
+  web-admin/    Future admin dashboard
+  infra/        Docker, compose, deployment files
+  docs/         Specifications and architecture docs
+
+  Technology Stack
+-Backend
+-Java 21
+-Spring Boot
+-Spring Security
+-JWT
+-PostgreSQL
+-Flyway
+-JPA / Hibernate
+-Maven
+-JUnit
+  
+  Mobile
+-React Native
+-Expo
+-TypeScript
+  
+  Infrastructure
+-Docker
+-Docker Compose
+-PostgreSQL container
+
+  Development Rules
+-Do not implement large parts of the app in one step.
+-Work by small tasks.
+-Every important business rule must be documented.
+-Salary calculation logic must have tests.
+-API changes must be reflected in docs/API.md.
+-Codex agents must follow AGENTS.md.
+
+  First MVP Scope
+The first MVP should include:
+
+-user registration
+-user login
+-roles: WORKER, FOREMAN, ADMIN
+-foreman creates a shift session
+-worker joins a shift session
+-shift has start time and end time
+-break time can be added
+-salary is calculated from worked time and hourly rate
+-worker can see own shift history
+-foreman can see shift summary
+
+
+1. README.md — що це за проєкт.
+2. AGENTS.md — головні правила для Codex.
+3. docs/SPEC.md — що має робити застосунок.
+4. docs/API.md — як mobile буде говорити з backend.
+5. docs/TASKS.md — що робити по черзі.
+6. backend/AGENTS.md — правила для backend-агента.
+7. mobile/AGENTS.md — правила для mobile-агента.
+8. infra/AGENTS.md — правила для Docker/deploy.

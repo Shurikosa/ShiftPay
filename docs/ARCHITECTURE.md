@@ -1,0 +1,261 @@
+# ShiftPay Architecture
+
+## 1. Overview
+
+ShiftPay is planned as a monorepo with separate modules:
+
+backend/      Spring Boot REST API
+mobile/       React Native / Expo app
+web-admin/    Future admin dashboard
+infra/        Docker and deployment files
+docs/         Documentation
+
+2. Backend Architecture
+
+The backend is responsible for:
+
+authentication
+authorization
+user management
+shift sessions
+attendance
+salary calculation
+reports
+
+Recommended backend layers:
+
+controller/
+service/
+repository/
+entity/
+dto/
+mapper/
+security/
+exception/
+config/
+Controllers
+
+Controllers should only handle HTTP requests and responses.
+
+They should not contain business logic.
+
+Services
+
+Services contain business logic.
+
+Examples:
+
+AuthService
+ShiftService
+AttendanceService
+SalaryCalculationService
+Repositories
+
+Repositories handle database access.
+
+Entities
+
+Entities represent database tables.
+
+DTOs
+
+DTOs are used for API requests and responses.
+
+Do not expose entities directly through the API.
+
+3. Main Backend Entities
+User
+
+Fields:
+
+id
+email
+passwordHash
+firstName
+lastName
+role
+createdAt
+updatedAt
+Company
+
+Fields:
+
+id
+name
+createdAt
+updatedAt
+ShiftSession
+
+Fields:
+
+id
+companyId
+title
+location
+joinCode
+status
+plannedStartTime
+plannedEndTime
+actualStartTime
+actualEndTime
+defaultBreakMinutes
+createdBy
+createdAt
+updatedAt
+ShiftAttendance
+
+Fields:
+
+id
+shiftSessionId
+workerId
+status
+hourlyRate
+breakMinutes
+workedMinutes
+calculatedSalary
+joinedAt
+approvedAt
+createdAt
+updatedAt
+
+4. Database
+
+Use PostgreSQL.
+
+Use Flyway for database migrations.
+
+Do not manually change database schema without Flyway migration.
+
+Migration files should be placed in:
+
+backend/src/main/resources/db/migration/
+
+Example:
+
+V1__create_users_table.sql
+V2__create_shift_sessions_table.sql
+
+5. Authentication
+
+Use JWT authentication.
+
+Login flow:
+
+User sends email and password.
+Backend validates credentials.
+Backend returns JWT token.
+Mobile app stores token securely.
+Mobile app sends token in Authorization header.
+
+Header:
+
+Authorization: Bearer <token>
+
+6. Authorization
+
+Roles:
+
+WORKER
+FOREMAN
+ADMIN
+
+Authorization rules:
+
+WORKER:
+- own profile
+- own shifts
+- join shift
+
+FOREMAN:
+- create shift
+- manage own shifts
+- approve attendance
+- see shift summaries
+
+ADMIN:
+- full access
+
+7. Mobile Architecture
+
+The mobile app should use:
+
+React Native
+Expo
+TypeScript
+
+Recommended structure:
+
+mobile/
+  src/
+    api/
+    screens/
+    components/
+    navigation/
+    store/
+    types/
+    utils/
+API Layer
+
+All backend calls should be inside:
+
+src/api/
+
+Do not call fetch directly from screen components.
+
+Screens
+
+Basic MVP screens:
+
+LoginScreen
+RegisterScreen
+WorkerDashboardScreen
+ForemanDashboardScreen
+JoinShiftScreen
+CreateShiftScreen
+ShiftDetailsScreen
+ShiftSummaryScreen
+
+8. Infrastructure
+
+Use Docker Compose for local development.
+
+Main services:
+
+postgres
+backend
+
+Mobile app can connect to local backend during development.
+
+9. Development Workflow with Codex
+
+Recommended agents:
+
+Root Codex session:
+- architecture
+- documentation
+- task planning
+
+Backend Codex session:
+- Spring Boot backend
+
+Mobile Codex session:
+- React Native app
+
+Infra Codex session:
+- Docker and deployment
+
+Review Codex session:
+- security review
+- API review
+- test coverage review
+
+10. Important Rule
+
+The backend API is the contract between backend and mobile.
+
+Whenever backend API changes, update:
+
+docs/API.md
+mobile API client
+backend tests
