@@ -7,6 +7,19 @@ The API is not final. It should be updated whenever endpoints change.
 Base path:
 
 /api/v1
+
+Health Check
+GET /api/v1/health
+
+No authentication required.
+
+Response:
+
+{
+"status": "UP"
+}
+ 
+ 
 1. Authentication
 Register
 POST /api/v1/auth/register
