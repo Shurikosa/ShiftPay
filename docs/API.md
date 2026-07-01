@@ -24,6 +24,8 @@ Response:
 Register
 POST /api/v1/auth/register
 
+No authentication required.
+
 Request:
 
 {
@@ -36,12 +38,38 @@ Request:
 
 Response:
 
+Status: 201 Created
+
 {
   "id": 1,
   "email": "worker@example.com",
   "firstName": "John",
   "lastName": "Worker",
   "role": "WORKER"
+}
+
+Validation error:
+
+Status: 400 Bad Request
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "email: must be a well-formed email address",
+  "path": "/api/v1/auth/register"
+}
+
+Duplicate email:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "User with email already exists: worker@example.com",
+  "path": "/api/v1/auth/register"
 }
 Login
 POST /api/v1/auth/login
