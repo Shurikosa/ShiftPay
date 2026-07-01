@@ -133,12 +133,26 @@ Authorization: Bearer <token>
 
 Response:
 
+Status: 200 OK
+
 {
   "id": 1,
   "email": "worker@example.com",
   "firstName": "John",
   "lastName": "Worker",
   "role": "WORKER"
+}
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/users/me"
 }
 
 3. Shift Sessions

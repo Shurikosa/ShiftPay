@@ -1,6 +1,7 @@
 package com.shiftpay.mvp.exception;
 
 import com.shiftpay.mvp.dto.ErrorResponse;
+import com.shiftpay.mvp.security.JwtAuthenticationException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -40,6 +41,14 @@ public class GlobalExceptionHandler {
 			HttpServletRequest request
 	) {
 		return buildError(HttpStatus.UNAUTHORIZED, exception.getMessage(), request);
+	}
+
+	@ExceptionHandler(JwtAuthenticationException.class)
+	public ResponseEntity<ErrorResponse> handleJwtAuthenticationException(
+			JwtAuthenticationException exception,
+			HttpServletRequest request
+	) {
+		return buildError(HttpStatus.UNAUTHORIZED, "Unauthorized", request);
 	}
 
 	private ResponseEntity<ErrorResponse> buildError(HttpStatus status, String message, HttpServletRequest request) {
