@@ -25,3 +25,8 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         jdbc:
           time_zone: UTC
+
+security:
+  jwt:
+    secret: ${JWT_SECRET:shiftpay-dev-secret-change-me}
+    expiration-seconds: ${JWT_EXPIRATION_SECONDS:3600}

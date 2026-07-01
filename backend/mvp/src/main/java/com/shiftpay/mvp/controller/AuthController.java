@@ -1,5 +1,7 @@
 package com.shiftpay.mvp.controller;
 
+import com.shiftpay.mvp.dto.LoginRequest;
+import com.shiftpay.mvp.dto.LoginResponse;
 import com.shiftpay.mvp.dto.RegisterRequest;
 import com.shiftpay.mvp.dto.UserResponse;
 import com.shiftpay.mvp.service.AuthService;
@@ -25,5 +27,10 @@ public class AuthController {
 	@ResponseStatus(HttpStatus.CREATED)
 	public UserResponse register(@Valid @RequestBody RegisterRequest request) {
 		return authService.register(request);
+	}
+
+	@PostMapping("/login")
+	public LoginResponse login(@Valid @RequestBody LoginRequest request) {
+		return authService.login(request);
 	}
 }

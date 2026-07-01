@@ -25,24 +25,24 @@ public class User {
 	private Long id;
 
 	@Setter
-    @Column(nullable = false, unique = true)
+	@Column(nullable = false, unique = true, length = 255)
 	private String email;
 
 	@Setter
-    @Column(name = "password_hash", nullable = false)
+	@Column(name = "password_hash", nullable = false, length = 255)
 	private String passwordHash;
 
 	@Setter
-    @Column(name = "first_name", nullable = false)
+	@Column(name = "first_name", nullable = false, length = 100)
 	private String firstName;
 
 	@Setter
-    @Column(name = "last_name", nullable = false)
+	@Column(name = "last_name", nullable = false, length = 100)
 	private String lastName;
 
 	@Setter
-    @Enumerated(EnumType.STRING)
-	@Column(nullable = false)
+	@Enumerated(EnumType.STRING)
+	@Column(nullable = false, length = 32)
 	private Role role;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
