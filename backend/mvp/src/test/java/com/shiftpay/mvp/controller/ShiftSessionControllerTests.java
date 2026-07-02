@@ -1,0 +1,220 @@
+package com.shiftpay.mvp.controller;
+
+import com.shiftpay.mvp.TestDataCleaner;
+import com.shiftpay.mvp.repository.ShiftSessionRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+
+import java.util.HashSet;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+class ShiftSessionControllerTests {
+
+	private static final String REGISTER_URL = "/api/v1/auth/register";
+	private static final String LOGIN_URL = "/api/v1/auth/login";
+	private static final String CREATE_SHIFT_URL = "/api/v1/shifts";
+	private static final Pattern ACCESS_TOKEN_PATTERN = Pattern.compile("\"accessToken\":\"([^\"]+)\"");
+	private static final Pattern JOIN_CODE_PATTERN = Pattern.compile("\"joinCode\":\"([^\"]+)\"");
+
+	@Autowired
+	private MockMvc mockMvc;
+
+	@Autowired
+	private JdbcTemplate jdbcTemplate;
+
+	@Autowired
+	private ShiftSessionRepository shiftSessionRepository;
+
+	@BeforeEach
+	void setUp() {
+		TestDataCleaner.clean(jdbcTemplate);
+	}
+
+	@Test
+	void foremanCanCreateShift() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		mockMvc.perform(post(CREATE_SHIFT_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(validCreateShiftPayload("Foreman shift")))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.id").isNumber())
+				.andExpect(jsonPath("$.title").value("Foreman shift"))
+				.andExpect(jsonPath("$.joinCode").isString())
+				.andExpect(jsonPath("$.status").value("OPEN"))
+				.andExpect(jsonPath("$.createdBy").isNumber());
+
+		assertThat(shiftSessionRepository.count()).isEqualTo(1);
+	}
+
+	@Test
+	void adminCanCreateShift() throws Exception {
+		String accessToken = registerAndLogin("admin@example.com", "ADMIN");
+
+		mockMvc.perform(post(CREATE_SHIFT_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(validCreateShiftPayload("Admin shift")))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.title").value("Admin shift"))
+				.andExpect(jsonPath("$.status").value("OPEN"));
+	}
+
+	@Test
+	void workerCannotCreateShift() throws Exception {
+		String accessToken = registerAndLogin("worker@example.com", "WORKER");
+
+		mockMvc.perform(post(CREATE_SHIFT_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(validCreateShiftPayload("Worker shift")))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
+	}
+
+	@Test
+	void missingTokenReturnsUnauthorized() throws Exception {
+		mockMvc.perform(post(CREATE_SHIFT_URL)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(validCreateShiftPayload("Missing token shift")))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.status").value(401))
+				.andExpect(jsonPath("$.error").value("Unauthorized"))
+				.andExpect(jsonPath("$.message").value("Unauthorized"))
+				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
+	}
+
+	@Test
+	void invalidBreakMinutesReturnsBadRequest() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		mockMvc.perform(post(CREATE_SHIFT_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "title": "Invalid break shift",
+								  "location": "Cologne",
+								  "plannedStartTime": "2026-07-01T08:00:00",
+								  "plannedEndTime": "2026-07-01T17:00:00",
+								  "defaultBreakMinutes": -1
+								}
+								"""))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
+	}
+
+	@Test
+	void invalidPlannedTimeOrderReturnsBadRequest() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		mockMvc.perform(post(CREATE_SHIFT_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "title": "Invalid time shift",
+								  "location": "Cologne",
+								  "plannedStartTime": "2026-07-01T17:00:00",
+								  "plannedEndTime": "2026-07-01T08:00:00",
+								  "defaultBreakMinutes": 60
+								}
+								"""))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.message").value("plannedEndTime must be after plannedStartTime"))
+				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
+	}
+
+	@Test
+	void joinCodeGeneratedAndUniqueForTestedCases() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		Set<String> joinCodes = new HashSet<>();
+
+		for (int index = 0; index < 5; index++) {
+			MvcResult result = mockMvc.perform(post(CREATE_SHIFT_URL)
+							.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+							.contentType(MediaType.APPLICATION_JSON)
+							.content(validCreateShiftPayload("Shift " + index)))
+					.andExpect(status().isCreated())
+					.andExpect(jsonPath("$.joinCode").isString())
+					.andReturn();
+
+			String joinCode = extractJoinCode(result);
+			assertThat(joinCode).hasSize(6);
+			assertThat(joinCodes.add(joinCode)).isTrue();
+		}
+	}
+
+	private String registerAndLogin(String email, String role) throws Exception {
+		mockMvc.perform(post(REGISTER_URL)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "email": "%s",
+								  "password": "password123",
+								  "firstName": "Test",
+								  "lastName": "User",
+								  "role": "%s"
+								}
+								""".formatted(email, role)))
+				.andExpect(status().isCreated());
+
+		MvcResult result = mockMvc.perform(post(LOGIN_URL)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "email": "%s",
+								  "password": "password123"
+								}
+								""".formatted(email)))
+				.andExpect(status().isOk())
+				.andReturn();
+
+		Matcher matcher = ACCESS_TOKEN_PATTERN.matcher(result.getResponse().getContentAsString());
+		assertThat(matcher.find()).isTrue();
+		return matcher.group(1);
+	}
+
+	private String validCreateShiftPayload(String title) {
+		return """
+				{
+				  "title": "%s",
+				  "location": "Cologne",
+				  "plannedStartTime": "2026-07-01T08:00:00",
+				  "plannedEndTime": "2026-07-01T17:00:00",
+				  "defaultBreakMinutes": 60
+				}
+				""".formatted(title);
+	}
+
+	private String extractJoinCode(MvcResult result) throws Exception {
+		Matcher matcher = JOIN_CODE_PATTERN.matcher(result.getResponse().getContentAsString());
+		assertThat(matcher.find()).isTrue();
+		return matcher.group(1);
+	}
+}

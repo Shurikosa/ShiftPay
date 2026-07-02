@@ -1,5 +1,6 @@
 package com.shiftpay.mvp.controller;
 
+import com.shiftpay.mvp.TestDataCleaner;
 import com.shiftpay.mvp.entity.User;
 import com.shiftpay.mvp.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -8,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
@@ -33,9 +35,12 @@ class AuthControllerTests {
 	@Autowired
 	private PasswordEncoder passwordEncoder;
 
+	@Autowired
+	private JdbcTemplate jdbcTemplate;
+
 	@BeforeEach
 	void setUp() {
-		userRepository.deleteAll();
+		TestDataCleaner.clean(jdbcTemplate);
 	}
 
 	@Test

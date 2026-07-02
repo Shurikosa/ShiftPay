@@ -1,0 +1,111 @@
+package com.shiftpay.mvp.service;
+
+import com.shiftpay.mvp.dto.CreateShiftRequest;
+import com.shiftpay.mvp.dto.ShiftCreateResponse;
+import com.shiftpay.mvp.entity.Company;
+import com.shiftpay.mvp.entity.ShiftSession;
+import com.shiftpay.mvp.entity.ShiftStatus;
+import com.shiftpay.mvp.entity.User;
+import com.shiftpay.mvp.exception.BadRequestException;
+import com.shiftpay.mvp.repository.CompanyRepository;
+import com.shiftpay.mvp.repository.ShiftSessionRepository;
+import com.shiftpay.mvp.repository.UserRepository;
+import com.shiftpay.mvp.security.AuthenticatedUserPrincipal;
+import com.shiftpay.mvp.security.JwtAuthenticationException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.security.SecureRandom;
+import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+
+@Service
+public class ShiftSessionService {
+
+	private static final String DEFAULT_COMPANY_NAME = "Default Company";
+	private static final char[] JOIN_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".toCharArray();
+	private static final int JOIN_CODE_LENGTH = 6;
+	private static final int JOIN_CODE_MAX_ATTEMPTS = 20;
+
+	private final CompanyRepository companyRepository;
+	private final ShiftSessionRepository shiftSessionRepository;
+	private final UserRepository userRepository;
+	private final SecureRandom secureRandom;
+
+	public ShiftSessionService(
+			CompanyRepository companyRepository,
+			ShiftSessionRepository shiftSessionRepository,
+			UserRepository userRepository
+	) {
+		this.companyRepository = companyRepository;
+		this.shiftSessionRepository = shiftSessionRepository;
+		this.userRepository = userRepository;
+		this.secureRandom = new SecureRandom();
+	}
+
+	@Transactional
+	public ShiftCreateResponse createShift(CreateShiftRequest request, AuthenticatedUserPrincipal principal) {
+		validatePlannedTimeOrder(request.plannedStartTime(), request.plannedEndTime());
+
+		User createdBy = userRepository.findById(principal.id())
+				.orElseThrow(() -> new JwtAuthenticationException("Authenticated user not found"));
+
+		ShiftSession shiftSession = new ShiftSession();
+		shiftSession.setCompany(getOrCreateDefaultCompany());
+		shiftSession.setTitle(request.title().trim());
+		shiftSession.setLocation(trimToNull(request.location()));
+		shiftSession.setJoinCode(generateUniqueJoinCode());
+		shiftSession.setStatus(ShiftStatus.OPEN);
+		shiftSession.setPlannedStartTime(toUtcOffsetDateTime(request.plannedStartTime()));
+		shiftSession.setPlannedEndTime(toUtcOffsetDateTime(request.plannedEndTime()));
+		shiftSession.setDefaultBreakMinutes(request.defaultBreakMinutes() == null ? 0 : request.defaultBreakMinutes());
+		shiftSession.setCreatedBy(createdBy);
+
+		return ShiftCreateResponse.from(shiftSessionRepository.save(shiftSession));
+	}
+
+	private Company getOrCreateDefaultCompany() {
+		return companyRepository.findFirstByName(DEFAULT_COMPANY_NAME)
+				.orElseGet(() -> {
+					Company company = new Company();
+					company.setName(DEFAULT_COMPANY_NAME);
+					return companyRepository.save(company);
+				});
+	}
+
+	private String generateUniqueJoinCode() {
+		for (int attempt = 0; attempt < JOIN_CODE_MAX_ATTEMPTS; attempt++) {
+			String joinCode = generateJoinCode();
+			if (!shiftSessionRepository.existsByJoinCode(joinCode)) {
+				return joinCode;
+			}
+		}
+		throw new IllegalStateException("Failed to generate unique join code");
+	}
+
+	private String generateJoinCode() {
+		StringBuilder joinCode = new StringBuilder(JOIN_CODE_LENGTH);
+		for (int index = 0; index < JOIN_CODE_LENGTH; index++) {
+			joinCode.append(JOIN_CODE_CHARS[secureRandom.nextInt(JOIN_CODE_CHARS.length)]);
+		}
+		return joinCode.toString();
+	}
+
+	private void validatePlannedTimeOrder(LocalDateTime plannedStartTime, LocalDateTime plannedEndTime) {
+		if (plannedStartTime != null && plannedEndTime != null && !plannedEndTime.isAfter(plannedStartTime)) {
+			throw new BadRequestException("plannedEndTime must be after plannedStartTime");
+		}
+	}
+
+	private OffsetDateTime toUtcOffsetDateTime(LocalDateTime value) {
+		return value == null ? null : value.atOffset(ZoneOffset.UTC);
+	}
+
+	private String trimToNull(String value) {
+		if (value == null || value.isBlank()) {
+			return null;
+		}
+		return value.trim();
+	}
+}

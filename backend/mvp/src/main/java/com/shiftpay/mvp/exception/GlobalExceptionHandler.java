@@ -27,6 +27,14 @@ public class GlobalExceptionHandler {
 		return buildError(HttpStatus.BAD_REQUEST, message, request);
 	}
 
+	@ExceptionHandler(BadRequestException.class)
+	public ResponseEntity<ErrorResponse> handleBadRequestException(
+			BadRequestException exception,
+			HttpServletRequest request
+	) {
+		return buildError(HttpStatus.BAD_REQUEST, exception.getMessage(), request);
+	}
+
 	@ExceptionHandler(DuplicateEmailException.class)
 	public ResponseEntity<ErrorResponse> handleDuplicateEmailException(
 			DuplicateEmailException exception,

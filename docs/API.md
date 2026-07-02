@@ -162,6 +162,10 @@ Only FOREMAN or ADMIN.
 
 POST /api/v1/shifts
 
+Headers:
+
+Authorization: Bearer <token>
+
 Request:
 
 {
@@ -174,12 +178,50 @@ Request:
 
 Response:
 
+Status: 201 Created
+
 {
   "id": 100,
   "title": "Monday construction shift",
   "joinCode": "ABCD12",
   "status": "OPEN",
   "createdBy": 5
+}
+
+Validation error:
+
+Status: 400 Bad Request
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "plannedEndTime must be after plannedStartTime",
+  "path": "/api/v1/shifts"
+}
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/shifts"
+}
+
+Forbidden role:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/shifts"
 }
 Get shift by id
 GET /api/v1/shifts/{shiftId}

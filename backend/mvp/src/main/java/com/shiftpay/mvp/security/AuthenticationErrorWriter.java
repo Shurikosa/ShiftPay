@@ -14,16 +14,28 @@ public class AuthenticationErrorWriter {
 
 	public void writeUnauthorized(HttpServletRequest request, HttpServletResponse response, String message)
 			throws IOException {
+		writeError(request, response, HttpStatus.UNAUTHORIZED, message);
+	}
+
+	public void writeForbidden(HttpServletRequest request, HttpServletResponse response, String message)
+			throws IOException {
+		writeError(request, response, HttpStatus.FORBIDDEN, message);
+	}
+
+	private void writeError(HttpServletRequest request, HttpServletResponse response, HttpStatus status, String message)
+			throws IOException {
 		if (response.isCommitted()) {
 			return;
 		}
 
-		response.setStatus(HttpStatus.UNAUTHORIZED.value());
+		response.setStatus(status.value());
 		response.setContentType(MediaType.APPLICATION_JSON_VALUE);
 		response.getWriter().write("""
-				{"timestamp":"%s","status":401,"error":"Unauthorized","message":"%s","path":"%s"}"""
+				{"timestamp":"%s","status":%d,"error":"%s","message":"%s","path":"%s"}"""
 				.formatted(
 						Instant.now(),
+						status.value(),
+						status.getReasonPhrase(),
 						escapeJson(message),
 						escapeJson(request.getRequestURI())
 				));
