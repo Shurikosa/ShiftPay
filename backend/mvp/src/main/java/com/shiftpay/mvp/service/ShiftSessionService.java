@@ -3,6 +3,7 @@ package com.shiftpay.mvp.service;
 import com.shiftpay.mvp.dto.CreateShiftRequest;
 import com.shiftpay.mvp.dto.ShiftCreateResponse;
 import com.shiftpay.mvp.dto.ShiftResponse;
+import com.shiftpay.mvp.dto.ShiftStartResponse;
 import com.shiftpay.mvp.entity.Company;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftSession;
@@ -11,6 +12,7 @@ import com.shiftpay.mvp.entity.User;
 import com.shiftpay.mvp.exception.BadRequestException;
 import com.shiftpay.mvp.exception.ForbiddenException;
 import com.shiftpay.mvp.exception.ShiftNotFoundException;
+import com.shiftpay.mvp.exception.ShiftStateConflictException;
 import com.shiftpay.mvp.repository.CompanyRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
@@ -75,11 +77,26 @@ public class ShiftSessionService {
 		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId)
 				.orElseThrow(ShiftNotFoundException::new);
 
-		validateReadAccess(shiftSession, principal);
+		validateShiftAccess(shiftSession, principal);
 		return ShiftResponse.from(shiftSession);
 	}
 
-	private void validateReadAccess(ShiftSession shiftSession, AuthenticatedUserPrincipal principal) {
+	@Transactional
+	public ShiftStartResponse startShift(Long shiftId, AuthenticatedUserPrincipal principal) {
+		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId)
+				.orElseThrow(ShiftNotFoundException::new);
+
+		validateShiftAccess(shiftSession, principal);
+		if (shiftSession.getStatus() != ShiftStatus.OPEN) {
+			throw new ShiftStateConflictException("Shift can only be started when status is OPEN");
+		}
+
+		shiftSession.setStatus(ShiftStatus.ACTIVE);
+		shiftSession.setActualStartTime(OffsetDateTime.now(ZoneOffset.UTC));
+		return ShiftStartResponse.from(shiftSession);
+	}
+
+	private void validateShiftAccess(ShiftSession shiftSession, AuthenticatedUserPrincipal principal) {
 		if (principal.role() == Role.ADMIN) {
 			return;
 		}

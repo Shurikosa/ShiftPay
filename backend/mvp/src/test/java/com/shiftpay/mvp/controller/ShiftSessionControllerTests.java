@@ -2,6 +2,8 @@ package com.shiftpay.mvp.controller;
 
 import com.shiftpay.mvp.TestDataCleaner;
 import com.shiftpay.mvp.entity.Role;
+import com.shiftpay.mvp.entity.ShiftSession;
+import com.shiftpay.mvp.entity.ShiftStatus;
 import com.shiftpay.mvp.entity.User;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
@@ -16,7 +18,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
 
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -286,6 +291,129 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(shiftUrl(999999)));
 	}
 
+	@Test
+	void ownerForemanStartsShift() throws Exception {
+		String accessToken = registerAndLogin("owner@example.com", "FOREMAN");
+		long shiftId = createShift(accessToken, "Owner shift");
+
+		mockMvc.perform(post(startShiftUrl(shiftId))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.id").value(shiftId))
+				.andExpect(jsonPath("$.status").value("ACTIVE"))
+				.andExpect(jsonPath("$.actualStartTime").isString())
+				.andExpect(jsonPath("$.*", hasSize(3)));
+	}
+
+	@Test
+	void anotherForemanCannotStartShift() throws Exception {
+		String ownerToken = registerAndLogin("owner@example.com", "FOREMAN");
+		long shiftId = createShift(ownerToken, "Owner shift");
+		String anotherForemanToken = registerAndLogin("another@example.com", "FOREMAN");
+
+		mockMvc.perform(post(startShiftUrl(shiftId))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + anotherForemanToken))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(startShiftUrl(shiftId)));
+	}
+
+	@Test
+	void adminStartsAnyShift() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Foreman shift");
+		String adminToken = createAdminAndLogin();
+
+		mockMvc.perform(post(startShiftUrl(shiftId))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.id").value(shiftId))
+				.andExpect(jsonPath("$.status").value("ACTIVE"))
+				.andExpect(jsonPath("$.actualStartTime").isString());
+	}
+
+	@Test
+	void workerCannotStartShift() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Foreman shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+
+		mockMvc.perform(post(startShiftUrl(shiftId))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + workerToken))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(startShiftUrl(shiftId)));
+	}
+
+	@Test
+	void missingTokenCannotStartShift() throws Exception {
+		mockMvc.perform(post(startShiftUrl(1)))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.status").value(401))
+				.andExpect(jsonPath("$.error").value("Unauthorized"))
+				.andExpect(jsonPath("$.message").value("Unauthorized"))
+				.andExpect(jsonPath("$.path").value(startShiftUrl(1)));
+	}
+
+	@Test
+	void invalidTokenCannotStartShift() throws Exception {
+		mockMvc.perform(post(startShiftUrl(1))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer invalid-token"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.status").value(401))
+				.andExpect(jsonPath("$.error").value("Unauthorized"))
+				.andExpect(jsonPath("$.message").value("Unauthorized"))
+				.andExpect(jsonPath("$.path").value(startShiftUrl(1)));
+	}
+
+	@Test
+	void unknownShiftCannotBeStarted() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		mockMvc.perform(post(startShiftUrl(999999))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.status").value(404))
+				.andExpect(jsonPath("$.error").value("Not Found"))
+				.andExpect(jsonPath("$.message").value("Shift not found"))
+				.andExpect(jsonPath("$.path").value(startShiftUrl(999999)));
+	}
+
+	@Test
+	void repeatedStartReturnsConflict() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(accessToken, "Foreman shift");
+
+		startShift(accessToken, shiftId).andExpect(status().isOk());
+
+		startShift(accessToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift can only be started when status is OPEN"))
+				.andExpect(jsonPath("$.path").value(startShiftUrl(shiftId)));
+	}
+
+	@Test
+	void startPersistsActiveStatusAndActualStartTime() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(accessToken, "Foreman shift");
+		OffsetDateTime beforeStart = OffsetDateTime.now(ZoneOffset.UTC);
+
+		startShift(accessToken, shiftId).andExpect(status().isOk());
+
+		ShiftSession persistedShift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		assertThat(persistedShift.getStatus()).isEqualTo(ShiftStatus.ACTIVE);
+		assertThat(persistedShift.getActualStartTime())
+				.isNotNull()
+				.isAfterOrEqualTo(beforeStart)
+				.isBeforeOrEqualTo(OffsetDateTime.now(ZoneOffset.UTC));
+	}
+
 	private String registerAndLogin(String email, String role) throws Exception {
 		mockMvc.perform(post(REGISTER_URL)
 						.contentType(MediaType.APPLICATION_JSON)
@@ -359,6 +487,15 @@ class ShiftSessionControllerTests {
 
 	private String shiftUrl(long shiftId) {
 		return CREATE_SHIFT_URL + "/" + shiftId;
+	}
+
+	private String startShiftUrl(long shiftId) {
+		return shiftUrl(shiftId) + "/start";
+	}
+
+	private ResultActions startShift(String accessToken, long shiftId) throws Exception {
+		return mockMvc.perform(post(startShiftUrl(shiftId))
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken));
 	}
 
 	private String extractJoinCode(MvcResult result) throws Exception {

@@ -306,16 +306,75 @@ Status: 404 Not Found
 }
 Start shift
 
-Only FOREMAN or ADMIN.
-
 POST /api/v1/shifts/{shiftId}/start
 
+Headers:
+
+Authorization: Bearer <token>
+
+Access and state rules:
+
+- FOREMAN can start only a shift created by that FOREMAN.
+- ADMIN can start any shift.
+- WORKER is not allowed.
+- Only a shift with status OPEN can be started.
+
 Response:
+
+Status: 200 OK
 
 {
   "id": 100,
   "status": "ACTIVE",
-  "actualStartTime": "2026-07-01T08:05:00"
+  "actualStartTime": "2026-07-01T08:05:00Z"
+}
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-01T08:05:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/shifts/100/start"
+}
+
+Forbidden role or non-owner FOREMAN:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-01T08:05:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/shifts/100/start"
+}
+
+Shift not found:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-01T08:05:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Shift not found",
+  "path": "/api/v1/shifts/100/start"
+}
+
+Shift is not OPEN:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T08:05:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Shift can only be started when status is OPEN",
+  "path": "/api/v1/shifts/100/start"
 }
 Close shift
 

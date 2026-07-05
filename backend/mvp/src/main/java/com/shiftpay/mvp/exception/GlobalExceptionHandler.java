@@ -59,6 +59,14 @@ public class GlobalExceptionHandler {
 		return buildError(HttpStatus.NOT_FOUND, exception.getMessage(), request);
 	}
 
+	@ExceptionHandler(ShiftStateConflictException.class)
+	public ResponseEntity<ErrorResponse> handleShiftStateConflictException(
+			ShiftStateConflictException exception,
+			HttpServletRequest request
+	) {
+		return buildError(HttpStatus.CONFLICT, exception.getMessage(), request);
+	}
+
 	@ExceptionHandler(InvalidCredentialsException.class)
 	public ResponseEntity<ErrorResponse> handleInvalidCredentialsException(
 			InvalidCredentialsException exception,
