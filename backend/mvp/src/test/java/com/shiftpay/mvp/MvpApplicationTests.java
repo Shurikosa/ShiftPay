@@ -42,10 +42,38 @@ class MvpApplicationTests {
 		assertThat(countRows("companies")).isNotNegative();
 		assertThat(countRows("shift_sessions")).isNotNegative();
 		assertThat(countRows("shift_attendance")).isNotNegative();
+		assertThat(countColumn("shift_sessions", "default_hourly_rate")).isEqualTo(1);
+		assertThat(latestFlywayVersion()).isEqualTo("5");
 	}
 
 	private Long countRows(String tableName) {
 		return jdbcTemplate.queryForObject("select count(*) from " + tableName, Long.class);
+	}
+
+	private Long countColumn(String tableName, String columnName) {
+		return jdbcTemplate.queryForObject(
+				"""
+						select count(*)
+						from information_schema.columns
+						where table_name = ? and column_name = ?
+						""",
+				Long.class,
+				tableName,
+				columnName
+		);
+	}
+
+	private String latestFlywayVersion() {
+		return jdbcTemplate.queryForObject(
+				"""
+						select version
+						from flyway_schema_history
+						where success = true
+						order by installed_rank desc
+						limit 1
+						""",
+				String.class
+		);
 	}
 
 }

@@ -79,9 +79,12 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.title").value("Foreman shift"))
 				.andExpect(jsonPath("$.joinCode").isString())
 				.andExpect(jsonPath("$.status").value("OPEN"))
+				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25))
 				.andExpect(jsonPath("$.createdBy").isNumber());
 
 		assertThat(shiftSessionRepository.count()).isEqualTo(1);
+		assertThat(shiftSessionRepository.findAll().getFirst().getDefaultHourlyRate())
+				.isEqualByComparingTo("15.25");
 	}
 
 	@Test
@@ -94,7 +97,8 @@ class ShiftSessionControllerTests {
 						.content(validCreateShiftPayload("Admin shift")))
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.title").value("Admin shift"))
-				.andExpect(jsonPath("$.status").value("OPEN"));
+				.andExpect(jsonPath("$.status").value("OPEN"))
+				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25));
 	}
 
 	@Test
@@ -137,7 +141,8 @@ class ShiftSessionControllerTests {
 								  "location": "Cologne",
 								  "plannedStartTime": "2026-07-01T08:00:00",
 								  "plannedEndTime": "2026-07-01T17:00:00",
-								  "defaultBreakMinutes": -1
+								  "defaultBreakMinutes": -1,
+								  "defaultHourlyRate": 15.25
 								}
 								"""))
 				.andExpect(status().isBadRequest())
@@ -159,7 +164,8 @@ class ShiftSessionControllerTests {
 								  "location": "Cologne",
 								  "plannedStartTime": "2026-07-01T17:00:00",
 								  "plannedEndTime": "2026-07-01T08:00:00",
-								  "defaultBreakMinutes": 60
+								  "defaultBreakMinutes": 60,
+								  "defaultHourlyRate": 15.25
 								}
 								"""))
 				.andExpect(status().isBadRequest())
@@ -207,8 +213,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.actualStartTime").value(nullValue()))
 				.andExpect(jsonPath("$.actualEndTime").value(nullValue()))
 				.andExpect(jsonPath("$.defaultBreakMinutes").value(60))
+				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25))
 				.andExpect(jsonPath("$.createdBy").isNumber())
-				.andExpect(jsonPath("$.*", hasSize(11)))
+				.andExpect(jsonPath("$.*", hasSize(12)))
 				.andExpect(jsonPath("$.company").doesNotExist())
 				.andExpect(jsonPath("$.createdAt").doesNotExist())
 				.andExpect(jsonPath("$.updatedAt").doesNotExist());
@@ -546,6 +553,47 @@ class ShiftSessionControllerTests {
 				.isAfterOrEqualTo(persistedShift.getActualStartTime());
 	}
 
+	@Test
+	void missingDefaultHourlyRateReturnsBadRequest() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		createShiftWithPayload(accessToken, """
+				{
+				  "title": "Missing rate shift",
+				  "location": "Cologne",
+				  "plannedStartTime": "2026-07-01T08:00:00",
+				  "plannedEndTime": "2026-07-01T17:00:00",
+				  "defaultBreakMinutes": 60
+				}
+				""")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
+	}
+
+	@Test
+	void negativeDefaultHourlyRateReturnsBadRequest() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		createShiftWithPayload(accessToken, validCreateShiftPayload("Negative rate shift", "-0.01"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
+	}
+
+	@Test
+	void defaultHourlyRateWithTooManyDecimalPlacesReturnsBadRequest() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		createShiftWithPayload(accessToken, validCreateShiftPayload("Invalid rate shift", "15.123"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
+	}
+
 	private String registerAndLogin(String email, String role) throws Exception {
 		mockMvc.perform(post(REGISTER_URL)
 						.contentType(MediaType.APPLICATION_JSON)
@@ -593,28 +641,37 @@ class ShiftSessionControllerTests {
 	}
 
 	private String validCreateShiftPayload(String title) {
+		return validCreateShiftPayload(title, "15.25");
+	}
+
+	private String validCreateShiftPayload(String title, String defaultHourlyRate) {
 		return """
 				{
 				  "title": "%s",
 				  "location": "Cologne",
 				  "plannedStartTime": "2026-07-01T08:00:00",
 				  "plannedEndTime": "2026-07-01T17:00:00",
-				  "defaultBreakMinutes": 60
+				  "defaultBreakMinutes": 60,
+				  "defaultHourlyRate": %s
 				}
-				""".formatted(title);
+				""".formatted(title, defaultHourlyRate);
 	}
 
 	private long createShift(String accessToken, String title) throws Exception {
-		MvcResult result = mockMvc.perform(post(CREATE_SHIFT_URL)
-						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
-						.contentType(MediaType.APPLICATION_JSON)
-						.content(validCreateShiftPayload(title)))
+		MvcResult result = createShiftWithPayload(accessToken, validCreateShiftPayload(title))
 				.andExpect(status().isCreated())
 				.andReturn();
 
 		Matcher matcher = SHIFT_ID_PATTERN.matcher(result.getResponse().getContentAsString());
 		assertThat(matcher.find()).isTrue();
 		return Long.parseLong(matcher.group(1));
+	}
+
+	private ResultActions createShiftWithPayload(String accessToken, String payload) throws Exception {
+		return mockMvc.perform(post(CREATE_SHIFT_URL)
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(payload));
 	}
 
 	private long createActiveShift(String accessToken, String title) throws Exception {

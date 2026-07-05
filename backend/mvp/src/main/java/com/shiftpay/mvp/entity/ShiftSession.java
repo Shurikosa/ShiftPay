@@ -16,6 +16,7 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 
@@ -69,6 +70,10 @@ public class ShiftSession {
 	@Setter
 	@Column(name = "default_break_minutes", nullable = false)
 	private Integer defaultBreakMinutes;
+
+	@Setter
+	@Column(name = "default_hourly_rate", nullable = false, precision = 12, scale = 2)
+	private BigDecimal defaultHourlyRate;
 
 	@Setter
 	@ManyToOne(fetch = FetchType.LAZY, optional = false)

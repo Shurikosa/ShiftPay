@@ -60,7 +60,7 @@ public class AttendanceService {
 		attendance.setShiftSession(shiftSession);
 		attendance.setWorker(worker);
 		attendance.setStatus(AttendanceStatus.JOINED);
-		attendance.setHourlyRate(request.hourlyRate());
+		attendance.setHourlyRate(shiftSession.getDefaultHourlyRate());
 		attendance.setBreakMinutes(shiftSession.getDefaultBreakMinutes());
 		attendance.setJoinedAt(OffsetDateTime.now(ZoneOffset.UTC));
 

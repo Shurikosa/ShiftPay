@@ -67,19 +67,19 @@ class AttendanceControllerTests {
 	@Test
 	void workerJoinsOpenShiftWithNormalizedCode() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
-		CreatedShift shift = createShift(foremanToken, "Open shift");
+		CreatedShift shift = createShift(foremanToken, "Open shift", "17.50");
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
 
 		mockMvc.perform(post(JOIN_SHIFT_URL)
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + workerToken)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(joinPayload("  " + shift.joinCode().toLowerCase() + "  ", "15.00")))
+						.content(joinPayload("  " + shift.joinCode().toLowerCase() + "  ")))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.attendanceId").isNumber())
 				.andExpect(jsonPath("$.shiftId").value(shift.id()))
 				.andExpect(jsonPath("$.workerId").isNumber())
 				.andExpect(jsonPath("$.status").value("JOINED"))
-				.andExpect(jsonPath("$.hourlyRate").value(15.00))
+				.andExpect(jsonPath("$.hourlyRate").value(17.50))
 				.andExpect(jsonPath("$.*", hasSize(5)));
 	}
 
@@ -89,9 +89,9 @@ class AttendanceControllerTests {
 		CreatedShift shift = createShift(foremanToken, "Open shift");
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
 
-		joinShift(workerToken, shift.joinCode(), "15.00").andExpect(status().isOk());
+		joinShift(workerToken, shift.joinCode()).andExpect(status().isOk());
 
-		joinShift(workerToken, shift.joinCode(), "15.00")
+		joinShift(workerToken, shift.joinCode())
 				.andExpect(status().isConflict())
 				.andExpect(jsonPath("$.status").value(409))
 				.andExpect(jsonPath("$.error").value("Conflict"))
@@ -103,7 +103,7 @@ class AttendanceControllerTests {
 	void unknownJoinCodeReturnsNotFound() throws Exception {
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
 
-		joinShift(workerToken, "UNKNOWN", "15.00")
+		joinShift(workerToken, "UNKNOWN")
 				.andExpect(status().isNotFound())
 				.andExpect(jsonPath("$.status").value(404))
 				.andExpect(jsonPath("$.error").value("Not Found"))
@@ -118,7 +118,7 @@ class AttendanceControllerTests {
 		startShift(foremanToken, shift.id());
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
 
-		joinShift(workerToken, shift.joinCode(), "15.00")
+		joinShift(workerToken, shift.joinCode())
 				.andExpect(status().isConflict())
 				.andExpect(jsonPath("$.status").value(409))
 				.andExpect(jsonPath("$.error").value("Conflict"))
@@ -127,16 +127,17 @@ class AttendanceControllerTests {
 	}
 
 	@Test
-	void negativeHourlyRateReturnsBadRequest() throws Exception {
+	void workerProvidedHourlyRateCannotOverrideShiftDefault() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
-		CreatedShift shift = createShift(foremanToken, "Open shift");
+		CreatedShift shift = createShift(foremanToken, "Open shift", "18.75");
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
 
-		joinShift(workerToken, shift.joinCode(), "-0.01")
-				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.status").value(400))
-				.andExpect(jsonPath("$.error").value("Bad Request"))
-				.andExpect(jsonPath("$.path").value(JOIN_SHIFT_URL));
+		joinShiftWithClientRate(workerToken, shift.joinCode(), "999.99")
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.hourlyRate").value(18.75));
+
+		ShiftAttendance attendance = shiftAttendanceRepository.findAll().getFirst();
+		assertThat(attendance.getHourlyRate()).isEqualByComparingTo(new BigDecimal("18.75"));
 	}
 
 	@Test
@@ -144,7 +145,7 @@ class AttendanceControllerTests {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
 		CreatedShift shift = createShift(foremanToken, "Open shift");
 
-		joinShift(foremanToken, shift.joinCode(), "15.00")
+		joinShift(foremanToken, shift.joinCode())
 				.andExpect(status().isForbidden())
 				.andExpect(jsonPath("$.status").value(403))
 				.andExpect(jsonPath("$.error").value("Forbidden"))
@@ -158,7 +159,7 @@ class AttendanceControllerTests {
 		CreatedShift shift = createShift(foremanToken, "Open shift");
 		String adminToken = createAdminAndLogin();
 
-		joinShift(adminToken, shift.joinCode(), "15.00")
+		joinShift(adminToken, shift.joinCode())
 				.andExpect(status().isForbidden())
 				.andExpect(jsonPath("$.status").value(403))
 				.andExpect(jsonPath("$.error").value("Forbidden"))
@@ -170,7 +171,7 @@ class AttendanceControllerTests {
 	void missingTokenCannotJoinShift() throws Exception {
 		mockMvc.perform(post(JOIN_SHIFT_URL)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(joinPayload("ABCD12", "15.00")))
+						.content(joinPayload("ABCD12")))
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.status").value(401))
 				.andExpect(jsonPath("$.error").value("Unauthorized"))
@@ -183,7 +184,7 @@ class AttendanceControllerTests {
 		mockMvc.perform(post(JOIN_SHIFT_URL)
 						.header(HttpHeaders.AUTHORIZATION, "Bearer invalid-token")
 						.contentType(MediaType.APPLICATION_JSON)
-						.content(joinPayload("ABCD12", "15.00")))
+						.content(joinPayload("ABCD12")))
 				.andExpect(status().isUnauthorized())
 				.andExpect(jsonPath("$.status").value(401))
 				.andExpect(jsonPath("$.error").value("Unauthorized"))
@@ -194,19 +195,19 @@ class AttendanceControllerTests {
 	@Test
 	void joinPersistsAttendanceData() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
-		CreatedShift shift = createShift(foremanToken, "Open shift");
+		CreatedShift shift = createShift(foremanToken, "Open shift", "16.40");
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
 		User worker = userRepository.findByEmail("worker@example.com").orElseThrow();
 		OffsetDateTime beforeJoin = OffsetDateTime.now(ZoneOffset.UTC);
 
-		joinShift(workerToken, shift.joinCode(), "15.25").andExpect(status().isOk());
+		joinShift(workerToken, shift.joinCode()).andExpect(status().isOk());
 
 		ShiftAttendance attendance = shiftAttendanceRepository.findAll().getFirst();
 		assertThat(shiftAttendanceRepository.count()).isEqualTo(1);
 		assertThat(attendance.getShiftSession().getId()).isEqualTo(shift.id());
 		assertThat(attendance.getWorker().getId()).isEqualTo(worker.getId());
 		assertThat(attendance.getStatus()).isEqualTo(AttendanceStatus.JOINED);
-		assertThat(attendance.getHourlyRate()).isEqualByComparingTo(new BigDecimal("15.25"));
+		assertThat(attendance.getHourlyRate()).isEqualByComparingTo(new BigDecimal("16.40"));
 		assertThat(attendance.getBreakMinutes()).isEqualTo(60);
 		assertThat(attendance.getJoinedAt())
 				.isAfterOrEqualTo(beforeJoin)
@@ -264,6 +265,10 @@ class AttendanceControllerTests {
 	}
 
 	private CreatedShift createShift(String accessToken, String title) throws Exception {
+		return createShift(accessToken, title, "15.25");
+	}
+
+	private CreatedShift createShift(String accessToken, String title, String defaultHourlyRate) throws Exception {
 		MvcResult result = mockMvc.perform(post(CREATE_SHIFT_URL)
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
 						.contentType(MediaType.APPLICATION_JSON)
@@ -273,9 +278,10 @@ class AttendanceControllerTests {
 								  "location": "Cologne",
 								  "plannedStartTime": "2026-07-01T08:00:00",
 								  "plannedEndTime": "2026-07-01T17:00:00",
-								  "defaultBreakMinutes": 60
+								  "defaultBreakMinutes": 60,
+								  "defaultHourlyRate": %s
 								}
-								""".formatted(title)))
+								""".formatted(title, defaultHourlyRate)))
 				.andExpect(status().isCreated())
 				.andReturn();
 
@@ -289,24 +295,32 @@ class AttendanceControllerTests {
 				.andExpect(status().isOk());
 	}
 
-	private ResultActions joinShift(
-			String accessToken,
-			String joinCode,
-			String hourlyRate
-	) throws Exception {
+	private ResultActions joinShift(String accessToken, String joinCode) throws Exception {
 		return mockMvc.perform(post(JOIN_SHIFT_URL)
 				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
 				.contentType(MediaType.APPLICATION_JSON)
-				.content(joinPayload(joinCode, hourlyRate)));
+				.content(joinPayload(joinCode)));
 	}
 
-	private String joinPayload(String joinCode, String hourlyRate) {
+	private ResultActions joinShiftWithClientRate(String accessToken, String joinCode, String hourlyRate)
+			throws Exception {
+		return mockMvc.perform(post(JOIN_SHIFT_URL)
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{
+						  "joinCode": "%s",
+						  "hourlyRate": %s
+						}
+						""".formatted(joinCode, hourlyRate)));
+	}
+
+	private String joinPayload(String joinCode) {
 		return """
 				{
-				  "joinCode": "%s",
-				  "hourlyRate": %s
+				  "joinCode": "%s"
 				}
-				""".formatted(joinCode, hourlyRate);
+				""".formatted(joinCode);
 	}
 
 	private long extractLong(String response, Pattern pattern) {

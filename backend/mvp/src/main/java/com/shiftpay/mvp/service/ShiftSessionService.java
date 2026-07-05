@@ -68,6 +68,7 @@ public class ShiftSessionService {
 		shiftSession.setPlannedStartTime(toUtcOffsetDateTime(request.plannedStartTime()));
 		shiftSession.setPlannedEndTime(toUtcOffsetDateTime(request.plannedEndTime()));
 		shiftSession.setDefaultBreakMinutes(request.defaultBreakMinutes() == null ? 0 : request.defaultBreakMinutes());
+		shiftSession.setDefaultHourlyRate(request.defaultHourlyRate());
 		shiftSession.setCreatedBy(createdBy);
 
 		return ShiftCreateResponse.from(shiftSessionRepository.save(shiftSession));

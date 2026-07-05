@@ -187,7 +187,8 @@ Request:
   "location": "Cologne",
   "plannedStartTime": "2026-07-01T08:00:00",
   "plannedEndTime": "2026-07-01T17:00:00",
-  "defaultBreakMinutes": 60
+  "defaultBreakMinutes": 60,
+  "defaultHourlyRate": 15.00
 }
 
 Response:
@@ -199,8 +200,11 @@ Status: 201 Created
   "title": "Monday construction shift",
   "joinCode": "ABCD12",
   "status": "OPEN",
+  "defaultHourlyRate": 15.00,
   "createdBy": 5
 }
+
+defaultHourlyRate is required, must be greater than or equal to 0, and supports up to two decimal places. It is set by the FOREMAN creating the shift or by an ADMIN.
 
 Validation error:
 
@@ -266,6 +270,7 @@ Status: 200 OK
   "actualStartTime": null,
   "actualEndTime": null,
   "defaultBreakMinutes": 60,
+  "defaultHourlyRate": 15.00,
   "createdBy": 5
 }
 
@@ -467,15 +472,16 @@ Rules:
 - joinCode is normalized with trim and uppercase.
 - The shift must have status OPEN.
 - A worker can join the same shift only once.
-- hourlyRate must be greater than or equal to 0 and supports up to two decimal places.
+- A worker never sets hourlyRate.
+- The backend copies shift.defaultHourlyRate into shift_attendance.hourly_rate as a rate snapshot.
+- If a client includes hourlyRate in the JSON, it is ignored and cannot change the assigned rate.
 - breakMinutes is copied from the shift defaultBreakMinutes.
 - joinedAt is set by the backend to the current server time in UTC.
 
 Request:
 
 {
-  "joinCode": "ABCD12",
-  "hourlyRate": 15.00
+  "joinCode": "ABCD12"
 }
 
 Response:
@@ -498,7 +504,7 @@ Status: 400 Bad Request
   "timestamp": "2026-07-01T07:55:00Z",
   "status": 400,
   "error": "Bad Request",
-  "message": "hourlyRate: must be greater than or equal to 0.00",
+  "message": "joinCode: must not be blank",
   "path": "/api/v1/shifts/join"
 }
 

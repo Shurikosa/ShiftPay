@@ -3,6 +3,7 @@ package com.shiftpay.mvp.dto;
 import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.ShiftStatus;
 
+import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
 public record ShiftResponse(
@@ -16,6 +17,7 @@ public record ShiftResponse(
 		OffsetDateTime actualStartTime,
 		OffsetDateTime actualEndTime,
 		Integer defaultBreakMinutes,
+		BigDecimal defaultHourlyRate,
 		Long createdBy
 ) {
 
@@ -31,6 +33,7 @@ public record ShiftResponse(
 				shiftSession.getActualStartTime(),
 				shiftSession.getActualEndTime(),
 				shiftSession.getDefaultBreakMinutes(),
+				shiftSession.getDefaultHourlyRate(),
 				shiftSession.getCreatedBy().getId()
 		);
 	}

@@ -99,9 +99,18 @@ plannedEndTime
 actualStartTime
 actualEndTime
 defaultBreakMinutes
+defaultHourlyRate
 createdBy
 createdAt
 updatedAt
+
+Hourly Rate Ownership
+
+- WORKER does not provide or modify hourly rates.
+- FOREMAN sets defaultHourlyRate when creating an owned shift.
+- ADMIN can set defaultHourlyRate for any shift.
+- ShiftAttendance.hourlyRate is copied from ShiftSession.defaultHourlyRate when a worker joins.
+- ShiftAttendance.hourlyRate is a snapshot for that worker and shift, so later shift-rate changes do not rewrite historical attendance.
 ShiftAttendance
 
 Fields:
