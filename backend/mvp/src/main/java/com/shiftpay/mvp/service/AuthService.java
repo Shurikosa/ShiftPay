@@ -4,7 +4,9 @@ import com.shiftpay.mvp.dto.LoginRequest;
 import com.shiftpay.mvp.dto.LoginResponse;
 import com.shiftpay.mvp.dto.RegisterRequest;
 import com.shiftpay.mvp.dto.UserResponse;
+import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.User;
+import com.shiftpay.mvp.exception.BadRequestException;
 import com.shiftpay.mvp.exception.DuplicateEmailException;
 import com.shiftpay.mvp.exception.InvalidCredentialsException;
 import com.shiftpay.mvp.repository.UserRepository;
@@ -30,6 +32,8 @@ public class AuthService {
 
 	@Transactional
 	public UserResponse register(RegisterRequest request) {
+		validatePublicRegistrationRole(request.role());
+
 		String normalizedEmail = normalizeEmail(request.email());
 		if (userRepository.existsByEmail(normalizedEmail)) {
 			throw new DuplicateEmailException(normalizedEmail);
@@ -56,6 +60,12 @@ public class AuthService {
 		}
 
 		return new LoginResponse(jwtService.generateAccessToken(user), "Bearer", UserResponse.from(user));
+	}
+
+	private void validatePublicRegistrationRole(Role role) {
+		if (role != Role.WORKER && role != Role.FOREMAN) {
+			throw new BadRequestException("Public registration supports only WORKER and FOREMAN");
+		}
 	}
 
 	private String normalizeEmail(String email) {

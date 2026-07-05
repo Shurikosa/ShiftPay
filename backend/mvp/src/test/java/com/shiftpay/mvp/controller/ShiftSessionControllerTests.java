@@ -1,7 +1,10 @@
 package com.shiftpay.mvp.controller;
 
 import com.shiftpay.mvp.TestDataCleaner;
+import com.shiftpay.mvp.entity.Role;
+import com.shiftpay.mvp.entity.User;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
+import com.shiftpay.mvp.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,6 +13,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -42,6 +46,12 @@ class ShiftSessionControllerTests {
 	@Autowired
 	private ShiftSessionRepository shiftSessionRepository;
 
+	@Autowired
+	private UserRepository userRepository;
+
+	@Autowired
+	private PasswordEncoder passwordEncoder;
+
 	@BeforeEach
 	void setUp() {
 		TestDataCleaner.clean(jdbcTemplate);
@@ -67,7 +77,7 @@ class ShiftSessionControllerTests {
 
 	@Test
 	void adminCanCreateShift() throws Exception {
-		String accessToken = registerAndLogin("admin@example.com", "ADMIN");
+		String accessToken = createAdminAndLogin();
 
 		mockMvc.perform(post(CREATE_SHIFT_URL)
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
@@ -184,6 +194,22 @@ class ShiftSessionControllerTests {
 								""".formatted(email, role)))
 				.andExpect(status().isCreated());
 
+		return login(email);
+	}
+
+	private String createAdminAndLogin() throws Exception {
+		User admin = new User();
+		admin.setEmail("admin@example.com");
+		admin.setPasswordHash(passwordEncoder.encode("password123"));
+		admin.setFirstName("System");
+		admin.setLastName("Admin");
+		admin.setRole(Role.ADMIN);
+		userRepository.save(admin);
+
+		return login(admin.getEmail());
+	}
+
+	private String login(String email) throws Exception {
 		MvcResult result = mockMvc.perform(post(LOGIN_URL)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""

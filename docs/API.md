@@ -26,6 +26,8 @@ POST /api/v1/auth/register
 
 No authentication required.
 
+Public registration supports only the WORKER and FOREMAN roles. ADMIN accounts cannot be created through this endpoint.
+
 Request:
 
 {
@@ -57,6 +59,18 @@ Status: 400 Bad Request
   "status": 400,
   "error": "Bad Request",
   "message": "email: must be a well-formed email address",
+  "path": "/api/v1/auth/register"
+}
+
+Unsupported public role:
+
+Status: 400 Bad Request
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "Public registration supports only WORKER and FOREMAN",
   "path": "/api/v1/auth/register"
 }
 

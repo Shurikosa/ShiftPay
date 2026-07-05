@@ -13,6 +13,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -44,7 +45,7 @@ class AuthControllerTests {
 	}
 
 	@Test
-	void successfulRegistrationReturnsUserWithoutPassword() throws Exception {
+	void workerRegistrationSucceedsWithoutExposingPassword() throws Exception {
 		mockMvc.perform(post(REGISTER_URL)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
@@ -64,6 +65,41 @@ class AuthControllerTests {
 				.andExpect(jsonPath("$.role").value("WORKER"))
 				.andExpect(jsonPath("$.password").doesNotExist())
 				.andExpect(jsonPath("$.passwordHash").doesNotExist());
+	}
+
+	@Test
+	void foremanRegistrationSucceeds() throws Exception {
+		mockMvc.perform(post(REGISTER_URL)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "email": "foreman@example.com",
+								  "password": "password123",
+								  "firstName": "Jane",
+								  "lastName": "Foreman",
+								  "role": "FOREMAN"
+								}
+								"""))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.email").value("foreman@example.com"))
+				.andExpect(jsonPath("$.role").value("FOREMAN"));
+	}
+
+	@Test
+	void adminRegistrationReturnsBadRequest() throws Exception {
+		registerAdmin()
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.message").value("Public registration supports only WORKER and FOREMAN"))
+				.andExpect(jsonPath("$.path").value(REGISTER_URL));
+	}
+
+	@Test
+	void rejectedAdminUserIsNotPersisted() throws Exception {
+		registerAdmin().andExpect(status().isBadRequest());
+
+		assertThat(userRepository.findByEmail("admin@example.com")).isEmpty();
 	}
 
 	@Test
@@ -235,5 +271,19 @@ class AuthControllerTests {
 								}
 								"""))
 				.andExpect(status().isCreated());
+	}
+
+	private ResultActions registerAdmin() throws Exception {
+		return mockMvc.perform(post(REGISTER_URL)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content("""
+						{
+						  "email": "admin@example.com",
+						  "password": "password123",
+						  "firstName": "System",
+						  "lastName": "Admin",
+						  "role": "ADMIN"
+						}
+						"""));
 	}
 }
