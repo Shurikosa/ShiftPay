@@ -1,6 +1,7 @@
 package com.shiftpay.mvp.service;
 
 import com.shiftpay.mvp.dto.CreateShiftRequest;
+import com.shiftpay.mvp.dto.ShiftCloseResponse;
 import com.shiftpay.mvp.dto.ShiftCreateResponse;
 import com.shiftpay.mvp.dto.ShiftResponse;
 import com.shiftpay.mvp.dto.ShiftStartResponse;
@@ -94,6 +95,21 @@ public class ShiftSessionService {
 		shiftSession.setStatus(ShiftStatus.ACTIVE);
 		shiftSession.setActualStartTime(OffsetDateTime.now(ZoneOffset.UTC));
 		return ShiftStartResponse.from(shiftSession);
+	}
+
+	@Transactional
+	public ShiftCloseResponse closeShift(Long shiftId, AuthenticatedUserPrincipal principal) {
+		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId)
+				.orElseThrow(ShiftNotFoundException::new);
+
+		validateShiftAccess(shiftSession, principal);
+		if (shiftSession.getStatus() != ShiftStatus.ACTIVE) {
+			throw new ShiftStateConflictException("Shift can only be closed when status is ACTIVE");
+		}
+
+		shiftSession.setStatus(ShiftStatus.CLOSED);
+		shiftSession.setActualEndTime(OffsetDateTime.now(ZoneOffset.UTC));
+		return ShiftCloseResponse.from(shiftSession);
 	}
 
 	private void validateShiftAccess(ShiftSession shiftSession, AuthenticatedUserPrincipal principal) {

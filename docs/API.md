@@ -378,22 +378,77 @@ Status: 409 Conflict
 }
 Close shift
 
-Only FOREMAN or ADMIN.
-
 POST /api/v1/shifts/{shiftId}/close
 
-Request:
+Headers:
 
-{
-  "actualEndTime": "2026-07-01T17:00:00"
-}
+Authorization: Bearer <token>
+
+This endpoint does not accept a request body. The backend sets actualEndTime to the current server time in UTC.
+
+Access and state rules:
+
+- FOREMAN can close only a shift created by that FOREMAN.
+- ADMIN can close any shift.
+- WORKER is not allowed.
+- Only a shift with status ACTIVE can be closed.
 
 Response:
+
+Status: 200 OK
 
 {
   "id": 100,
   "status": "CLOSED",
-  "actualEndTime": "2026-07-01T17:00:00"
+  "actualEndTime": "2026-07-01T17:00:00Z"
+}
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-01T17:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/shifts/100/close"
+}
+
+Forbidden role or non-owner FOREMAN:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-01T17:00:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/shifts/100/close"
+}
+
+Shift not found:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-01T17:00:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Shift not found",
+  "path": "/api/v1/shifts/100/close"
+}
+
+Shift is not ACTIVE:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T17:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Shift can only be closed when status is ACTIVE",
+  "path": "/api/v1/shifts/100/close"
 }
 
 4. Shift Join

@@ -414,6 +414,138 @@ class ShiftSessionControllerTests {
 				.isBeforeOrEqualTo(OffsetDateTime.now(ZoneOffset.UTC));
 	}
 
+	@Test
+	void ownerForemanClosesActiveShift() throws Exception {
+		String accessToken = registerAndLogin("owner@example.com", "FOREMAN");
+		long shiftId = createActiveShift(accessToken, "Owner shift");
+
+		closeShift(accessToken, shiftId)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.id").value(shiftId))
+				.andExpect(jsonPath("$.status").value("CLOSED"))
+				.andExpect(jsonPath("$.actualEndTime").isString())
+				.andExpect(jsonPath("$.*", hasSize(3)));
+	}
+
+	@Test
+	void anotherForemanCannotCloseShift() throws Exception {
+		String ownerToken = registerAndLogin("owner@example.com", "FOREMAN");
+		long shiftId = createActiveShift(ownerToken, "Owner shift");
+		String anotherForemanToken = registerAndLogin("another@example.com", "FOREMAN");
+
+		closeShift(anotherForemanToken, shiftId)
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
+	}
+
+	@Test
+	void adminClosesAnyActiveShift() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createActiveShift(foremanToken, "Foreman shift");
+		String adminToken = createAdminAndLogin();
+
+		closeShift(adminToken, shiftId)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.id").value(shiftId))
+				.andExpect(jsonPath("$.status").value("CLOSED"))
+				.andExpect(jsonPath("$.actualEndTime").isString());
+	}
+
+	@Test
+	void workerCannotCloseShift() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createActiveShift(foremanToken, "Foreman shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+
+		closeShift(workerToken, shiftId)
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
+	}
+
+	@Test
+	void missingTokenCannotCloseShift() throws Exception {
+		mockMvc.perform(post(closeShiftUrl(1)))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.status").value(401))
+				.andExpect(jsonPath("$.error").value("Unauthorized"))
+				.andExpect(jsonPath("$.message").value("Unauthorized"))
+				.andExpect(jsonPath("$.path").value(closeShiftUrl(1)));
+	}
+
+	@Test
+	void invalidTokenCannotCloseShift() throws Exception {
+		mockMvc.perform(post(closeShiftUrl(1))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer invalid-token"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.status").value(401))
+				.andExpect(jsonPath("$.error").value("Unauthorized"))
+				.andExpect(jsonPath("$.message").value("Unauthorized"))
+				.andExpect(jsonPath("$.path").value(closeShiftUrl(1)));
+	}
+
+	@Test
+	void unknownShiftCannotBeClosed() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		closeShift(accessToken, 999999)
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.status").value(404))
+				.andExpect(jsonPath("$.error").value("Not Found"))
+				.andExpect(jsonPath("$.message").value("Shift not found"))
+				.andExpect(jsonPath("$.path").value(closeShiftUrl(999999)));
+	}
+
+	@Test
+	void closingOpenShiftReturnsConflict() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(accessToken, "Open shift");
+
+		closeShift(accessToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift can only be closed when status is ACTIVE"))
+				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
+	}
+
+	@Test
+	void repeatedCloseReturnsConflict() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createActiveShift(accessToken, "Active shift");
+
+		closeShift(accessToken, shiftId).andExpect(status().isOk());
+
+		closeShift(accessToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift can only be closed when status is ACTIVE"))
+				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
+	}
+
+	@Test
+	void closePersistsStatusAndChronologicalActualEndTime() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createActiveShift(accessToken, "Active shift");
+		OffsetDateTime beforeClose = OffsetDateTime.now(ZoneOffset.UTC);
+
+		closeShift(accessToken, shiftId).andExpect(status().isOk());
+
+		ShiftSession persistedShift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		assertThat(persistedShift.getStatus()).isEqualTo(ShiftStatus.CLOSED);
+		assertThat(persistedShift.getActualEndTime())
+				.isNotNull()
+				.isAfterOrEqualTo(beforeClose)
+				.isBeforeOrEqualTo(OffsetDateTime.now(ZoneOffset.UTC))
+				.isAfterOrEqualTo(persistedShift.getActualStartTime());
+	}
+
 	private String registerAndLogin(String email, String role) throws Exception {
 		mockMvc.perform(post(REGISTER_URL)
 						.contentType(MediaType.APPLICATION_JSON)
@@ -485,6 +617,12 @@ class ShiftSessionControllerTests {
 		return Long.parseLong(matcher.group(1));
 	}
 
+	private long createActiveShift(String accessToken, String title) throws Exception {
+		long shiftId = createShift(accessToken, title);
+		startShift(accessToken, shiftId).andExpect(status().isOk());
+		return shiftId;
+	}
+
 	private String shiftUrl(long shiftId) {
 		return CREATE_SHIFT_URL + "/" + shiftId;
 	}
@@ -495,6 +633,15 @@ class ShiftSessionControllerTests {
 
 	private ResultActions startShift(String accessToken, long shiftId) throws Exception {
 		return mockMvc.perform(post(startShiftUrl(shiftId))
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken));
+	}
+
+	private String closeShiftUrl(long shiftId) {
+		return shiftUrl(shiftId) + "/close";
+	}
+
+	private ResultActions closeShift(String accessToken, long shiftId) throws Exception {
+		return mockMvc.perform(post(closeShiftUrl(shiftId))
 				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken));
 	}
 

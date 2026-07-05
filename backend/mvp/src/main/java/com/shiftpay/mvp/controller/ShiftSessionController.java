@@ -1,6 +1,7 @@
 package com.shiftpay.mvp.controller;
 
 import com.shiftpay.mvp.dto.CreateShiftRequest;
+import com.shiftpay.mvp.dto.ShiftCloseResponse;
 import com.shiftpay.mvp.dto.ShiftCreateResponse;
 import com.shiftpay.mvp.dto.ShiftResponse;
 import com.shiftpay.mvp.dto.ShiftStartResponse;
@@ -50,5 +51,13 @@ public class ShiftSessionController {
 			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
 	) {
 		return shiftSessionService.startShift(shiftId, principal);
+	}
+
+	@PostMapping("/{shiftId}/close")
+	public ShiftCloseResponse closeShift(
+			@PathVariable Long shiftId,
+			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
+	) {
+		return shiftSessionService.closeShift(shiftId, principal);
 	}
 }

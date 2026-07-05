@@ -41,6 +41,8 @@ public class SecurityConfig {
 						.requestMatchers(HttpMethod.GET, "/api/v1/shifts/{shiftId}").hasAnyRole("FOREMAN", "ADMIN")
 						.requestMatchers(HttpMethod.POST, "/api/v1/shifts/{shiftId}/start")
 						.hasAnyRole("FOREMAN", "ADMIN")
+						.requestMatchers(HttpMethod.POST, "/api/v1/shifts/{shiftId}/close")
+						.hasAnyRole("FOREMAN", "ADMIN")
 						.anyRequest().authenticated())
 				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
 				.build();
