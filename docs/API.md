@@ -458,6 +458,19 @@ Only WORKER.
 
 POST /api/v1/shifts/join
 
+Headers:
+
+Authorization: Bearer <token>
+
+Rules:
+
+- joinCode is normalized with trim and uppercase.
+- The shift must have status OPEN.
+- A worker can join the same shift only once.
+- hourlyRate must be greater than or equal to 0 and supports up to two decimal places.
+- breakMinutes is copied from the shift defaultBreakMinutes.
+- joinedAt is set by the backend to the current server time in UTC.
+
 Request:
 
 {
@@ -467,6 +480,8 @@ Request:
 
 Response:
 
+Status: 200 OK
+
 {
   "attendanceId": 500,
   "shiftId": 100,
@@ -474,6 +489,79 @@ Response:
   "status": "JOINED",
   "hourlyRate": 15.00
 }
+
+Validation error:
+
+Status: 400 Bad Request
+
+{
+  "timestamp": "2026-07-01T07:55:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "hourlyRate: must be greater than or equal to 0.00",
+  "path": "/api/v1/shifts/join"
+}
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-01T07:55:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/shifts/join"
+}
+
+FOREMAN or ADMIN:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-01T07:55:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/shifts/join"
+}
+
+Unknown join code:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-01T07:55:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Shift not found",
+  "path": "/api/v1/shifts/join"
+}
+
+Duplicate join:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T07:55:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Worker has already joined this shift",
+  "path": "/api/v1/shifts/join"
+}
+
+Shift is not OPEN:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T07:55:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Workers can only join shifts with status OPEN",
+  "path": "/api/v1/shifts/join"
+}
+
 Approve worker attendance
 
 Only FOREMAN or ADMIN.
