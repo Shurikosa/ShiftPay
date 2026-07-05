@@ -43,6 +43,22 @@ public class GlobalExceptionHandler {
 		return buildError(HttpStatus.CONFLICT, exception.getMessage(), request);
 	}
 
+	@ExceptionHandler(ForbiddenException.class)
+	public ResponseEntity<ErrorResponse> handleForbiddenException(
+			ForbiddenException exception,
+			HttpServletRequest request
+	) {
+		return buildError(HttpStatus.FORBIDDEN, "Forbidden", request);
+	}
+
+	@ExceptionHandler(ShiftNotFoundException.class)
+	public ResponseEntity<ErrorResponse> handleShiftNotFoundException(
+			ShiftNotFoundException exception,
+			HttpServletRequest request
+	) {
+		return buildError(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+	}
+
 	@ExceptionHandler(InvalidCredentialsException.class)
 	public ResponseEntity<ErrorResponse> handleInvalidCredentialsException(
 			InvalidCredentialsException exception,

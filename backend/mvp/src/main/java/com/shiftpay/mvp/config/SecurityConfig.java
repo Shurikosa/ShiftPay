@@ -1,8 +1,8 @@
 package com.shiftpay.mvp.config;
 
+import com.shiftpay.mvp.security.AuthenticationErrorWriter;
 import com.shiftpay.mvp.security.JwtAuthenticationEntryPoint;
 import com.shiftpay.mvp.security.JwtAuthenticationFilter;
-import com.shiftpay.mvp.security.AuthenticationErrorWriter;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -38,6 +38,7 @@ public class SecurityConfig {
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/shifts").hasAnyRole("FOREMAN", "ADMIN")
+						.requestMatchers(HttpMethod.GET, "/api/v1/shifts/{shiftId}").hasAnyRole("FOREMAN", "ADMIN")
 						.anyRequest().authenticated())
 				.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
 				.build();

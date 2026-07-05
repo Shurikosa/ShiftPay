@@ -2,11 +2,15 @@ package com.shiftpay.mvp.service;
 
 import com.shiftpay.mvp.dto.CreateShiftRequest;
 import com.shiftpay.mvp.dto.ShiftCreateResponse;
+import com.shiftpay.mvp.dto.ShiftResponse;
 import com.shiftpay.mvp.entity.Company;
+import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.ShiftStatus;
 import com.shiftpay.mvp.entity.User;
 import com.shiftpay.mvp.exception.BadRequestException;
+import com.shiftpay.mvp.exception.ForbiddenException;
+import com.shiftpay.mvp.exception.ShiftNotFoundException;
 import com.shiftpay.mvp.repository.CompanyRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
@@ -19,6 +23,7 @@ import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Objects;
 
 @Service
 public class ShiftSessionService {
@@ -63,6 +68,26 @@ public class ShiftSessionService {
 		shiftSession.setCreatedBy(createdBy);
 
 		return ShiftCreateResponse.from(shiftSessionRepository.save(shiftSession));
+	}
+
+	@Transactional(readOnly = true)
+	public ShiftResponse getShift(Long shiftId, AuthenticatedUserPrincipal principal) {
+		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId)
+				.orElseThrow(ShiftNotFoundException::new);
+
+		validateReadAccess(shiftSession, principal);
+		return ShiftResponse.from(shiftSession);
+	}
+
+	private void validateReadAccess(ShiftSession shiftSession, AuthenticatedUserPrincipal principal) {
+		if (principal.role() == Role.ADMIN) {
+			return;
+		}
+		if (principal.role() == Role.FOREMAN
+				&& Objects.equals(shiftSession.getCreatedBy().getId(), principal.id())) {
+			return;
+		}
+		throw new ForbiddenException();
 	}
 
 	private Company getOrCreateDefaultCompany() {

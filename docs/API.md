@@ -238,9 +238,22 @@ Status: 403 Forbidden
   "path": "/api/v1/shifts"
 }
 Get shift by id
+
 GET /api/v1/shifts/{shiftId}
 
+Headers:
+
+Authorization: Bearer <token>
+
+Access rules:
+
+- FOREMAN can get only a shift created by that FOREMAN.
+- ADMIN can get any shift.
+- WORKER is not allowed until worker attendance access is implemented.
+
 Response:
+
+Status: 200 OK
 
 {
   "id": 100,
@@ -248,9 +261,48 @@ Response:
   "location": "Cologne",
   "status": "OPEN",
   "joinCode": "ABCD12",
-  "plannedStartTime": "2026-07-01T08:00:00",
-  "plannedEndTime": "2026-07-01T17:00:00",
-  "defaultBreakMinutes": 60
+  "plannedStartTime": "2026-07-01T08:00:00Z",
+  "plannedEndTime": "2026-07-01T17:00:00Z",
+  "actualStartTime": null,
+  "actualEndTime": null,
+  "defaultBreakMinutes": 60,
+  "createdBy": 5
+}
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/shifts/100"
+}
+
+Forbidden role or non-owner FOREMAN:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/shifts/100"
+}
+
+Shift not found:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Shift not found",
+  "path": "/api/v1/shifts/100"
 }
 Start shift
 
