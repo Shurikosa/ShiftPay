@@ -142,6 +142,25 @@ Attendance Approval
 - approvedAt is recorded using the current server time in UTC.
 - The optional hourly-rate override uses BigDecimal and is limited to non-negative values with two decimal places.
 
+Attendance Query
+
+- FOREMAN can list attendance only for an owned shift; ADMIN can list attendance for any shift.
+- Attendance can be listed for OPEN, ACTIVE, and CLOSED shifts.
+- The repository fetches attendance and worker in one query to avoid N+1 loading.
+- Results are ordered by joinedAt ascending and then attendance id ascending.
+- Controllers return attendance DTOs and never expose User entities or password hashes.
+
+Concurrency Control
+
+- Join, start, close, and approval run inside transactions with pessimistic write locks.
+- ShiftSession is locked by id for start, close, and approval.
+- ShiftSession is locked by joinCode for worker join.
+- ShiftAttendance is locked by attendance id and shift id for approval.
+- Operations that require both rows always lock ShiftSession first and ShiftAttendance second.
+- Concurrent approvals serialize so only the first JOINED -> APPROVED transition succeeds.
+- Start serializes with join and approval, preventing either operation from succeeding after the shift becomes ACTIVE.
+- Close serializes concurrent lifecycle transitions and prevents duplicate successful close operations.
+
 4. Database
 
 Use PostgreSQL.

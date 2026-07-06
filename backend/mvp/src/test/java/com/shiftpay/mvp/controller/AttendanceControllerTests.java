@@ -29,6 +29,7 @@ import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasSize;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -221,6 +222,158 @@ class AttendanceControllerTests {
 		assertThat(attendance.getWorkedMinutes()).isNull();
 		assertThat(attendance.getCalculatedSalary()).isNull();
 		assertThat(attendance.getApprovedAt()).isNull();
+	}
+
+	@Test
+	void ownerForemanGetsSortedAttendanceWithoutUserEntityFields() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Open shift", "15.00");
+		String firstWorkerToken = registerAndLogin(
+				"first.worker@example.com",
+				"WORKER",
+				"John",
+				"Worker"
+		);
+		String secondWorkerToken = registerAndLogin(
+				"second.worker@example.com",
+				"WORKER",
+				"Alice",
+				"Builder"
+		);
+		String thirdWorkerToken = registerAndLogin(
+				"third.worker@example.com",
+				"WORKER",
+				"Maria",
+				"Stone"
+		);
+		long firstAttendanceId = joinAndGetAttendanceId(firstWorkerToken, shift.joinCode());
+		long secondAttendanceId = joinAndGetAttendanceId(secondWorkerToken, shift.joinCode());
+		long thirdAttendanceId = joinAndGetAttendanceId(thirdWorkerToken, shift.joinCode());
+		OffsetDateTime sharedJoinedAt = OffsetDateTime.parse("2026-07-06T18:00:00Z");
+		setJoinedAt(firstAttendanceId, sharedJoinedAt);
+		setJoinedAt(secondAttendanceId, sharedJoinedAt.minusMinutes(1));
+		setJoinedAt(thirdAttendanceId, sharedJoinedAt);
+
+		mockMvc.perform(get(attendanceUrl(shift.id()))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(3)))
+				.andExpect(jsonPath("$[0].attendanceId").value(secondAttendanceId))
+				.andExpect(jsonPath("$[1].attendanceId").value(firstAttendanceId))
+				.andExpect(jsonPath("$[2].attendanceId").value(thirdAttendanceId))
+				.andExpect(jsonPath("$[1].workerId").isNumber())
+				.andExpect(jsonPath("$[1].firstName").value("John"))
+				.andExpect(jsonPath("$[1].lastName").value("Worker"))
+				.andExpect(jsonPath("$[1].status").value("JOINED"))
+				.andExpect(jsonPath("$[1].hourlyRate").value(15.00))
+				.andExpect(jsonPath("$[1].breakMinutes").value(60))
+				.andExpect(jsonPath("$[1].joinedAt").value("2026-07-06T18:00:00Z"))
+				.andExpect(jsonPath("$[1].approvedAt").value((Object) null))
+				.andExpect(jsonPath("$[1].*", hasSize(9)))
+				.andExpect(jsonPath("$[1].passwordHash").doesNotExist())
+				.andExpect(jsonPath("$[1].worker").doesNotExist())
+				.andExpect(jsonPath("$[1].email").doesNotExist());
+	}
+
+	@Test
+	void adminGetsAttendanceForAnyShift() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Open shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		String adminToken = createAdminAndLogin();
+
+		mockMvc.perform(get(attendanceUrl(shift.id()))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(1)))
+				.andExpect(jsonPath("$[0].attendanceId").value(attendanceId));
+	}
+
+	@Test
+	void attendanceListWorksForOpenActiveAndClosedShifts() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift openShift = createShift(foremanToken, "Open shift");
+		CreatedShift activeShift = createShift(foremanToken, "Active shift");
+		CreatedShift closedShift = createShift(foremanToken, "Closed shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		joinAndGetAttendanceId(workerToken, openShift.joinCode());
+		joinAndGetAttendanceId(workerToken, activeShift.joinCode());
+		joinAndGetAttendanceId(workerToken, closedShift.joinCode());
+		startShift(foremanToken, activeShift.id());
+		startShift(foremanToken, closedShift.id());
+		closeShift(foremanToken, closedShift.id());
+
+		for (CreatedShift shift : new CreatedShift[] {openShift, activeShift, closedShift}) {
+			mockMvc.perform(get(attendanceUrl(shift.id()))
+							.header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
+					.andExpect(status().isOk())
+					.andExpect(jsonPath("$", hasSize(1)));
+		}
+	}
+
+	@Test
+	void anotherForemanCannotGetAttendance() throws Exception {
+		String ownerToken = registerAndLogin("owner@example.com", "FOREMAN");
+		CreatedShift shift = createShift(ownerToken, "Open shift");
+		String anotherForemanToken = registerAndLogin("another@example.com", "FOREMAN");
+
+		mockMvc.perform(get(attendanceUrl(shift.id()))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + anotherForemanToken))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(attendanceUrl(shift.id())));
+	}
+
+	@Test
+	void workerCannotGetAttendance() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Open shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+
+		mockMvc.perform(get(attendanceUrl(shift.id()))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + workerToken))
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(attendanceUrl(shift.id())));
+	}
+
+	@Test
+	void missingTokenCannotGetAttendance() throws Exception {
+		mockMvc.perform(get(attendanceUrl(1)))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.status").value(401))
+				.andExpect(jsonPath("$.error").value("Unauthorized"))
+				.andExpect(jsonPath("$.message").value("Unauthorized"))
+				.andExpect(jsonPath("$.path").value(attendanceUrl(1)));
+	}
+
+	@Test
+	void invalidTokenCannotGetAttendance() throws Exception {
+		mockMvc.perform(get(attendanceUrl(1))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer invalid-token"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.status").value(401))
+				.andExpect(jsonPath("$.error").value("Unauthorized"))
+				.andExpect(jsonPath("$.message").value("Unauthorized"))
+				.andExpect(jsonPath("$.path").value(attendanceUrl(1)));
+	}
+
+	@Test
+	void unknownShiftAttendanceReturnsNotFound() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		mockMvc.perform(get(attendanceUrl(999999))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.status").value(404))
+				.andExpect(jsonPath("$.error").value("Not Found"))
+				.andExpect(jsonPath("$.message").value("Shift not found"))
+				.andExpect(jsonPath("$.path").value(attendanceUrl(999999)));
 	}
 
 	@Test
@@ -511,17 +664,26 @@ class AttendanceControllerTests {
 	}
 
 	private String registerAndLogin(String email, String role) throws Exception {
+		return registerAndLogin(email, role, "Test", "User");
+	}
+
+	private String registerAndLogin(
+			String email,
+			String role,
+			String firstName,
+			String lastName
+	) throws Exception {
 		mockMvc.perform(post(REGISTER_URL)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{
 								  "email": "%s",
 								  "password": "password123",
-								  "firstName": "Test",
-								  "lastName": "User",
+								  "firstName": "%s",
+								  "lastName": "%s",
 								  "role": "%s"
 								}
-								""".formatted(email, role)))
+								""".formatted(email, firstName, lastName, role)))
 				.andExpect(status().isCreated());
 
 		return login(email);
@@ -636,6 +798,16 @@ class AttendanceControllerTests {
 
 	private String approvalUrl(long shiftId, long attendanceId) {
 		return CREATE_SHIFT_URL + "/" + shiftId + "/attendance/" + attendanceId + "/approve";
+	}
+
+	private String attendanceUrl(long shiftId) {
+		return CREATE_SHIFT_URL + "/" + shiftId + "/attendance";
+	}
+
+	private void setJoinedAt(long attendanceId, OffsetDateTime joinedAt) {
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		attendance.setJoinedAt(joinedAt);
+		shiftAttendanceRepository.saveAndFlush(attendance);
 	}
 
 	private String joinPayload(String joinCode) {

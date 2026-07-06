@@ -41,6 +41,8 @@ public class SecurityConfig {
 						.requestMatchers(HttpMethod.POST,
 								"/api/v1/shifts/{shiftId}/attendance/{attendanceId}/approve")
 						.hasAnyRole("FOREMAN", "ADMIN")
+						.requestMatchers(HttpMethod.GET, "/api/v1/shifts/{shiftId}/attendance")
+						.hasAnyRole("FOREMAN", "ADMIN")
 						.requestMatchers(HttpMethod.POST, "/api/v1/shifts").hasAnyRole("FOREMAN", "ADMIN")
 						.requestMatchers(HttpMethod.GET, "/api/v1/shifts/{shiftId}").hasAnyRole("FOREMAN", "ADMIN")
 						.requestMatchers(HttpMethod.POST, "/api/v1/shifts/{shiftId}/start")

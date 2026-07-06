@@ -568,6 +568,79 @@ Status: 409 Conflict
   "path": "/api/v1/shifts/join"
 }
 
+List shift attendance
+
+Only FOREMAN or ADMIN.
+
+GET /api/v1/shifts/{shiftId}/attendance
+
+Headers:
+
+Authorization: Bearer <token>
+
+Rules:
+
+- FOREMAN can list attendance only for a shift they created.
+- ADMIN can list attendance for any shift.
+- WORKER is not allowed.
+- The endpoint is available while the shift is OPEN, ACTIVE, or CLOSED.
+- Results are sorted by joinedAt ascending, then attendanceId ascending.
+- Worker data is returned through the attendance DTO; passwordHash and the User entity are never exposed.
+
+Response:
+
+Status: 200 OK
+
+[
+  {
+    "attendanceId": 500,
+    "workerId": 10,
+    "firstName": "John",
+    "lastName": "Worker",
+    "status": "JOINED",
+    "hourlyRate": 15.00,
+    "breakMinutes": 60,
+    "joinedAt": "2026-07-06T18:00:00Z",
+    "approvedAt": null
+  }
+]
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/shifts/100/attendance"
+}
+
+WORKER or non-owner FOREMAN:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/shifts/100/attendance"
+}
+
+Shift not found:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Shift not found",
+  "path": "/api/v1/shifts/100/attendance"
+}
+
 Approve worker attendance
 
 Only FOREMAN or ADMIN.

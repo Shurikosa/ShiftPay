@@ -2,6 +2,7 @@ package com.shiftpay.mvp.service;
 
 import com.shiftpay.mvp.dto.ApproveAttendanceRequest;
 import com.shiftpay.mvp.dto.ApproveAttendanceResponse;
+import com.shiftpay.mvp.dto.AttendanceResponse;
 import com.shiftpay.mvp.dto.JoinShiftRequest;
 import com.shiftpay.mvp.dto.JoinShiftResponse;
 import com.shiftpay.mvp.entity.AttendanceStatus;
@@ -26,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -49,7 +51,7 @@ public class AttendanceService {
 	@Transactional
 	public JoinShiftResponse joinShift(JoinShiftRequest request, AuthenticatedUserPrincipal principal) {
 		String normalizedJoinCode = request.joinCode().trim().toUpperCase(Locale.ROOT);
-		ShiftSession shiftSession = shiftSessionRepository.findByJoinCode(normalizedJoinCode)
+		ShiftSession shiftSession = shiftSessionRepository.findByJoinCodeForUpdate(normalizedJoinCode)
 				.orElseThrow(ShiftNotFoundException::new);
 
 		if (shiftSession.getStatus() != ShiftStatus.OPEN) {
@@ -78,6 +80,20 @@ public class AttendanceService {
 		}
 	}
 
+	@Transactional(readOnly = true)
+	public List<AttendanceResponse> getShiftAttendance(
+			Long shiftId,
+			AuthenticatedUserPrincipal principal
+	) {
+		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId)
+				.orElseThrow(ShiftNotFoundException::new);
+		validateAttendanceManagementAccess(shiftSession, principal);
+
+		return shiftAttendanceRepository.findAllByShiftSessionIdWithWorker(shiftId).stream()
+				.map(AttendanceResponse::from)
+				.toList();
+	}
+
 	@Transactional
 	public ApproveAttendanceResponse approveAttendance(
 			Long shiftId,
@@ -85,12 +101,12 @@ public class AttendanceService {
 			ApproveAttendanceRequest request,
 			AuthenticatedUserPrincipal principal
 	) {
-		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId)
+		ShiftSession shiftSession = shiftSessionRepository.findByIdForUpdate(shiftId)
 				.orElseThrow(ShiftNotFoundException::new);
-		validateApprovalAccess(shiftSession, principal);
+		validateAttendanceManagementAccess(shiftSession, principal);
 
 		ShiftAttendance attendance = shiftAttendanceRepository
-				.findByIdAndShiftSessionId(attendanceId, shiftId)
+				.findByIdAndShiftSessionIdForUpdate(attendanceId, shiftId)
 				.orElseThrow(AttendanceNotFoundException::new);
 
 		if (shiftSession.getStatus() != ShiftStatus.OPEN) {
@@ -109,7 +125,10 @@ public class AttendanceService {
 		return ApproveAttendanceResponse.from(attendance);
 	}
 
-	private void validateApprovalAccess(ShiftSession shiftSession, AuthenticatedUserPrincipal principal) {
+	private void validateAttendanceManagementAccess(
+			ShiftSession shiftSession,
+			AuthenticatedUserPrincipal principal
+	) {
 		if (principal.role() == Role.ADMIN) {
 			return;
 		}

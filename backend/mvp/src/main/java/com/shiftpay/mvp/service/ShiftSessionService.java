@@ -85,7 +85,7 @@ public class ShiftSessionService {
 
 	@Transactional
 	public ShiftStartResponse startShift(Long shiftId, AuthenticatedUserPrincipal principal) {
-		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId)
+		ShiftSession shiftSession = shiftSessionRepository.findByIdForUpdate(shiftId)
 				.orElseThrow(ShiftNotFoundException::new);
 
 		validateShiftAccess(shiftSession, principal);
@@ -100,7 +100,7 @@ public class ShiftSessionService {
 
 	@Transactional
 	public ShiftCloseResponse closeShift(Long shiftId, AuthenticatedUserPrincipal principal) {
-		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId)
+		ShiftSession shiftSession = shiftSessionRepository.findByIdForUpdate(shiftId)
 				.orElseThrow(ShiftNotFoundException::new);
 
 		validateShiftAccess(shiftSession, principal);
