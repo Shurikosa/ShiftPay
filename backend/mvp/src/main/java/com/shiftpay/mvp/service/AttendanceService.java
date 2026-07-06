@@ -1,13 +1,18 @@
 package com.shiftpay.mvp.service;
 
+import com.shiftpay.mvp.dto.ApproveAttendanceRequest;
+import com.shiftpay.mvp.dto.ApproveAttendanceResponse;
 import com.shiftpay.mvp.dto.JoinShiftRequest;
 import com.shiftpay.mvp.dto.JoinShiftResponse;
 import com.shiftpay.mvp.entity.AttendanceStatus;
+import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftAttendance;
 import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.ShiftStatus;
 import com.shiftpay.mvp.entity.User;
 import com.shiftpay.mvp.exception.AttendanceConflictException;
+import com.shiftpay.mvp.exception.AttendanceNotFoundException;
+import com.shiftpay.mvp.exception.ForbiddenException;
 import com.shiftpay.mvp.exception.ShiftNotFoundException;
 import com.shiftpay.mvp.exception.ShiftStateConflictException;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
@@ -22,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Locale;
+import java.util.Objects;
 
 @Service
 public class AttendanceService {
@@ -70,5 +76,47 @@ public class AttendanceService {
 		catch (DataIntegrityViolationException exception) {
 			throw new AttendanceConflictException("Worker has already joined this shift");
 		}
+	}
+
+	@Transactional
+	public ApproveAttendanceResponse approveAttendance(
+			Long shiftId,
+			Long attendanceId,
+			ApproveAttendanceRequest request,
+			AuthenticatedUserPrincipal principal
+	) {
+		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId)
+				.orElseThrow(ShiftNotFoundException::new);
+		validateApprovalAccess(shiftSession, principal);
+
+		ShiftAttendance attendance = shiftAttendanceRepository
+				.findByIdAndShiftSessionId(attendanceId, shiftId)
+				.orElseThrow(AttendanceNotFoundException::new);
+
+		if (shiftSession.getStatus() != ShiftStatus.OPEN) {
+			throw new ShiftStateConflictException("Attendance can only be approved while shift status is OPEN");
+		}
+		if (attendance.getStatus() != AttendanceStatus.JOINED) {
+			throw new AttendanceConflictException("Attendance can only be approved when status is JOINED");
+		}
+
+		if (request != null && request.hourlyRate() != null) {
+			attendance.setHourlyRate(request.hourlyRate());
+		}
+		attendance.setStatus(AttendanceStatus.APPROVED);
+		attendance.setApprovedAt(OffsetDateTime.now(ZoneOffset.UTC));
+
+		return ApproveAttendanceResponse.from(attendance);
+	}
+
+	private void validateApprovalAccess(ShiftSession shiftSession, AuthenticatedUserPrincipal principal) {
+		if (principal.role() == Role.ADMIN) {
+			return;
+		}
+		if (principal.role() == Role.FOREMAN
+				&& Objects.equals(shiftSession.getCreatedBy().getId(), principal.id())) {
+			return;
+		}
+		throw new ForbiddenException();
 	}
 }

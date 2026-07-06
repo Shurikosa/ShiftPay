@@ -1,11 +1,14 @@
 package com.shiftpay.mvp.controller;
 
+import com.shiftpay.mvp.dto.ApproveAttendanceRequest;
+import com.shiftpay.mvp.dto.ApproveAttendanceResponse;
 import com.shiftpay.mvp.dto.JoinShiftRequest;
 import com.shiftpay.mvp.dto.JoinShiftResponse;
 import com.shiftpay.mvp.security.AuthenticatedUserPrincipal;
 import com.shiftpay.mvp.service.AttendanceService;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -27,5 +30,15 @@ public class AttendanceController {
 			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
 	) {
 		return attendanceService.joinShift(request, principal);
+	}
+
+	@PostMapping("/{shiftId}/attendance/{attendanceId}/approve")
+	public ApproveAttendanceResponse approveAttendance(
+			@PathVariable Long shiftId,
+			@PathVariable Long attendanceId,
+			@Valid @RequestBody(required = false) ApproveAttendanceRequest request,
+			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
+	) {
+		return attendanceService.approveAttendance(shiftId, attendanceId, request, principal);
 	}
 }

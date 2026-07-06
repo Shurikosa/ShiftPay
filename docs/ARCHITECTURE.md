@@ -111,6 +111,10 @@ Hourly Rate Ownership
 - ADMIN can set defaultHourlyRate for any shift.
 - ShiftAttendance.hourlyRate is copied from ShiftSession.defaultHourlyRate when a worker joins.
 - ShiftAttendance.hourlyRate is a snapshot for that worker and shift, so later shift-rate changes do not rewrite historical attendance.
+- FOREMAN can override ShiftAttendance.hourlyRate while approving attendance for an owned OPEN shift.
+- ADMIN can override ShiftAttendance.hourlyRate while approving attendance for any OPEN shift.
+- Approval without an override preserves the join-time attendance rate snapshot.
+- An attendance-specific override does not modify ShiftSession.defaultHourlyRate or other attendance records.
 ShiftAttendance
 
 Fields:
@@ -127,6 +131,16 @@ joinedAt
 approvedAt
 createdAt
 updatedAt
+
+Attendance Approval
+
+- The approval endpoint is available only to FOREMAN and ADMIN.
+- FOREMAN ownership is enforced in the service layer against ShiftSession.createdBy.
+- Attendance is loaded by both attendance id and shift session id, so a URL shift mismatch is returned as not found.
+- Approval is allowed only while the shift is OPEN.
+- The only allowed approval transition is JOINED -> APPROVED.
+- approvedAt is recorded using the current server time in UTC.
+- The optional hourly-rate override uses BigDecimal and is limited to non-negative values with two decimal places.
 
 4. Database
 

@@ -574,11 +574,128 @@ Only FOREMAN or ADMIN.
 
 POST /api/v1/shifts/{shiftId}/attendance/{attendanceId}/approve
 
+Headers:
+
+Authorization: Bearer <token>
+
+Rules:
+
+- FOREMAN can approve attendance only for a shift they created.
+- ADMIN can approve attendance for any shift.
+- The shift must have status OPEN.
+- The attendance must belong to the shift identified by shiftId.
+- Only the JOINED -> APPROVED transition is allowed.
+- The request body is optional.
+- If hourlyRate is omitted, the attendance keeps the rate snapshot assigned when the worker joined.
+- If hourlyRate is provided, it overrides the rate only for this attendance.
+- hourlyRate must be non-negative and have at most two decimal places.
+- approvedAt is set by the backend to the current server time in UTC.
+
+Request without a rate override:
+
+{}
+
+The request body may also be omitted.
+
+Request with an attendance-specific rate override:
+
+{
+  "hourlyRate": 18.50
+}
+
 Response:
+
+Status: 200 OK
 
 {
   "attendanceId": 500,
-  "status": "APPROVED"
+  "status": "APPROVED",
+  "hourlyRate": 18.50,
+  "approvedAt": "2026-07-06T20:00:00Z"
+}
+
+Invalid hourlyRate:
+
+Status: 400 Bad Request
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "hourlyRate: must be greater than or equal to 0.00",
+  "path": "/api/v1/shifts/100/attendance/500/approve"
+}
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/shifts/100/attendance/500/approve"
+}
+
+WORKER or non-owner FOREMAN:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/shifts/100/attendance/500/approve"
+}
+
+Shift not found:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Shift not found",
+  "path": "/api/v1/shifts/100/attendance/500/approve"
+}
+
+Attendance not found or does not belong to the shift:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Attendance not found",
+  "path": "/api/v1/shifts/100/attendance/500/approve"
+}
+
+Shift is not OPEN:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Attendance can only be approved while shift status is OPEN",
+  "path": "/api/v1/shifts/100/attendance/500/approve"
+}
+
+Attendance is not JOINED:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Attendance can only be approved when status is JOINED",
+  "path": "/api/v1/shifts/100/attendance/500/approve"
 }
 
 5. Salary Calculation
