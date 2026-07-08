@@ -5,8 +5,10 @@ import com.shiftpay.mvp.dto.ShiftCloseResponse;
 import com.shiftpay.mvp.dto.ShiftCreateResponse;
 import com.shiftpay.mvp.dto.ShiftResponse;
 import com.shiftpay.mvp.dto.ShiftStartResponse;
+import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.Company;
 import com.shiftpay.mvp.entity.Role;
+import com.shiftpay.mvp.entity.ShiftAttendance;
 import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.ShiftStatus;
 import com.shiftpay.mvp.entity.User;
@@ -15,6 +17,7 @@ import com.shiftpay.mvp.exception.ForbiddenException;
 import com.shiftpay.mvp.exception.ShiftNotFoundException;
 import com.shiftpay.mvp.exception.ShiftStateConflictException;
 import com.shiftpay.mvp.repository.CompanyRepository;
+import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
 import com.shiftpay.mvp.security.AuthenticatedUserPrincipal;
@@ -37,18 +40,24 @@ public class ShiftSessionService {
 	private static final int JOIN_CODE_MAX_ATTEMPTS = 20;
 
 	private final CompanyRepository companyRepository;
+	private final ShiftAttendanceRepository shiftAttendanceRepository;
 	private final ShiftSessionRepository shiftSessionRepository;
 	private final UserRepository userRepository;
+	private final SalaryCalculationService salaryCalculationService;
 	private final SecureRandom secureRandom;
 
 	public ShiftSessionService(
 			CompanyRepository companyRepository,
+			ShiftAttendanceRepository shiftAttendanceRepository,
 			ShiftSessionRepository shiftSessionRepository,
-			UserRepository userRepository
+			UserRepository userRepository,
+			SalaryCalculationService salaryCalculationService
 	) {
 		this.companyRepository = companyRepository;
+		this.shiftAttendanceRepository = shiftAttendanceRepository;
 		this.shiftSessionRepository = shiftSessionRepository;
 		this.userRepository = userRepository;
+		this.salaryCalculationService = salaryCalculationService;
 		this.secureRandom = new SecureRandom();
 	}
 
@@ -108,8 +117,30 @@ public class ShiftSessionService {
 			throw new ShiftStateConflictException("Shift can only be closed when status is ACTIVE");
 		}
 
+		OffsetDateTime actualEndTime = OffsetDateTime.now(ZoneOffset.UTC);
+		long durationMinutes = salaryCalculationService.calculateDurationMinutes(
+				shiftSession.getActualStartTime(),
+				actualEndTime
+		);
+
+		for (ShiftAttendance attendance : shiftAttendanceRepository.findAllByShiftSessionIdForUpdate(shiftId)) {
+			if (attendance.getStatus() == AttendanceStatus.APPROVED) {
+				SalaryCalculationService.SalaryCalculationResult salary = salaryCalculationService.calculate(
+						durationMinutes,
+						attendance.getBreakMinutes(),
+						attendance.getHourlyRate()
+				);
+				attendance.setWorkedMinutes(salary.workedMinutes());
+				attendance.setCalculatedSalary(salary.calculatedSalary());
+			}
+			else {
+				attendance.setWorkedMinutes(null);
+				attendance.setCalculatedSalary(null);
+			}
+		}
+
 		shiftSession.setStatus(ShiftStatus.CLOSED);
-		shiftSession.setActualEndTime(OffsetDateTime.now(ZoneOffset.UTC));
+		shiftSession.setActualEndTime(actualEndTime);
 		return ShiftCloseResponse.from(shiftSession);
 	}
 

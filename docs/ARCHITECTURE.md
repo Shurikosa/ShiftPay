@@ -149,6 +149,21 @@ Attendance Query
 - The repository fetches attendance and worker in one query to avoid N+1 loading.
 - Results are ordered by joinedAt ascending and then attendance id ascending.
 - Controllers return attendance DTOs and never expose User entities or password hashes.
+- Attendance DTOs expose workedMinutes and calculatedSalary so close-time salary results can be read without a summary endpoint.
+
+Salary Calculation
+
+- SalaryCalculationService owns worked-minute and salary math.
+- ShiftSessionService.closeShift invokes SalaryCalculationService after locking the ShiftSession and before setting status CLOSED.
+- Close locks all attendance rows for the shift with PESSIMISTIC_WRITE after locking the ShiftSession.
+- Salary is calculated only for APPROVED attendance.
+- JOINED, REJECTED, and CANCELLED attendance keep workedMinutes and calculatedSalary null.
+- workedMinutes = minutes_between(actualStartTime, actualEndTime) - attendance.breakMinutes.
+- calculatedSalary = workedMinutes / 60 * attendance.hourlyRate.
+- calculatedSalary is stored with scale 2 and RoundingMode.HALF_UP.
+- Salary uses ShiftAttendance.hourlyRate, including any attendance-specific approval override.
+- Close fails with 409 if actualStartTime is missing or breakMinutes is greater than shift duration.
+- Close is transactional: when salary validation fails, the shift remains ACTIVE and attendance salary fields are not written.
 
 Concurrency Control
 
@@ -156,6 +171,7 @@ Concurrency Control
 - ShiftSession is locked by id for start, close, and approval.
 - ShiftSession is locked by joinCode for worker join.
 - ShiftAttendance is locked by attendance id and shift id for approval.
+- ShiftAttendance is locked by shift id during close before salary fields are updated.
 - Operations that require both rows always lock ShiftSession first and ShiftAttendance second.
 - Concurrent approvals serialize so only the first JOINED -> APPROVED transition succeeds.
 - Start serializes with join and approval, preventing either operation from succeeding after the shift becomes ACTIVE.

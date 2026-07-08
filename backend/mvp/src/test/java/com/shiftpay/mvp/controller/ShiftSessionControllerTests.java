@@ -1,10 +1,13 @@
 package com.shiftpay.mvp.controller;
 
 import com.shiftpay.mvp.TestDataCleaner;
+import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.Role;
+import com.shiftpay.mvp.entity.ShiftAttendance;
 import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.ShiftStatus;
 import com.shiftpay.mvp.entity.User;
+import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,6 +23,9 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.HashSet;
@@ -42,15 +48,20 @@ class ShiftSessionControllerTests {
 	private static final String REGISTER_URL = "/api/v1/auth/register";
 	private static final String LOGIN_URL = "/api/v1/auth/login";
 	private static final String CREATE_SHIFT_URL = "/api/v1/shifts";
+	private static final String JOIN_SHIFT_URL = "/api/v1/shifts/join";
 	private static final Pattern ACCESS_TOKEN_PATTERN = Pattern.compile("\"accessToken\":\"([^\"]+)\"");
 	private static final Pattern SHIFT_ID_PATTERN = Pattern.compile("\"id\":(\\d+)");
 	private static final Pattern JOIN_CODE_PATTERN = Pattern.compile("\"joinCode\":\"([^\"]+)\"");
+	private static final Pattern ATTENDANCE_ID_PATTERN = Pattern.compile("\"attendanceId\":(\\d+)");
 
 	@Autowired
 	private MockMvc mockMvc;
 
 	@Autowired
 	private JdbcTemplate jdbcTemplate;
+
+	@Autowired
+	private ShiftAttendanceRepository shiftAttendanceRepository;
 
 	@Autowired
 	private ShiftSessionRepository shiftSessionRepository;
@@ -554,6 +565,91 @@ class ShiftSessionControllerTests {
 	}
 
 	@Test
+	void closeCalculatesSalaryForApprovedAttendance() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Salary shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
+		approveAttendance(foremanToken, shiftId, attendanceId, "{}").andExpect(status().isOk());
+		startShift(foremanToken, shiftId).andExpect(status().isOk());
+		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(540));
+
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
+
+		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		int expectedWorkedMinutes = expectedWorkedMinutes(shift, attendance);
+		assertThat(attendance.getStatus()).isEqualTo(AttendanceStatus.APPROVED);
+		assertThat(attendance.getWorkedMinutes()).isEqualTo(expectedWorkedMinutes);
+		assertThat(attendance.getCalculatedSalary())
+				.isEqualByComparingTo(expectedSalary(expectedWorkedMinutes, attendance.getHourlyRate()));
+	}
+
+	@Test
+	void closeUsesAttendanceOverrideHourlyRateForSalary() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Override salary shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
+		approveAttendance(foremanToken, shiftId, attendanceId, "{\"hourlyRate\": 18.50}")
+				.andExpect(status().isOk());
+		startShift(foremanToken, shiftId).andExpect(status().isOk());
+		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(180));
+
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
+
+		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		int expectedWorkedMinutes = expectedWorkedMinutes(shift, attendance);
+		assertThat(attendance.getHourlyRate()).isEqualByComparingTo("18.50");
+		assertThat(attendance.getWorkedMinutes()).isEqualTo(expectedWorkedMinutes);
+		assertThat(attendance.getCalculatedSalary())
+				.isEqualByComparingTo(expectedSalary(expectedWorkedMinutes, new BigDecimal("18.50")));
+	}
+
+	@Test
+	void closeLeavesJoinedAttendanceWithoutSalary() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Joined attendance shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
+		startShift(foremanToken, shiftId).andExpect(status().isOk());
+		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(120));
+
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
+
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		assertThat(attendance.getStatus()).isEqualTo(AttendanceStatus.JOINED);
+		assertThat(attendance.getWorkedMinutes()).isNull();
+		assertThat(attendance.getCalculatedSalary()).isNull();
+	}
+
+	@Test
+	void invalidBreakGreaterThanDurationReturnsConflictAndDoesNotCloseShift() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Invalid break salary shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
+		approveAttendance(foremanToken, shiftId, attendanceId, "{}").andExpect(status().isOk());
+		startShift(foremanToken, shiftId).andExpect(status().isOk());
+		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(10));
+
+		closeShift(foremanToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Break minutes cannot be greater than shift duration"))
+				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
+
+		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		assertThat(shift.getStatus()).isEqualTo(ShiftStatus.ACTIVE);
+		assertThat(shift.getActualEndTime()).isNull();
+		assertThat(attendance.getWorkedMinutes()).isNull();
+		assertThat(attendance.getCalculatedSalary()).isNull();
+	}
+
+	@Test
 	void missingDefaultHourlyRateReturnsBadRequest() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
 
@@ -700,6 +796,51 @@ class ShiftSessionControllerTests {
 	private ResultActions closeShift(String accessToken, long shiftId) throws Exception {
 		return mockMvc.perform(post(closeShiftUrl(shiftId))
 				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken));
+	}
+
+	private long joinAndGetAttendanceId(String accessToken, long shiftId) throws Exception {
+		String joinCode = shiftSessionRepository.findById(shiftId).orElseThrow().getJoinCode();
+		MvcResult result = mockMvc.perform(post(JOIN_SHIFT_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "joinCode": "%s"
+								}
+								""".formatted(joinCode)))
+				.andExpect(status().isOk())
+				.andReturn();
+		Matcher matcher = ATTENDANCE_ID_PATTERN.matcher(result.getResponse().getContentAsString());
+		assertThat(matcher.find()).isTrue();
+		return Long.parseLong(matcher.group(1));
+	}
+
+	private ResultActions approveAttendance(
+			String accessToken,
+			long shiftId,
+			long attendanceId,
+			String payload
+	) throws Exception {
+		return mockMvc.perform(post(shiftUrl(shiftId) + "/attendance/" + attendanceId + "/approve")
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+				.contentType(MediaType.APPLICATION_JSON)
+				.content(payload));
+	}
+
+	private void setActualStartTime(long shiftId, OffsetDateTime actualStartTime) {
+		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId).orElseThrow();
+		shiftSession.setActualStartTime(actualStartTime);
+		shiftSessionRepository.saveAndFlush(shiftSession);
+	}
+
+	private int expectedWorkedMinutes(ShiftSession shift, ShiftAttendance attendance) {
+		return Math.toIntExact(Duration.between(shift.getActualStartTime(), shift.getActualEndTime()).toMinutes()
+				- attendance.getBreakMinutes());
+	}
+
+	private BigDecimal expectedSalary(int workedMinutes, BigDecimal hourlyRate) {
+		return hourlyRate.multiply(BigDecimal.valueOf(workedMinutes))
+				.divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_UP);
 	}
 
 	private String extractJoinCode(MvcResult result) throws Exception {

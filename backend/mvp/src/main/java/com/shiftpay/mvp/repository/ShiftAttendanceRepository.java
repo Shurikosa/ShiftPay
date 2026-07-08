@@ -26,6 +26,15 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 			@Param("shiftId") Long shiftId
 	);
 
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("""
+			select attendance
+			from ShiftAttendance attendance
+			where attendance.shiftSession.id = :shiftId
+			order by attendance.id asc
+			""")
+	List<ShiftAttendance> findAllByShiftSessionIdForUpdate(@Param("shiftId") Long shiftId);
+
 	@Query("""
 			select attendance
 			from ShiftAttendance attendance

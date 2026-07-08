@@ -267,9 +267,11 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$[1].status").value("JOINED"))
 				.andExpect(jsonPath("$[1].hourlyRate").value(15.00))
 				.andExpect(jsonPath("$[1].breakMinutes").value(60))
+				.andExpect(jsonPath("$[1].workedMinutes").value((Object) null))
+				.andExpect(jsonPath("$[1].calculatedSalary").value((Object) null))
 				.andExpect(jsonPath("$[1].joinedAt").value("2026-07-06T18:00:00Z"))
 				.andExpect(jsonPath("$[1].approvedAt").value((Object) null))
-				.andExpect(jsonPath("$[1].*", hasSize(9)))
+				.andExpect(jsonPath("$[1].*", hasSize(11)))
 				.andExpect(jsonPath("$[1].passwordHash").doesNotExist())
 				.andExpect(jsonPath("$[1].worker").doesNotExist())
 				.andExpect(jsonPath("$[1].email").doesNotExist());

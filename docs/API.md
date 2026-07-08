@@ -397,6 +397,13 @@ Access and state rules:
 - ADMIN can close any shift.
 - WORKER is not allowed.
 - Only a shift with status ACTIVE can be closed.
+- actualStartTime must exist.
+- For each APPROVED attendance, the backend calculates and stores workedMinutes and calculatedSalary.
+- workedMinutes = minutes_between(actualStartTime, actualEndTime) - attendance.breakMinutes.
+- calculatedSalary = workedMinutes / 60 * attendance.hourlyRate, rounded to 2 decimal places with HALF_UP.
+- Salary uses the attendance hourlyRate snapshot or attendance-specific override, not shift.defaultHourlyRate.
+- JOINED, REJECTED, and CANCELLED attendance keep workedMinutes and calculatedSalary as null.
+- If breakMinutes is greater than the shift duration, close returns 409 and the shift remains ACTIVE.
 
 Response:
 
@@ -453,6 +460,30 @@ Status: 409 Conflict
   "status": 409,
   "error": "Conflict",
   "message": "Shift can only be closed when status is ACTIVE",
+  "path": "/api/v1/shifts/100/close"
+}
+
+Missing actualStartTime:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T17:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Shift actualStartTime is required before closing",
+  "path": "/api/v1/shifts/100/close"
+}
+
+Break is greater than shift duration:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T17:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Break minutes cannot be greater than shift duration",
   "path": "/api/v1/shifts/100/close"
 }
 
@@ -600,10 +631,15 @@ Status: 200 OK
     "status": "JOINED",
     "hourlyRate": 15.00,
     "breakMinutes": 60,
+    "workedMinutes": null,
+    "calculatedSalary": null,
     "joinedAt": "2026-07-06T18:00:00Z",
     "approvedAt": null
   }
 ]
+
+For APPROVED attendance after the shift is closed, workedMinutes and calculatedSalary contain the close-time calculation.
+For JOINED, REJECTED, and CANCELLED attendance, workedMinutes and calculatedSalary remain null.
 
 Missing, invalid, or expired token:
 

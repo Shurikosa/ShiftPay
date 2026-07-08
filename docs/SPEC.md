@@ -113,8 +113,8 @@ Basic flow:
 11. System records shift start time.
 12. Foreman closes the shift.
 13. System records shift end time.
-14. System calculates worked time.
-15. System calculates salary.
+14. System calculates worked time for approved attendance.
+15. System calculates salary for approved attendance.
 16. Worker can view result.
 17. Foreman can view shift summary.
 
@@ -159,6 +159,12 @@ salary = 8 * 15 = 120 EUR/DOL
 -An approval without an hourly rate override preserves the attendance rate snapshot.
 -An attendance-specific override does not change the shift default hourly rate or another worker's attendance rate.
 -Salary calculation should use precise decimal values, not floating-point double.
+-Salary is calculated when a shift closes successfully.
+-Only APPROVED attendance receives worked minutes and calculated salary.
+-JOINED, REJECTED, and CANCELLED attendance keep worked minutes and calculated salary empty.
+-Salary calculation uses the attendance hourly rate snapshot or override.
+-Calculated salary is rounded to 2 decimal places with HALF_UP.
+-Closing fails if actualStartTime is missing or break time is greater than the shift duration.
 
 10. Authentication
 

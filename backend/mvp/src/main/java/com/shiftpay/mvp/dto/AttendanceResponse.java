@@ -14,6 +14,8 @@ public record AttendanceResponse(
 		AttendanceStatus status,
 		BigDecimal hourlyRate,
 		Integer breakMinutes,
+		Integer workedMinutes,
+		BigDecimal calculatedSalary,
 		OffsetDateTime joinedAt,
 		OffsetDateTime approvedAt
 ) {
@@ -27,6 +29,8 @@ public record AttendanceResponse(
 				attendance.getStatus(),
 				attendance.getHourlyRate(),
 				attendance.getBreakMinutes(),
+				attendance.getWorkedMinutes(),
+				attendance.getCalculatedSalary(),
 				attendance.getJoinedAt(),
 				attendance.getApprovedAt()
 		);
