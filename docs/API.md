@@ -921,18 +921,50 @@ Only authenticated user.
 
 GET /api/v1/me/shifts
 
+Rules:
+
+- WORKER sees only attendance records where the current user is the worker.
+- FOREMAN and ADMIN also see only their own worker-attendance records for this endpoint, not shifts they manage.
+- OPEN, ACTIVE, and CLOSED shifts are included.
+- CLOSED shifts return workedMinutes and calculatedSalary when those values were already calculated and stored.
+- OPEN, ACTIVE, and unapproved attendance may return null workedMinutes and calculatedSalary.
+- This endpoint reads stored attendance salary fields and does not recalculate salary.
+- Results are sorted by joinedAt descending, then attendanceId descending.
+- The response does not expose User entities, worker records, email, or passwordHash.
+- The repository fetches attendance with shift in one query to avoid N+1 loading.
+
 Response:
 
 [
   {
     "shiftId": 100,
+    "attendanceId": 500,
     "title": "Monday construction shift",
-    "date": "2026-07-01",
-    "workedMinutes": 480,
+    "location": "Cologne",
+    "status": "CLOSED",
+    "plannedStartTime": "2026-07-01T08:00:00Z",
+    "plannedEndTime": "2026-07-01T17:00:00Z",
+    "actualStartTime": "2026-07-01T08:05:00Z",
+    "actualEndTime": "2026-07-01T17:00:00Z",
+    "attendanceStatus": "APPROVED",
     "hourlyRate": 15.00,
-    "salary": 120.00
+    "breakMinutes": 60,
+    "workedMinutes": 480,
+    "calculatedSalary": 120.00
   }
 ]
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/me/shifts"
+}
 
 6. Error Response Format
 

@@ -4,6 +4,7 @@ import com.shiftpay.mvp.TestDataCleaner;
 import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftAttendance;
+import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.User;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
@@ -42,6 +43,7 @@ class AttendanceControllerTests {
 	private static final String LOGIN_URL = "/api/v1/auth/login";
 	private static final String CREATE_SHIFT_URL = "/api/v1/shifts";
 	private static final String JOIN_SHIFT_URL = "/api/v1/shifts/join";
+	private static final String MY_SHIFT_HISTORY_URL = "/api/v1/me/shifts";
 	private static final Pattern ACCESS_TOKEN_PATTERN = Pattern.compile("\"accessToken\":\"([^\"]+)\"");
 	private static final Pattern SHIFT_ID_PATTERN = Pattern.compile("\"id\":(\\d+)");
 	private static final Pattern JOIN_CODE_PATTERN = Pattern.compile("\"joinCode\":\"([^\"]+)\"");
@@ -665,6 +667,181 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$.path").value(approvalUrl));
 	}
 
+	@Test
+	void workerGetsOnlyOwnShiftHistoryWithoutUserEntityFields() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Open history shift", "17.50");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		String secondWorkerToken = registerAndLogin("second.worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		long secondAttendanceId = joinAndGetAttendanceId(secondWorkerToken, shift.joinCode());
+
+		getMyShiftHistory(workerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(1)))
+				.andExpect(jsonPath("$[0].shiftId").value(shift.id()))
+				.andExpect(jsonPath("$[0].attendanceId").value(attendanceId))
+				.andExpect(jsonPath("$[0].title").value("Open history shift"))
+				.andExpect(jsonPath("$[0].location").value("Cologne"))
+				.andExpect(jsonPath("$[0].status").value("OPEN"))
+				.andExpect(jsonPath("$[0].plannedStartTime").value("2026-07-01T08:00:00Z"))
+				.andExpect(jsonPath("$[0].plannedEndTime").value("2026-07-01T17:00:00Z"))
+				.andExpect(jsonPath("$[0].actualStartTime").value((Object) null))
+				.andExpect(jsonPath("$[0].actualEndTime").value((Object) null))
+				.andExpect(jsonPath("$[0].attendanceStatus").value("JOINED"))
+				.andExpect(jsonPath("$[0].hourlyRate").value(17.50))
+				.andExpect(jsonPath("$[0].breakMinutes").value(60))
+				.andExpect(jsonPath("$[0].workedMinutes").value((Object) null))
+				.andExpect(jsonPath("$[0].calculatedSalary").value((Object) null))
+				.andExpect(jsonPath("$[0].*", hasSize(14)))
+				.andExpect(jsonPath("$[0].passwordHash").doesNotExist())
+				.andExpect(jsonPath("$[0].user").doesNotExist())
+				.andExpect(jsonPath("$[0].worker").doesNotExist())
+				.andExpect(jsonPath("$[0].workerId").doesNotExist())
+				.andExpect(jsonPath("$[0].email").doesNotExist())
+				.andExpect(jsonPath("$[0].firstName").doesNotExist())
+				.andExpect(jsonPath("$[0].lastName").doesNotExist())
+				.andExpect(jsonPath("$[0].joinCode").doesNotExist())
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(secondAttendanceId)).isEmpty());
+	}
+
+	@Test
+	void myShiftHistoryIncludesOpenActiveAndClosedShiftsWithPersistedSalaryFields() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift openShift = createShift(foremanToken, "Open history shift");
+		CreatedShift activeShift = createShift(foremanToken, "Active history shift");
+		CreatedShift closedApprovedShift = createShift(foremanToken, "Closed approved history shift");
+		CreatedShift closedJoinedShift = createShift(foremanToken, "Closed joined history shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long openAttendanceId = joinAndGetAttendanceId(workerToken, openShift.joinCode());
+		long activeAttendanceId = joinAndGetAttendanceId(workerToken, activeShift.joinCode());
+		long closedApprovedAttendanceId = joinAndGetAttendanceId(workerToken, closedApprovedShift.joinCode());
+		long closedJoinedAttendanceId = joinAndGetAttendanceId(workerToken, closedJoinedShift.joinCode());
+		setJoinedAt(closedApprovedAttendanceId, OffsetDateTime.parse("2026-07-06T13:00:00Z"));
+		setJoinedAt(activeAttendanceId, OffsetDateTime.parse("2026-07-06T12:00:00Z"));
+		setJoinedAt(openAttendanceId, OffsetDateTime.parse("2026-07-06T11:00:00Z"));
+		setJoinedAt(closedJoinedAttendanceId, OffsetDateTime.parse("2026-07-06T10:00:00Z"));
+		approveAttendance(foremanToken, closedApprovedShift.id(), closedApprovedAttendanceId, "{}")
+				.andExpect(status().isOk());
+		startShift(foremanToken, activeShift.id());
+		startShift(foremanToken, closedApprovedShift.id());
+		setActualStartTime(closedApprovedShift.id(), OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(180));
+		closeShift(foremanToken, closedApprovedShift.id());
+		startShift(foremanToken, closedJoinedShift.id());
+		setActualStartTime(closedJoinedShift.id(), OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(180));
+		closeShift(foremanToken, closedJoinedShift.id());
+		ShiftAttendance closedApprovedAttendance = shiftAttendanceRepository
+				.findById(closedApprovedAttendanceId)
+				.orElseThrow();
+
+		getMyShiftHistory(workerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(4)))
+				.andExpect(jsonPath("$[0].shiftId").value(closedApprovedShift.id()))
+				.andExpect(jsonPath("$[0].attendanceId").value(closedApprovedAttendanceId))
+				.andExpect(jsonPath("$[0].status").value("CLOSED"))
+				.andExpect(jsonPath("$[0].actualStartTime").isString())
+				.andExpect(jsonPath("$[0].actualEndTime").isString())
+				.andExpect(jsonPath("$[0].attendanceStatus").value("APPROVED"))
+				.andExpect(jsonPath("$[0].workedMinutes").value(closedApprovedAttendance.getWorkedMinutes()))
+				.andExpect(jsonPath("$[0].calculatedSalary")
+						.value(closedApprovedAttendance.getCalculatedSalary().doubleValue()))
+				.andExpect(jsonPath("$[1].shiftId").value(activeShift.id()))
+				.andExpect(jsonPath("$[1].status").value("ACTIVE"))
+				.andExpect(jsonPath("$[1].attendanceStatus").value("JOINED"))
+				.andExpect(jsonPath("$[1].workedMinutes").value((Object) null))
+				.andExpect(jsonPath("$[1].calculatedSalary").value((Object) null))
+				.andExpect(jsonPath("$[2].shiftId").value(openShift.id()))
+				.andExpect(jsonPath("$[2].status").value("OPEN"))
+				.andExpect(jsonPath("$[2].workedMinutes").value((Object) null))
+				.andExpect(jsonPath("$[2].calculatedSalary").value((Object) null))
+				.andExpect(jsonPath("$[3].shiftId").value(closedJoinedShift.id()))
+				.andExpect(jsonPath("$[3].attendanceId").value(closedJoinedAttendanceId))
+				.andExpect(jsonPath("$[3].status").value("CLOSED"))
+				.andExpect(jsonPath("$[3].attendanceStatus").value("JOINED"))
+				.andExpect(jsonPath("$[3].workedMinutes").value((Object) null))
+				.andExpect(jsonPath("$[3].calculatedSalary").value((Object) null));
+	}
+
+	@Test
+	void myShiftHistorySortsByJoinedAtDescendingThenAttendanceIdDescending() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift firstShift = createShift(foremanToken, "First same-time shift");
+		CreatedShift secondShift = createShift(foremanToken, "Second same-time shift");
+		CreatedShift olderShift = createShift(foremanToken, "Older shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long firstAttendanceId = joinAndGetAttendanceId(workerToken, firstShift.joinCode());
+		long secondAttendanceId = joinAndGetAttendanceId(workerToken, secondShift.joinCode());
+		long olderAttendanceId = joinAndGetAttendanceId(workerToken, olderShift.joinCode());
+		OffsetDateTime sharedJoinedAt = OffsetDateTime.parse("2026-07-06T18:00:00Z");
+		setJoinedAt(firstAttendanceId, sharedJoinedAt);
+		setJoinedAt(secondAttendanceId, sharedJoinedAt);
+		setJoinedAt(olderAttendanceId, sharedJoinedAt.minusMinutes(1));
+
+		getMyShiftHistory(workerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(3)))
+				.andExpect(jsonPath("$[0].attendanceId").value(secondAttendanceId))
+				.andExpect(jsonPath("$[1].attendanceId").value(firstAttendanceId))
+				.andExpect(jsonPath("$[2].attendanceId").value(olderAttendanceId));
+	}
+
+	@Test
+	void foremanAndAdminCanGetOwnShiftHistory() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		String adminToken = createAdminAndLogin();
+
+		getMyShiftHistory(foremanToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(0)));
+		getMyShiftHistory(adminToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(0)));
+	}
+
+	@Test
+	void foremanGetsOnlyOwnWorkerAttendanceHistory() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Foreman-owned history shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long workerAttendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		User foreman = userRepository.findByEmail("foreman@example.com").orElseThrow();
+		long foremanAttendanceId = createAttendanceForUser(
+				shift,
+				foreman,
+				OffsetDateTime.parse("2026-07-06T18:00:00Z")
+		);
+
+		getMyShiftHistory(foremanToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(1)))
+				.andExpect(jsonPath("$[0].shiftId").value(shift.id()))
+				.andExpect(jsonPath("$[0].attendanceId").value(foremanAttendanceId))
+				.andExpect(jsonPath("$[0].attendanceStatus").value("JOINED"))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(workerAttendanceId)).isEmpty());
+	}
+
+	@Test
+	void missingTokenCannotGetMyShiftHistory() throws Exception {
+		mockMvc.perform(get(MY_SHIFT_HISTORY_URL))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.status").value(401))
+				.andExpect(jsonPath("$.error").value("Unauthorized"))
+				.andExpect(jsonPath("$.message").value("Unauthorized"))
+				.andExpect(jsonPath("$.path").value(MY_SHIFT_HISTORY_URL));
+	}
+
+	@Test
+	void invalidTokenCannotGetMyShiftHistory() throws Exception {
+		mockMvc.perform(get(MY_SHIFT_HISTORY_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer invalid-token"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.status").value(401))
+				.andExpect(jsonPath("$.error").value("Unauthorized"))
+				.andExpect(jsonPath("$.message").value("Unauthorized"))
+				.andExpect(jsonPath("$.path").value(MY_SHIFT_HISTORY_URL));
+	}
+
 	private String registerAndLogin(String email, String role) throws Exception {
 		return registerAndLogin(email, role, "Test", "User");
 	}
@@ -798,6 +975,11 @@ class AttendanceControllerTests {
 		return mockMvc.perform(request);
 	}
 
+	private ResultActions getMyShiftHistory(String accessToken) throws Exception {
+		return mockMvc.perform(get(MY_SHIFT_HISTORY_URL)
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken));
+	}
+
 	private String approvalUrl(long shiftId, long attendanceId) {
 		return CREATE_SHIFT_URL + "/" + shiftId + "/attendance/" + attendanceId + "/approve";
 	}
@@ -810,6 +992,24 @@ class AttendanceControllerTests {
 		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
 		attendance.setJoinedAt(joinedAt);
 		shiftAttendanceRepository.saveAndFlush(attendance);
+	}
+
+	private void setActualStartTime(long shiftId, OffsetDateTime actualStartTime) {
+		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId).orElseThrow();
+		shiftSession.setActualStartTime(actualStartTime);
+		shiftSessionRepository.saveAndFlush(shiftSession);
+	}
+
+	private long createAttendanceForUser(CreatedShift shift, User worker, OffsetDateTime joinedAt) {
+		ShiftSession shiftSession = shiftSessionRepository.findById(shift.id()).orElseThrow();
+		ShiftAttendance attendance = new ShiftAttendance();
+		attendance.setShiftSession(shiftSession);
+		attendance.setWorker(worker);
+		attendance.setStatus(AttendanceStatus.JOINED);
+		attendance.setHourlyRate(shiftSession.getDefaultHourlyRate());
+		attendance.setBreakMinutes(shiftSession.getDefaultBreakMinutes());
+		attendance.setJoinedAt(joinedAt);
+		return shiftAttendanceRepository.saveAndFlush(attendance).getId();
 	}
 
 	private String joinPayload(String joinCode) {

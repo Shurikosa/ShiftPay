@@ -5,6 +5,7 @@ import com.shiftpay.mvp.dto.ApproveAttendanceResponse;
 import com.shiftpay.mvp.dto.AttendanceResponse;
 import com.shiftpay.mvp.dto.JoinShiftRequest;
 import com.shiftpay.mvp.dto.JoinShiftResponse;
+import com.shiftpay.mvp.dto.MyShiftHistoryResponse;
 import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftAttendance;
@@ -78,6 +79,13 @@ public class AttendanceService {
 		catch (DataIntegrityViolationException exception) {
 			throw new AttendanceConflictException("Worker has already joined this shift");
 		}
+	}
+
+	@Transactional(readOnly = true)
+	public List<MyShiftHistoryResponse> getMyShiftHistory(AuthenticatedUserPrincipal principal) {
+		return shiftAttendanceRepository.findMyShiftHistoryByWorkerId(principal.id()).stream()
+				.map(MyShiftHistoryResponse::from)
+				.toList();
 	}
 
 	@Transactional(readOnly = true)

@@ -151,6 +151,19 @@ Attendance Query
 - Controllers return attendance DTOs and never expose User entities or password hashes.
 - Attendance DTOs expose workedMinutes and calculatedSalary so close-time salary results can be read without a summary endpoint.
 
+Worker Shift History
+
+- GET /api/v1/me/shifts is available to any authenticated user.
+- The endpoint always filters by the current user's worker attendance records.
+- WORKER, FOREMAN, and ADMIN all see only attendance where ShiftAttendance.worker.id equals the current user id.
+- FOREMAN and ADMIN do not receive managed-shift attendance through this endpoint unless they also have their own attendance record.
+- OPEN, ACTIVE, and CLOSED shifts are included.
+- The endpoint reads persisted workedMinutes and calculatedSalary from ShiftAttendance and never recalculates salary.
+- OPEN, ACTIVE, and unapproved attendance can return null workedMinutes and calculatedSalary.
+- The repository fetches attendance with shift in one query to avoid N+1 loading.
+- Results are ordered by joinedAt descending and then attendance id descending.
+- DTOs expose shift and attendance fields only, never User entities, emails, or password hashes.
+
 Salary Calculation
 
 - SalaryCalculationService owns worked-minute and salary math.
