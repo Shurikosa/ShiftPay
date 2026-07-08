@@ -43,6 +43,8 @@ public class SecurityConfig {
 						.hasAnyRole("FOREMAN", "ADMIN")
 						.requestMatchers(HttpMethod.GET, "/api/v1/shifts/{shiftId}/attendance")
 						.hasAnyRole("FOREMAN", "ADMIN")
+						.requestMatchers(HttpMethod.GET, "/api/v1/shifts/{shiftId}/summary")
+						.hasAnyRole("FOREMAN", "ADMIN")
 						.requestMatchers(HttpMethod.POST, "/api/v1/shifts").hasAnyRole("FOREMAN", "ADMIN")
 						.requestMatchers(HttpMethod.GET, "/api/v1/shifts/{shiftId}").hasAnyRole("FOREMAN", "ADMIN")
 						.requestMatchers(HttpMethod.POST, "/api/v1/shifts/{shiftId}/start")

@@ -5,6 +5,8 @@ import com.shiftpay.mvp.dto.ShiftCloseResponse;
 import com.shiftpay.mvp.dto.ShiftCreateResponse;
 import com.shiftpay.mvp.dto.ShiftResponse;
 import com.shiftpay.mvp.dto.ShiftStartResponse;
+import com.shiftpay.mvp.dto.ShiftSummaryResponse;
+import com.shiftpay.mvp.dto.WorkerSummaryResponse;
 import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.Company;
 import com.shiftpay.mvp.entity.Role;
@@ -26,9 +28,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Objects;
 
 @Service
@@ -142,6 +147,52 @@ public class ShiftSessionService {
 		shiftSession.setStatus(ShiftStatus.CLOSED);
 		shiftSession.setActualEndTime(actualEndTime);
 		return ShiftCloseResponse.from(shiftSession);
+	}
+
+	@Transactional(readOnly = true)
+	public ShiftSummaryResponse getShiftSummary(Long shiftId, AuthenticatedUserPrincipal principal) {
+		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId)
+				.orElseThrow(ShiftNotFoundException::new);
+
+		validateShiftAccess(shiftSession, principal);
+		if (shiftSession.getStatus() != ShiftStatus.CLOSED) {
+			throw new ShiftStateConflictException("Shift summary is available only for CLOSED shifts");
+		}
+
+		List<WorkerSummaryResponse> workers = shiftAttendanceRepository
+				.findApprovedByShiftSessionIdWithWorkerOrderByWorkerName(shiftId)
+				.stream()
+				.map(this::toWorkerSummary)
+				.toList();
+
+		BigDecimal totalSalary = workers.stream()
+				.map(WorkerSummaryResponse::salary)
+				.reduce(BigDecimal.ZERO, BigDecimal::add)
+				.setScale(2, RoundingMode.HALF_UP);
+
+		return new ShiftSummaryResponse(
+				shiftSession.getId(),
+				shiftSession.getStatus(),
+				workers.size(),
+				totalSalary,
+				workers
+		);
+	}
+
+	private WorkerSummaryResponse toWorkerSummary(ShiftAttendance attendance) {
+		if (attendance.getWorkedMinutes() == null || attendance.getCalculatedSalary() == null) {
+			throw new ShiftStateConflictException("Approved attendance has incomplete salary calculation");
+		}
+
+		return new WorkerSummaryResponse(
+				attendance.getId(),
+				attendance.getWorker().getId(),
+				attendance.getWorker().getFirstName(),
+				attendance.getWorker().getLastName(),
+				attendance.getWorkedMinutes(),
+				attendance.getHourlyRate(),
+				attendance.getCalculatedSalary().setScale(2, RoundingMode.HALF_UP)
+		);
 	}
 
 	private void validateShiftAccess(ShiftSession shiftSession, AuthenticatedUserPrincipal principal) {

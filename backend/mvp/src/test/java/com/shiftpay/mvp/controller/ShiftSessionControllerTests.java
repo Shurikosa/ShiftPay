@@ -650,6 +650,182 @@ class ShiftSessionControllerTests {
 	}
 
 	@Test
+	void ownerForemanGetsClosedShiftSummary() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Summary shift");
+		String firstWorkerToken = registerAndLogin(
+				"first.worker@example.com",
+				"WORKER",
+				"Bob",
+				"Alpha"
+		);
+		String secondWorkerToken = registerAndLogin(
+				"second.worker@example.com",
+				"WORKER",
+				"Anna",
+				"Zulu"
+		);
+		String joinedWorkerToken = registerAndLogin(
+				"joined.worker@example.com",
+				"WORKER",
+				"Charlie",
+				"Beta"
+		);
+		long firstAttendanceId = joinAndGetAttendanceId(firstWorkerToken, shiftId);
+		long secondAttendanceId = joinAndGetAttendanceId(secondWorkerToken, shiftId);
+		long joinedAttendanceId = joinAndGetAttendanceId(joinedWorkerToken, shiftId);
+		approveAttendance(foremanToken, shiftId, secondAttendanceId, "{\"hourlyRate\": 18.50}")
+				.andExpect(status().isOk());
+		approveAttendance(foremanToken, shiftId, firstAttendanceId, "{}").andExpect(status().isOk());
+		startShift(foremanToken, shiftId).andExpect(status().isOk());
+		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(540));
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
+
+		ShiftAttendance firstAttendance = shiftAttendanceRepository.findById(firstAttendanceId).orElseThrow();
+		ShiftAttendance secondAttendance = shiftAttendanceRepository.findById(secondAttendanceId).orElseThrow();
+		ShiftAttendance joinedAttendance = shiftAttendanceRepository.findById(joinedAttendanceId).orElseThrow();
+		BigDecimal totalSalary = firstAttendance.getCalculatedSalary()
+				.add(secondAttendance.getCalculatedSalary())
+				.setScale(2, RoundingMode.HALF_UP);
+
+		getSummary(foremanToken, shiftId)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.shiftId").value(shiftId))
+				.andExpect(jsonPath("$.status").value("CLOSED"))
+				.andExpect(jsonPath("$.totalWorkers").value(2))
+				.andExpect(jsonPath("$.totalSalary").value(totalSalary.doubleValue()))
+				.andExpect(jsonPath("$.workers", hasSize(2)))
+				.andExpect(jsonPath("$.workers[0].attendanceId").value(firstAttendanceId))
+				.andExpect(jsonPath("$.workers[0].workerId").isNumber())
+				.andExpect(jsonPath("$.workers[0].firstName").value("Bob"))
+				.andExpect(jsonPath("$.workers[0].lastName").value("Alpha"))
+				.andExpect(jsonPath("$.workers[0].workedMinutes").value(firstAttendance.getWorkedMinutes()))
+				.andExpect(jsonPath("$.workers[0].hourlyRate").value(15.25))
+				.andExpect(jsonPath("$.workers[0].salary")
+						.value(firstAttendance.getCalculatedSalary().doubleValue()))
+				.andExpect(jsonPath("$.workers[0].*", hasSize(7)))
+				.andExpect(jsonPath("$.workers[0].passwordHash").doesNotExist())
+				.andExpect(jsonPath("$.workers[0].user").doesNotExist())
+				.andExpect(jsonPath("$.workers[0].email").doesNotExist())
+				.andExpect(jsonPath("$.workers[1].attendanceId").value(secondAttendanceId))
+				.andExpect(jsonPath("$.workers[1].firstName").value("Anna"))
+				.andExpect(jsonPath("$.workers[1].lastName").value("Zulu"))
+				.andExpect(jsonPath("$.workers[1].hourlyRate").value(18.50))
+				.andExpect(jsonPath("$.workers[1].salary")
+						.value(secondAttendance.getCalculatedSalary().doubleValue()))
+				.andExpect(jsonPath("$.*", hasSize(5)))
+				.andExpect(jsonPath("$.workers[?(@.attendanceId == %d)]".formatted(joinedAttendanceId))
+						.isEmpty());
+		assertThat(joinedAttendance.getCalculatedSalary()).isNull();
+	}
+
+	@Test
+	void adminGetsSummaryForAnyClosedShift() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createClosedShiftWithApprovedAttendance(foremanToken);
+		String adminToken = createAdminAndLogin();
+
+		getSummary(adminToken, shiftId)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.shiftId").value(shiftId))
+				.andExpect(jsonPath("$.status").value("CLOSED"))
+				.andExpect(jsonPath("$.totalWorkers").value(1));
+	}
+
+	@Test
+	void workerCannotGetSummary() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createClosedShiftWithApprovedAttendance(foremanToken);
+		String workerToken = registerAndLogin("other.worker@example.com", "WORKER");
+
+		getSummary(workerToken, shiftId)
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(summaryUrl(shiftId)));
+	}
+
+	@Test
+	void nonOwnerForemanCannotGetSummary() throws Exception {
+		String ownerToken = registerAndLogin("owner@example.com", "FOREMAN");
+		long shiftId = createClosedShiftWithApprovedAttendance(ownerToken);
+		String anotherForemanToken = registerAndLogin("another@example.com", "FOREMAN");
+
+		getSummary(anotherForemanToken, shiftId)
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(summaryUrl(shiftId)));
+	}
+
+	@Test
+	void missingTokenCannotGetSummary() throws Exception {
+		mockMvc.perform(get(summaryUrl(1)))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.status").value(401))
+				.andExpect(jsonPath("$.error").value("Unauthorized"))
+				.andExpect(jsonPath("$.message").value("Unauthorized"))
+				.andExpect(jsonPath("$.path").value(summaryUrl(1)));
+	}
+
+	@Test
+	void invalidTokenCannotGetSummary() throws Exception {
+		mockMvc.perform(get(summaryUrl(1))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer invalid-token"))
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.status").value(401))
+				.andExpect(jsonPath("$.error").value("Unauthorized"))
+				.andExpect(jsonPath("$.message").value("Unauthorized"))
+				.andExpect(jsonPath("$.path").value(summaryUrl(1)));
+	}
+
+	@Test
+	void unknownShiftSummaryReturnsNotFound() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		getSummary(foremanToken, 999999)
+				.andExpect(status().isNotFound())
+				.andExpect(jsonPath("$.status").value(404))
+				.andExpect(jsonPath("$.error").value("Not Found"))
+				.andExpect(jsonPath("$.message").value("Shift not found"))
+				.andExpect(jsonPath("$.path").value(summaryUrl(999999)));
+	}
+
+	@Test
+	void nonClosedShiftSummaryReturnsConflict() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Open summary shift");
+
+		getSummary(foremanToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift summary is available only for CLOSED shifts"))
+				.andExpect(jsonPath("$.path").value(summaryUrl(shiftId)));
+	}
+
+	@Test
+	void approvedAttendanceWithMissingSalaryDataReturnsConflict() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createClosedShiftWithApprovedAttendance(foremanToken);
+		ShiftAttendance attendance = shiftAttendanceRepository.findAll().stream()
+				.filter((candidate) -> candidate.getShiftSession().getId().equals(shiftId))
+				.findFirst()
+				.orElseThrow();
+		attendance.setWorkedMinutes(null);
+		shiftAttendanceRepository.saveAndFlush(attendance);
+
+		getSummary(foremanToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Approved attendance has incomplete salary calculation"))
+				.andExpect(jsonPath("$.path").value(summaryUrl(shiftId)));
+	}
+
+	@Test
 	void missingDefaultHourlyRateReturnsBadRequest() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
 
@@ -691,17 +867,26 @@ class ShiftSessionControllerTests {
 	}
 
 	private String registerAndLogin(String email, String role) throws Exception {
+		return registerAndLogin(email, role, "Test", "User");
+	}
+
+	private String registerAndLogin(
+			String email,
+			String role,
+			String firstName,
+			String lastName
+	) throws Exception {
 		mockMvc.perform(post(REGISTER_URL)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{
 								  "email": "%s",
 								  "password": "password123",
-								  "firstName": "Test",
-								  "lastName": "User",
+								  "firstName": "%s",
+								  "lastName": "%s",
 								  "role": "%s"
 								}
-								""".formatted(email, role)))
+								""".formatted(email, firstName, lastName, role)))
 				.andExpect(status().isCreated());
 
 		return login(email);
@@ -798,6 +983,17 @@ class ShiftSessionControllerTests {
 				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken));
 	}
 
+	private long createClosedShiftWithApprovedAttendance(String foremanToken) throws Exception {
+		long shiftId = createShift(foremanToken, "Closed summary shift");
+		String workerToken = registerAndLogin("summary.worker." + shiftId + "@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
+		approveAttendance(foremanToken, shiftId, attendanceId, "{}").andExpect(status().isOk());
+		startShift(foremanToken, shiftId).andExpect(status().isOk());
+		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(180));
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
+		return shiftId;
+	}
+
 	private long joinAndGetAttendanceId(String accessToken, long shiftId) throws Exception {
 		String joinCode = shiftSessionRepository.findById(shiftId).orElseThrow().getJoinCode();
 		MvcResult result = mockMvc.perform(post(JOIN_SHIFT_URL)
@@ -827,6 +1023,11 @@ class ShiftSessionControllerTests {
 				.content(payload));
 	}
 
+	private ResultActions getSummary(String accessToken, long shiftId) throws Exception {
+		return mockMvc.perform(get(summaryUrl(shiftId))
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken));
+	}
+
 	private void setActualStartTime(long shiftId, OffsetDateTime actualStartTime) {
 		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId).orElseThrow();
 		shiftSession.setActualStartTime(actualStartTime);
@@ -841,6 +1042,10 @@ class ShiftSessionControllerTests {
 	private BigDecimal expectedSalary(int workedMinutes, BigDecimal hourlyRate) {
 		return hourlyRate.multiply(BigDecimal.valueOf(workedMinutes))
 				.divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_UP);
+	}
+
+	private String summaryUrl(long shiftId) {
+		return shiftUrl(shiftId) + "/summary";
 	}
 
 	private String extractJoinCode(MvcResult result) throws Exception {

@@ -43,4 +43,16 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 			order by attendance.joinedAt asc, attendance.id asc
 			""")
 	List<ShiftAttendance> findAllByShiftSessionIdWithWorker(@Param("shiftId") Long shiftId);
+
+	@Query("""
+			select attendance
+			from ShiftAttendance attendance
+			join fetch attendance.worker worker
+			where attendance.shiftSession.id = :shiftId
+			  and attendance.status = com.shiftpay.mvp.entity.AttendanceStatus.APPROVED
+			order by worker.lastName asc, worker.firstName asc, worker.id asc
+			""")
+	List<ShiftAttendance> findApprovedByShiftSessionIdWithWorkerOrderByWorkerName(
+			@Param("shiftId") Long shiftId
+	);
 }

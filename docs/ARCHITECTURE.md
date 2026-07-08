@@ -165,6 +165,20 @@ Salary Calculation
 - Close fails with 409 if actualStartTime is missing or breakMinutes is greater than shift duration.
 - Close is transactional: when salary validation fails, the shift remains ACTIVE and attendance salary fields are not written.
 
+Shift Summary
+
+- ShiftSessionService owns summary business rules.
+- Summary is available only for CLOSED shifts.
+- Summary reads persisted ShiftAttendance.workedMinutes and ShiftAttendance.calculatedSalary.
+- Summary does not call SalaryCalculationService and does not recalculate salary.
+- Summary includes only APPROVED attendance.
+- The repository fetches approved attendance with worker in one query to avoid N+1 loading.
+- Workers are ordered by worker lastName, firstName, and worker id.
+- totalWorkers is the count of included attendance rows.
+- totalSalary is the sum of included calculatedSalary values with scale 2.
+- If approved attendance is missing workedMinutes or calculatedSalary, summary returns a conflict.
+- Summary DTOs expose worker identity fields but never expose User entities or password hashes.
+
 Concurrency Control
 
 - Join, start, close, and approval run inside transactions with pessimistic write locks.

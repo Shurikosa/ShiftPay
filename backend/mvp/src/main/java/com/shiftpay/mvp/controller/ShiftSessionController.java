@@ -5,6 +5,7 @@ import com.shiftpay.mvp.dto.ShiftCloseResponse;
 import com.shiftpay.mvp.dto.ShiftCreateResponse;
 import com.shiftpay.mvp.dto.ShiftResponse;
 import com.shiftpay.mvp.dto.ShiftStartResponse;
+import com.shiftpay.mvp.dto.ShiftSummaryResponse;
 import com.shiftpay.mvp.security.AuthenticatedUserPrincipal;
 import com.shiftpay.mvp.service.ShiftSessionService;
 import jakarta.validation.Valid;
@@ -51,6 +52,14 @@ public class ShiftSessionController {
 			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
 	) {
 		return shiftSessionService.startShift(shiftId, principal);
+	}
+
+	@GetMapping("/{shiftId}/summary")
+	public ShiftSummaryResponse getShiftSummary(
+			@PathVariable Long shiftId,
+			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
+	) {
+		return shiftSessionService.getShiftSummary(shiftId, principal);
 	}
 
 	@PostMapping("/{shiftId}/close")

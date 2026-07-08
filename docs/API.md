@@ -814,22 +814,107 @@ Only FOREMAN or ADMIN.
 
 GET /api/v1/shifts/{shiftId}/summary
 
+Headers:
+
+Authorization: Bearer <token>
+
+Rules:
+
+- FOREMAN can get summary only for a shift they created.
+- ADMIN can get summary for any shift.
+- WORKER is not allowed.
+- Summary is available only for CLOSED shifts.
+- The endpoint uses stored workedMinutes and calculatedSalary from shift_attendance.
+- The endpoint does not recalculate salary.
+- Only APPROVED attendance is included in workers.
+- JOINED, REJECTED, and CANCELLED attendance is excluded.
+- totalWorkers is the number of included APPROVED attendance records.
+- totalSalary is the sum of included calculatedSalary values with scale 2.
+- Workers are sorted by lastName ascending, firstName ascending, then workerId ascending.
+- If an APPROVED attendance has null workedMinutes or calculatedSalary, the endpoint returns 409.
+
 Response:
+
+Status: 200 OK
 
 {
   "shiftId": 100,
   "status": "CLOSED",
-  "totalWorkers": 3,
+  "totalWorkers": 2,
+  "totalSalary": 240.00,
   "workers": [
     {
+      "attendanceId": 500,
       "workerId": 1,
-      "fullName": "John Worker",
+      "firstName": "John",
+      "lastName": "Worker",
       "workedMinutes": 480,
       "hourlyRate": 15.00,
       "salary": 120.00
     }
   ]
 }
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/shifts/100/summary"
+}
+
+WORKER or non-owner FOREMAN:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/shifts/100/summary"
+}
+
+Shift not found:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Shift not found",
+  "path": "/api/v1/shifts/100/summary"
+}
+
+Shift is not CLOSED:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Shift summary is available only for CLOSED shifts",
+  "path": "/api/v1/shifts/100/summary"
+}
+
+Approved attendance has incomplete salary calculation:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Approved attendance has incomplete salary calculation",
+  "path": "/api/v1/shifts/100/summary"
+}
+
 Get my shift history
 
 Only authenticated user.
