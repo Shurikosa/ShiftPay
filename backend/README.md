@@ -57,6 +57,22 @@ Health check:
 curl http://localhost:8080/api/v1/health
 ```
 
+Swagger UI:
+
+```text
+http://localhost:8080/swagger-ui/index.html
+```
+
+The OpenAPI JSON is available at:
+
+```text
+http://localhost:8080/v3/api-docs
+```
+
+Use the Swagger UI `Authorize` button with a JWT access token from
+`POST /api/v1/auth/login`. Business endpoints still require the same JWT and
+role permissions as direct API calls.
+
 ## Run Tests
 
 From `backend/mvp`:

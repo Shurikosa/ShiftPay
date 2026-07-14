@@ -35,6 +35,10 @@ public class SecurityConfig {
 								authenticationErrorWriter.writeForbidden(request, response, "Forbidden")))
 				.authorizeHttpRequests((requests) -> requests
 						.requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll()
+						.requestMatchers(HttpMethod.GET, "/v3/api-docs").permitAll()
+						.requestMatchers(HttpMethod.GET, "/v3/api-docs/**").permitAll()
+						.requestMatchers(HttpMethod.GET, "/swagger-ui.html").permitAll()
+						.requestMatchers(HttpMethod.GET, "/swagger-ui/**").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/shifts/join").hasRole("WORKER")

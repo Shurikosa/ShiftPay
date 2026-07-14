@@ -18,6 +18,27 @@ Response:
 {
 "status": "UP"
 }
+
+OpenAPI and Swagger UI
+
+No authentication required.
+
+OpenAPI JSON:
+
+GET /v3/api-docs
+GET /v3/api-docs/**
+
+Swagger UI:
+
+GET /swagger-ui.html
+GET /swagger-ui/**
+
+Local Swagger UI URL:
+
+http://localhost:8080/swagger-ui/index.html
+
+Swagger UI supports JWT authentication through Authorize with a Bearer token.
+Business endpoints keep their normal JWT and role-based authorization rules.
  
  
 1. Authentication

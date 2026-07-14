@@ -86,6 +86,7 @@ Each Codex session should take one small task from this file.
 - [x] Implement foreman/admin shift summary endpoint
 - [x] Document implemented backend API contract
 - [x] Add backend local run instructions
+- [x] Add Swagger/OpenAPI documentation for backend MVP
 - [ ] Decide whether managed foreman-created shifts should appear in a separate foreman history endpoint
 - [ ] Decide whether ADMIN user management is needed before or after mobile MVP
 
