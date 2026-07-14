@@ -20,6 +20,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * Controller integration tests for public authentication endpoints.
+ *
+ * <p>The class covers registration, login, password hashing, role restrictions, duplicate email handling, validation
+ * errors, JWT response shape, and public DTO safety for password fields.</p>
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 class AuthControllerTests {
@@ -39,11 +45,17 @@ class AuthControllerTests {
 	@Autowired
 	private JdbcTemplate jdbcTemplate;
 
+	/**
+	 * Clears persisted users before each test so duplicate-email and login scenarios are deterministic.
+	 */
 	@BeforeEach
 	void setUp() {
 		TestDataCleaner.clean(jdbcTemplate);
 	}
 
+	/**
+	 * Registers a worker with mixed-case email and expects normalized public data without password fields.
+	 */
 	@Test
 	void workerRegistrationSucceedsWithoutExposingPassword() throws Exception {
 		mockMvc.perform(post(REGISTER_URL)
@@ -67,6 +79,9 @@ class AuthControllerTests {
 				.andExpect(jsonPath("$.passwordHash").doesNotExist());
 	}
 
+	/**
+	 * Registers a foreman through the public endpoint, which is allowed for the MVP.
+	 */
 	@Test
 	void foremanRegistrationSucceeds() throws Exception {
 		mockMvc.perform(post(REGISTER_URL)
@@ -85,6 +100,9 @@ class AuthControllerTests {
 				.andExpect(jsonPath("$.role").value("FOREMAN"));
 	}
 
+	/**
+	 * Attempts public ADMIN registration and expects the service role rule to return a 400 response.
+	 */
 	@Test
 	void adminRegistrationReturnsBadRequest() throws Exception {
 		registerAdmin()
@@ -95,6 +113,9 @@ class AuthControllerTests {
 				.andExpect(jsonPath("$.path").value(REGISTER_URL));
 	}
 
+	/**
+	 * Verifies a rejected ADMIN registration does not leave a partially persisted user row.
+	 */
 	@Test
 	void rejectedAdminUserIsNotPersisted() throws Exception {
 		registerAdmin().andExpect(status().isBadRequest());
@@ -102,6 +123,9 @@ class AuthControllerTests {
 		assertThat(userRepository.findByEmail("admin@example.com")).isEmpty();
 	}
 
+	/**
+	 * Confirms registration stores a BCrypt hash that matches the original password but is not plain text.
+	 */
 	@Test
 	void passwordIsStoredHashedNotPlainText() throws Exception {
 		mockMvc.perform(post(REGISTER_URL)
@@ -123,6 +147,9 @@ class AuthControllerTests {
 		assertThat(passwordEncoder.matches("password123", user.getPasswordHash())).isTrue();
 	}
 
+	/**
+	 * Uses case variation to prove duplicate email detection happens after normalization and returns 409.
+	 */
 	@Test
 	void duplicateEmailReturnsConflict() throws Exception {
 		String payload = """
@@ -159,6 +186,9 @@ class AuthControllerTests {
 				.andExpect(jsonPath("$.path").value(REGISTER_URL));
 	}
 
+	/**
+	 * Sends invalid registration data and expects request validation to return the standard 400 error body.
+	 */
 	@Test
 	void invalidRequestReturnsBadRequest() throws Exception {
 		mockMvc.perform(post(REGISTER_URL)
@@ -178,6 +208,9 @@ class AuthControllerTests {
 				.andExpect(jsonPath("$.path").value(REGISTER_URL));
 	}
 
+	/**
+	 * Logs in an existing worker with a case-insensitive email and expects a Bearer JWT plus safe user DTO.
+	 */
 	@Test
 	void successfulLoginReturnsBearerTokenAndUser() throws Exception {
 		registerWorker();
@@ -206,6 +239,9 @@ class AuthControllerTests {
 				.containsPattern("\"accessToken\":\"[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\"");
 	}
 
+	/**
+	 * Checks that a wrong password for a real account is rejected without revealing credential details.
+	 */
 	@Test
 	void wrongPasswordReturnsUnauthorized() throws Exception {
 		registerWorker();
@@ -225,6 +261,9 @@ class AuthControllerTests {
 				.andExpect(jsonPath("$.path").value(LOGIN_URL));
 	}
 
+	/**
+	 * Checks that login for an unknown email returns the same 401 shape as a bad password.
+	 */
 	@Test
 	void unknownEmailReturnsUnauthorized() throws Exception {
 		mockMvc.perform(post(LOGIN_URL)
@@ -242,6 +281,9 @@ class AuthControllerTests {
 				.andExpect(jsonPath("$.path").value(LOGIN_URL));
 	}
 
+	/**
+	 * Sends invalid login input and expects Bean Validation to produce a 400 response.
+	 */
 	@Test
 	void loginValidationReturnsBadRequest() throws Exception {
 		mockMvc.perform(post(LOGIN_URL)
@@ -258,6 +300,9 @@ class AuthControllerTests {
 				.andExpect(jsonPath("$.path").value(LOGIN_URL));
 	}
 
+	/**
+	 * Creates a baseline worker account used by login tests that need existing credentials.
+	 */
 	private void registerWorker() throws Exception {
 		mockMvc.perform(post(REGISTER_URL)
 						.contentType(MediaType.APPLICATION_JSON)
@@ -273,6 +318,11 @@ class AuthControllerTests {
 				.andExpect(status().isCreated());
 	}
 
+	/**
+	 * Sends the unsupported public ADMIN registration request so tests can assert response and persistence behavior.
+	 *
+	 * @return MockMvc result actions for the registration request
+	 */
 	private ResultActions registerAdmin() throws Exception {
 		return mockMvc.perform(post(REGISTER_URL)
 				.contentType(MediaType.APPLICATION_JSON)

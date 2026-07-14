@@ -38,6 +38,13 @@ import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/**
+ * Service-level concurrency tests for attendance and shift lifecycle serialization.
+ *
+ * <p>The class uses real transactions and repository locks to prove that concurrent approval, join, start, and close
+ * operations block on the same shift rows and leave exactly one valid final state instead of racing through stale
+ * lifecycle data.</p>
+ */
 @SpringBootTest
 class AttendanceConcurrencyTests {
 
@@ -66,16 +73,30 @@ class AttendanceConcurrencyTests {
 
 	private TransactionTemplate transactionTemplate;
 
+	/**
+	 * Configures a transaction template so tests can hold the first operation open while the second operation starts.
+	 *
+	 * @param transactionManager Spring transaction manager used by the application services
+	 */
 	@Autowired
 	void setTransactionManager(PlatformTransactionManager transactionManager) {
 		transactionTemplate = new TransactionTemplate(transactionManager);
 	}
 
+	/**
+	 * Clears all rows before each locking scenario so row locks and final-state assertions are isolated.
+	 */
 	@BeforeEach
 	void setUp() {
 		TestDataCleaner.clean(jdbcTemplate);
 	}
 
+	/**
+	 * Runs two approvals for the same JOINED attendance while the first transaction is held open.
+	 *
+	 * <p>The expected serialization rule is that the second approval waits for the row lock, then sees the persisted
+	 * APPROVED state and fails with a conflict. The first approval's rate remains the final attendance rate.</p>
+	 */
 	@Test
 	void concurrentApprovalsProduceOneSuccessAndOneConflict() throws Exception {
 		Scenario scenario = createScenario(ShiftStatus.OPEN);
@@ -103,6 +124,12 @@ class AttendanceConcurrencyTests {
 		assertThat(attendance.getHourlyRate()).isEqualByComparingTo("15.00");
 	}
 
+	/**
+	 * Starts an OPEN shift while a concurrent approval waits on the same shift lock.
+	 *
+	 * <p>After the start commits, approval must observe ACTIVE status and fail, leaving attendance JOINED rather than
+	 * approving a worker after the shift has already started.</p>
+	 */
 	@Test
 	void approvalWaitsForConcurrentStartAndThenReturnsConflict() throws Exception {
 		Scenario scenario = createScenario(ShiftStatus.OPEN);
@@ -126,6 +153,12 @@ class AttendanceConcurrencyTests {
 				.isEqualTo(AttendanceStatus.JOINED);
 	}
 
+	/**
+	 * Starts an OPEN shift while a second worker attempts to join with the same join code.
+	 *
+	 * <p>The join must block on the locked shift, then see ACTIVE status and fail so no late attendance row is
+	 * created after start.</p>
+	 */
 	@Test
 	void joinWaitsForConcurrentStartAndThenReturnsConflict() throws Exception {
 		Scenario scenario = createScenario(ShiftStatus.OPEN);
@@ -151,6 +184,12 @@ class AttendanceConcurrencyTests {
 		)).isFalse();
 	}
 
+	/**
+	 * Closes the same ACTIVE shift from two concurrent transactions.
+	 *
+	 * <p>The first close wins and persists CLOSED. The second close waits for the shift lock, then sees CLOSED and
+	 * fails with a lifecycle conflict instead of closing twice.</p>
+	 */
 	@Test
 	void concurrentCloseProducesOneSuccessAndOneConflict() throws Exception {
 		Scenario scenario = createScenario(ShiftStatus.ACTIVE);
@@ -172,6 +211,16 @@ class AttendanceConcurrencyTests {
 				.isEqualTo(ShiftStatus.CLOSED);
 	}
 
+	/**
+	 * Runs two operations so the first holds its transaction after executing and before commit.
+	 *
+	 * <p>This proves the second operation is blocked by database locks before the first transaction commits, then
+	 * captures both outcomes after releasing the first transaction.</p>
+	 *
+	 * @param firstOperation operation expected to acquire the lock and commit successfully
+	 * @param secondOperation operation expected to block, then observe the committed state
+	 * @return captured success or error from both operations
+	 */
 	private ConcurrentResults<?, ?> runWithFirstTransactionHeld(
 			Supplier<?> firstOperation,
 			Supplier<?> secondOperation
@@ -222,6 +271,12 @@ class AttendanceConcurrencyTests {
 		}
 	}
 
+	/**
+	 * Converts an operation's thrown exception into a value object so concurrent assertions can inspect both threads.
+	 *
+	 * @param operation operation to execute
+	 * @return operation value or thrown error
+	 */
 	private OperationResult<?> capture(Supplier<?> operation) {
 		try {
 			return new OperationResult<>(operation.get(), null);
@@ -231,6 +286,11 @@ class AttendanceConcurrencyTests {
 		}
 	}
 
+	/**
+	 * Waits for a latch and fails fast if a concurrent step does not reach the expected point in time.
+	 *
+	 * @param latch latch to wait on
+	 */
 	private void await(CountDownLatch latch) {
 		try {
 			if (!latch.await(WAIT_SECONDS, TimeUnit.SECONDS)) {
@@ -243,6 +303,15 @@ class AttendanceConcurrencyTests {
 		}
 	}
 
+	/**
+	 * Creates a foreman-owned shift, one worker attendance row, and a principal for service calls.
+	 *
+	 * <p>The shift can be OPEN for join/approval/start races or ACTIVE for close races. ACTIVE scenarios receive an
+	 * actualStartTime so close can calculate duration.</p>
+	 *
+	 * @param shiftStatus lifecycle state to seed
+	 * @return seeded entities and foreman principal
+	 */
 	private Scenario createScenario(ShiftStatus shiftStatus) {
 		Company company = new Company();
 		company.setName("Default Company");
@@ -276,6 +345,14 @@ class AttendanceConcurrencyTests {
 		return new Scenario(shift, attendance, principal(foreman));
 	}
 
+	/**
+	 * Creates a persisted user without going through authentication because service concurrency tests call services
+	 * directly.
+	 *
+	 * @param email user email
+	 * @param role user role
+	 * @return saved user entity
+	 */
 	private User createUser(String email, Role role) {
 		User user = new User();
 		user.setEmail(email);
@@ -286,10 +363,23 @@ class AttendanceConcurrencyTests {
 		return userRepository.save(user);
 	}
 
+	/**
+	 * Builds the authenticated principal used by services from a persisted test user.
+	 *
+	 * @param user persisted user
+	 * @return service-layer principal
+	 */
 	private AuthenticatedUserPrincipal principal(User user) {
 		return new AuthenticatedUserPrincipal(user.getId(), user.getEmail(), user.getRole());
 	}
 
+	/**
+	 * Seeded state used by each concurrency scenario.
+	 *
+	 * @param shift shift session involved in the race
+	 * @param attendance worker attendance involved in the race
+	 * @param foremanPrincipal owner principal used for management operations
+	 */
 	private record Scenario(
 			ShiftSession shift,
 			ShiftAttendance attendance,
@@ -297,9 +387,24 @@ class AttendanceConcurrencyTests {
 	) {
 	}
 
+	/**
+	 * Captured result from one concurrent operation.
+	 *
+	 * @param value returned value when the operation succeeds
+	 * @param error thrown error when the operation fails
+	 * @param <T> result type
+	 */
 	private record OperationResult<T>(T value, Throwable error) {
 	}
 
+	/**
+	 * Pair of results from the first lock-holding operation and the second blocked operation.
+	 *
+	 * @param first result from the first operation
+	 * @param second result from the second operation
+	 * @param <T> first result type
+	 * @param <U> second result type
+	 */
 	private record ConcurrentResults<T, U>(
 			OperationResult<T> first,
 			OperationResult<U> second

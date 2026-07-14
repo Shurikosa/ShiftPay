@@ -41,6 +41,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * Controller integration tests for shift session endpoints.
+ *
+ * <p>The class covers create, get, start, close, and summary APIs with MockMvc. It verifies role access,
+ * foreman ownership, shift lifecycle conflicts, salary persistence on close, summary response rules, and DTO fields
+ * that must not expose entities or internal timestamps.</p>
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 class ShiftSessionControllerTests {
@@ -72,11 +79,18 @@ class ShiftSessionControllerTests {
 	@Autowired
 	private PasswordEncoder passwordEncoder;
 
+	/**
+	 * Clears data before each API scenario so generated ids, join codes, and ownership checks do not leak between
+	 * tests.
+	 */
 	@BeforeEach
 	void setUp() {
 		TestDataCleaner.clean(jdbcTemplate);
 	}
 
+	/**
+	 * Creates a shift as a FOREMAN and expects an OPEN shift with the requested default hourly rate persisted.
+	 */
 	@Test
 	void foremanCanCreateShift() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -98,6 +112,9 @@ class ShiftSessionControllerTests {
 				.isEqualByComparingTo("15.25");
 	}
 
+	/**
+	 * Creates a shift as an ADMIN, which is allowed to manage any shift in the MVP contract.
+	 */
 	@Test
 	void adminCanCreateShift() throws Exception {
 		String accessToken = createAdminAndLogin();
@@ -112,6 +129,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25));
 	}
 
+	/**
+	 * Attempts shift creation as a WORKER and expects role-based authorization to return 403.
+	 */
 	@Test
 	void workerCannotCreateShift() throws Exception {
 		String accessToken = registerAndLogin("worker@example.com", "WORKER");
@@ -127,6 +147,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
 	}
 
+	/**
+	 * Calls the protected create endpoint without JWT and expects the shared 401 error response.
+	 */
 	@Test
 	void missingTokenReturnsUnauthorized() throws Exception {
 		mockMvc.perform(post(CREATE_SHIFT_URL)
@@ -139,6 +162,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
 	}
 
+	/**
+	 * Sends a negative default break value and expects request validation to reject the create request.
+	 */
 	@Test
 	void invalidBreakMinutesReturnsBadRequest() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -162,6 +188,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
 	}
 
+	/**
+	 * Sends planned end before planned start and expects the service business validation message.
+	 */
 	@Test
 	void invalidPlannedTimeOrderReturnsBadRequest() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -186,6 +215,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
 	}
 
+	/**
+	 * Creates several shifts and checks each generated join code is six characters and unique within the sample.
+	 */
 	@Test
 	void joinCodeGeneratedAndUniqueForTestedCases() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -206,6 +238,9 @@ class ShiftSessionControllerTests {
 		}
 	}
 
+	/**
+	 * Reads a shift as its creator FOREMAN and verifies public shift fields while internal entity fields are hidden.
+	 */
 	@Test
 	void ownerForemanGetsShift() throws Exception {
 		String accessToken = registerAndLogin("owner@example.com", "FOREMAN");
@@ -232,6 +267,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.updatedAt").doesNotExist());
 	}
 
+	/**
+	 * Tries to read a shift as a different FOREMAN and expects owner-only access to return 403.
+	 */
 	@Test
 	void anotherForemanGetsForbidden() throws Exception {
 		String ownerToken = registerAndLogin("owner@example.com", "FOREMAN");
@@ -247,6 +285,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(shiftUrl(shiftId)));
 	}
 
+	/**
+	 * Reads a foreman-created shift as ADMIN and expects cross-shift admin access to succeed.
+	 */
 	@Test
 	void adminGetsAnyShift() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -260,6 +301,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.title").value("Foreman shift"));
 	}
 
+	/**
+	 * Tries to read shift management details as a WORKER and expects role-based denial.
+	 */
 	@Test
 	void workerCannotGetShift() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -275,6 +319,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(shiftUrl(shiftId)));
 	}
 
+	/**
+	 * Calls shift details without JWT and expects the security entry point to return 401.
+	 */
 	@Test
 	void missingTokenCannotGetShift() throws Exception {
 		mockMvc.perform(get(shiftUrl(1)))
@@ -285,6 +332,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(shiftUrl(1)));
 	}
 
+	/**
+	 * Calls shift details with an invalid JWT and expects token validation to return 401.
+	 */
 	@Test
 	void invalidTokenCannotGetShift() throws Exception {
 		mockMvc.perform(get(shiftUrl(1))
@@ -296,6 +346,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(shiftUrl(1)));
 	}
 
+	/**
+	 * Requests a missing shift as an allowed role and expects a 404 rather than an authorization error.
+	 */
 	@Test
 	void unknownShiftReturnsNotFoundForAllowedRole() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -309,6 +362,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(shiftUrl(999999)));
 	}
 
+	/**
+	 * Starts an OPEN shift as the owner FOREMAN and expects ACTIVE status with an actual start timestamp.
+	 */
 	@Test
 	void ownerForemanStartsShift() throws Exception {
 		String accessToken = registerAndLogin("owner@example.com", "FOREMAN");
@@ -323,6 +379,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.*", hasSize(3)));
 	}
 
+	/**
+	 * Attempts to start a shift as another FOREMAN and expects ownership checks to return 403.
+	 */
 	@Test
 	void anotherForemanCannotStartShift() throws Exception {
 		String ownerToken = registerAndLogin("owner@example.com", "FOREMAN");
@@ -338,6 +397,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(startShiftUrl(shiftId)));
 	}
 
+	/**
+	 * Starts a foreman-owned shift as ADMIN and expects lifecycle transition access to succeed.
+	 */
 	@Test
 	void adminStartsAnyShift() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -352,6 +414,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.actualStartTime").isString());
 	}
 
+	/**
+	 * Attempts to start a shift as WORKER and expects role-based authorization to reject the request.
+	 */
 	@Test
 	void workerCannotStartShift() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -367,6 +432,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(startShiftUrl(shiftId)));
 	}
 
+	/**
+	 * Calls the start endpoint without JWT and expects 401 before service logic runs.
+	 */
 	@Test
 	void missingTokenCannotStartShift() throws Exception {
 		mockMvc.perform(post(startShiftUrl(1)))
@@ -377,6 +445,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(startShiftUrl(1)));
 	}
 
+	/**
+	 * Calls the start endpoint with a malformed JWT and expects 401.
+	 */
 	@Test
 	void invalidTokenCannotStartShift() throws Exception {
 		mockMvc.perform(post(startShiftUrl(1))
@@ -388,6 +459,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(startShiftUrl(1)));
 	}
 
+	/**
+	 * Attempts to start a missing shift as an allowed role and expects a 404 shift-not-found response.
+	 */
 	@Test
 	void unknownShiftCannotBeStarted() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -401,6 +475,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(startShiftUrl(999999)));
 	}
 
+	/**
+	 * Starts the same shift twice and expects the second call to fail because only OPEN shifts can start.
+	 */
 	@Test
 	void repeatedStartReturnsConflict() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -416,6 +493,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(startShiftUrl(shiftId)));
 	}
 
+	/**
+	 * Checks that start persists ACTIVE status and records actualStartTime in the expected time window.
+	 */
 	@Test
 	void startPersistsActiveStatusAndActualStartTime() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -432,6 +512,9 @@ class ShiftSessionControllerTests {
 				.isBeforeOrEqualTo(OffsetDateTime.now(ZoneOffset.UTC));
 	}
 
+	/**
+	 * Closes an ACTIVE shift as owner FOREMAN and expects CLOSED status plus an actual end timestamp.
+	 */
 	@Test
 	void ownerForemanClosesActiveShift() throws Exception {
 		String accessToken = registerAndLogin("owner@example.com", "FOREMAN");
@@ -445,6 +528,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.*", hasSize(3)));
 	}
 
+	/**
+	 * Attempts to close another foreman's shift and expects ownership enforcement to return 403.
+	 */
 	@Test
 	void anotherForemanCannotCloseShift() throws Exception {
 		String ownerToken = registerAndLogin("owner@example.com", "FOREMAN");
@@ -459,6 +545,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
 	}
 
+	/**
+	 * Closes a foreman-created active shift as ADMIN, proving admin lifecycle access is global.
+	 */
 	@Test
 	void adminClosesAnyActiveShift() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -472,6 +561,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.actualEndTime").isString());
 	}
 
+	/**
+	 * Attempts to close a shift as WORKER and expects role-based authorization to return 403.
+	 */
 	@Test
 	void workerCannotCloseShift() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -486,6 +578,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
 	}
 
+	/**
+	 * Calls close without JWT and expects the security layer to return Unauthorized.
+	 */
 	@Test
 	void missingTokenCannotCloseShift() throws Exception {
 		mockMvc.perform(post(closeShiftUrl(1)))
@@ -496,6 +591,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(closeShiftUrl(1)));
 	}
 
+	/**
+	 * Calls close with an invalid JWT and expects token validation to reject the request.
+	 */
 	@Test
 	void invalidTokenCannotCloseShift() throws Exception {
 		mockMvc.perform(post(closeShiftUrl(1))
@@ -507,6 +605,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(closeShiftUrl(1)));
 	}
 
+	/**
+	 * Attempts to close a missing shift as an allowed role and expects a 404 response.
+	 */
 	@Test
 	void unknownShiftCannotBeClosed() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -519,6 +620,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(closeShiftUrl(999999)));
 	}
 
+	/**
+	 * Attempts to close a shift that is still OPEN and expects the lifecycle conflict message.
+	 */
 	@Test
 	void closingOpenShiftReturnsConflict() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -532,6 +636,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
 	}
 
+	/**
+	 * Closes an ACTIVE shift once, then expects a second close attempt to fail because the shift is already CLOSED.
+	 */
 	@Test
 	void repeatedCloseReturnsConflict() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -547,6 +654,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
 	}
 
+	/**
+	 * Verifies close persists CLOSED status and records actualEndTime after actualStartTime.
+	 */
 	@Test
 	void closePersistsStatusAndChronologicalActualEndTime() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -564,6 +674,10 @@ class ShiftSessionControllerTests {
 				.isAfterOrEqualTo(persistedShift.getActualStartTime());
 	}
 
+	/**
+	 * Closes a shift with APPROVED attendance and expects worked minutes and salary to be persisted from shift time,
+	 * break, and attendance rate.
+	 */
 	@Test
 	void closeCalculatesSalaryForApprovedAttendance() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -585,6 +699,9 @@ class ShiftSessionControllerTests {
 				.isEqualByComparingTo(expectedSalary(expectedWorkedMinutes, attendance.getHourlyRate()));
 	}
 
+	/**
+	 * Approves attendance with a rate override and expects close-time salary to use the attendance override.
+	 */
 	@Test
 	void closeUsesAttendanceOverrideHourlyRateForSalary() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -607,6 +724,9 @@ class ShiftSessionControllerTests {
 				.isEqualByComparingTo(expectedSalary(expectedWorkedMinutes, new BigDecimal("18.50")));
 	}
 
+	/**
+	 * Leaves attendance in JOINED state, closes the shift, and expects salary fields to remain null.
+	 */
 	@Test
 	void closeLeavesJoinedAttendanceWithoutSalary() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -624,6 +744,9 @@ class ShiftSessionControllerTests {
 		assertThat(attendance.getCalculatedSalary()).isNull();
 	}
 
+	/**
+	 * Makes the shift duration shorter than the attendance break and expects close to roll back without salary writes.
+	 */
 	@Test
 	void invalidBreakGreaterThanDurationReturnsConflictAndDoesNotCloseShift() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -649,6 +772,10 @@ class ShiftSessionControllerTests {
 		assertThat(attendance.getCalculatedSalary()).isNull();
 	}
 
+	/**
+	 * Builds a closed shift with two approved workers and one unapproved worker, then expects the summary to include
+	 * only approved persisted salary rows ordered by worker name without user entity fields.
+	 */
 	@Test
 	void ownerForemanGetsClosedShiftSummary() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -719,6 +846,9 @@ class ShiftSessionControllerTests {
 		assertThat(joinedAttendance.getCalculatedSalary()).isNull();
 	}
 
+	/**
+	 * Reads a closed shift summary as ADMIN and expects cross-shift summary access to succeed.
+	 */
 	@Test
 	void adminGetsSummaryForAnyClosedShift() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -732,6 +862,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.totalWorkers").value(1));
 	}
 
+	/**
+	 * Attempts to read a shift summary as WORKER and expects role-based denial.
+	 */
 	@Test
 	void workerCannotGetSummary() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -746,6 +879,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(summaryUrl(shiftId)));
 	}
 
+	/**
+	 * Attempts to read another foreman's summary and expects ownership enforcement to return 403.
+	 */
 	@Test
 	void nonOwnerForemanCannotGetSummary() throws Exception {
 		String ownerToken = registerAndLogin("owner@example.com", "FOREMAN");
@@ -760,6 +896,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(summaryUrl(shiftId)));
 	}
 
+	/**
+	 * Calls summary without JWT and expects a 401 response.
+	 */
 	@Test
 	void missingTokenCannotGetSummary() throws Exception {
 		mockMvc.perform(get(summaryUrl(1)))
@@ -770,6 +909,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(summaryUrl(1)));
 	}
 
+	/**
+	 * Calls summary with an invalid JWT and expects token validation to return 401.
+	 */
 	@Test
 	void invalidTokenCannotGetSummary() throws Exception {
 		mockMvc.perform(get(summaryUrl(1))
@@ -781,6 +923,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(summaryUrl(1)));
 	}
 
+	/**
+	 * Requests summary for a missing shift and expects the allowed role to receive a 404 response.
+	 */
 	@Test
 	void unknownShiftSummaryReturnsNotFound() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -793,6 +938,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(summaryUrl(999999)));
 	}
 
+	/**
+	 * Requests summary before close and expects the CLOSED-only summary rule to return a conflict.
+	 */
 	@Test
 	void nonClosedShiftSummaryReturnsConflict() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -806,6 +954,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(summaryUrl(shiftId)));
 	}
 
+	/**
+	 * Corrupts persisted salary data for approved attendance and expects summary to fail rather than recalculate.
+	 */
 	@Test
 	void approvedAttendanceWithMissingSalaryDataReturnsConflict() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -825,6 +976,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(summaryUrl(shiftId)));
 	}
 
+	/**
+	 * Omits defaultHourlyRate during shift creation and expects request validation to reject the payload.
+	 */
 	@Test
 	void missingDefaultHourlyRateReturnsBadRequest() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -844,6 +998,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
 	}
 
+	/**
+	 * Sends a negative default hourly rate and expects validation to reject salary input before persistence.
+	 */
 	@Test
 	void negativeDefaultHourlyRateReturnsBadRequest() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -855,6 +1012,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
 	}
 
+	/**
+	 * Sends a default hourly rate with more than two decimal places and expects validation to return 400.
+	 */
 	@Test
 	void defaultHourlyRateWithTooManyDecimalPlacesReturnsBadRequest() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
@@ -866,10 +1026,26 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
 	}
 
+	/**
+	 * Registers a user with the default test name and returns a JWT for authenticated controller requests.
+	 *
+	 * @param email email address used for registration and login
+	 * @param role role sent to the public registration endpoint
+	 * @return JWT access token for the created user
+	 */
 	private String registerAndLogin(String email, String role) throws Exception {
 		return registerAndLogin(email, role, "Test", "User");
 	}
 
+	/**
+	 * Registers a named user and logs in with the shared test password.
+	 *
+	 * @param email email address used for the account
+	 * @param role role sent to registration
+	 * @param firstName first name stored on the user
+	 * @param lastName last name stored on the user
+	 * @return JWT access token for the account
+	 */
 	private String registerAndLogin(
 			String email,
 			String role,
@@ -892,6 +1068,11 @@ class ShiftSessionControllerTests {
 		return login(email);
 	}
 
+	/**
+	 * Inserts an ADMIN directly because public registration intentionally disallows ADMIN accounts.
+	 *
+	 * @return JWT access token for the seeded admin
+	 */
 	private String createAdminAndLogin() throws Exception {
 		User admin = new User();
 		admin.setEmail("admin@example.com");
@@ -904,6 +1085,12 @@ class ShiftSessionControllerTests {
 		return login(admin.getEmail());
 	}
 
+	/**
+	 * Logs in an existing test user and extracts the JWT access token from the response body.
+	 *
+	 * @param email account email
+	 * @return JWT access token
+	 */
 	private String login(String email) throws Exception {
 		MvcResult result = mockMvc.perform(post(LOGIN_URL)
 						.contentType(MediaType.APPLICATION_JSON)
@@ -921,10 +1108,23 @@ class ShiftSessionControllerTests {
 		return matcher.group(1);
 	}
 
+	/**
+	 * Builds a valid shift creation request with the default hourly rate used by most tests.
+	 *
+	 * @param title shift title
+	 * @return JSON request body
+	 */
 	private String validCreateShiftPayload(String title) {
 		return validCreateShiftPayload(title, "15.25");
 	}
 
+	/**
+	 * Builds a shift creation request while allowing tests to vary hourly-rate validation input.
+	 *
+	 * @param title shift title
+	 * @param defaultHourlyRate literal JSON number for defaultHourlyRate
+	 * @return JSON request body
+	 */
 	private String validCreateShiftPayload(String title, String defaultHourlyRate) {
 		return """
 				{
@@ -938,6 +1138,13 @@ class ShiftSessionControllerTests {
 				""".formatted(title, defaultHourlyRate);
 	}
 
+	/**
+	 * Creates a valid shift through the API and extracts its generated id.
+	 *
+	 * @param accessToken JWT for a FOREMAN or ADMIN
+	 * @param title shift title
+	 * @return created shift id
+	 */
 	private long createShift(String accessToken, String title) throws Exception {
 		MvcResult result = createShiftWithPayload(accessToken, validCreateShiftPayload(title))
 				.andExpect(status().isCreated())
@@ -948,6 +1155,13 @@ class ShiftSessionControllerTests {
 		return Long.parseLong(matcher.group(1));
 	}
 
+	/**
+	 * Sends a raw shift creation payload so validation tests can control invalid fields.
+	 *
+	 * @param accessToken JWT for the caller
+	 * @param payload JSON request body
+	 * @return MockMvc result actions for assertions
+	 */
 	private ResultActions createShiftWithPayload(String accessToken, String payload) throws Exception {
 		return mockMvc.perform(post(CREATE_SHIFT_URL)
 				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
@@ -955,34 +1169,79 @@ class ShiftSessionControllerTests {
 				.content(payload));
 	}
 
+	/**
+	 * Creates a shift and starts it, returning an ACTIVE shift id for close and summary setup.
+	 *
+	 * @param accessToken JWT for a shift manager
+	 * @param title shift title
+	 * @return active shift id
+	 */
 	private long createActiveShift(String accessToken, String title) throws Exception {
 		long shiftId = createShift(accessToken, title);
 		startShift(accessToken, shiftId).andExpect(status().isOk());
 		return shiftId;
 	}
 
+	/**
+	 * Builds the shift details URL for the supplied id.
+	 *
+	 * @param shiftId shift id
+	 * @return endpoint path
+	 */
 	private String shiftUrl(long shiftId) {
 		return CREATE_SHIFT_URL + "/" + shiftId;
 	}
 
+	/**
+	 * Builds the start endpoint URL for a shift.
+	 *
+	 * @param shiftId shift id
+	 * @return endpoint path
+	 */
 	private String startShiftUrl(long shiftId) {
 		return shiftUrl(shiftId) + "/start";
 	}
 
+	/**
+	 * Sends a start request for a shift as the given caller.
+	 *
+	 * @param accessToken JWT for the caller
+	 * @param shiftId target shift id
+	 * @return MockMvc result actions for assertions
+	 */
 	private ResultActions startShift(String accessToken, long shiftId) throws Exception {
 		return mockMvc.perform(post(startShiftUrl(shiftId))
 				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken));
 	}
 
+	/**
+	 * Builds the close endpoint URL for a shift.
+	 *
+	 * @param shiftId shift id
+	 * @return endpoint path
+	 */
 	private String closeShiftUrl(long shiftId) {
 		return shiftUrl(shiftId) + "/close";
 	}
 
+	/**
+	 * Sends a close request for a shift as the given caller.
+	 *
+	 * @param accessToken JWT for the caller
+	 * @param shiftId target shift id
+	 * @return MockMvc result actions for assertions
+	 */
 	private ResultActions closeShift(String accessToken, long shiftId) throws Exception {
 		return mockMvc.perform(post(closeShiftUrl(shiftId))
 				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken));
 	}
 
+	/**
+	 * Creates, approves, starts, adjusts start time, and closes a shift for summary tests.
+	 *
+	 * @param foremanToken JWT for the owning foreman
+	 * @return closed shift id with one approved attendance row
+	 */
 	private long createClosedShiftWithApprovedAttendance(String foremanToken) throws Exception {
 		long shiftId = createShift(foremanToken, "Closed summary shift");
 		String workerToken = registerAndLogin("summary.worker." + shiftId + "@example.com", "WORKER");
@@ -994,6 +1253,13 @@ class ShiftSessionControllerTests {
 		return shiftId;
 	}
 
+	/**
+	 * Uses a shift's generated join code to create worker attendance and extract the attendance id.
+	 *
+	 * @param accessToken worker JWT
+	 * @param shiftId shift to join
+	 * @return created attendance id
+	 */
 	private long joinAndGetAttendanceId(String accessToken, long shiftId) throws Exception {
 		String joinCode = shiftSessionRepository.findById(shiftId).orElseThrow().getJoinCode();
 		MvcResult result = mockMvc.perform(post(JOIN_SHIFT_URL)
@@ -1011,6 +1277,15 @@ class ShiftSessionControllerTests {
 		return Long.parseLong(matcher.group(1));
 	}
 
+	/**
+	 * Sends an attendance approval request with a caller-selected body.
+	 *
+	 * @param accessToken JWT for a FOREMAN or ADMIN
+	 * @param shiftId shift id from the URL
+	 * @param attendanceId attendance id from the URL
+	 * @param payload approval JSON body
+	 * @return MockMvc result actions for assertions
+	 */
 	private ResultActions approveAttendance(
 			String accessToken,
 			long shiftId,
@@ -1023,31 +1298,70 @@ class ShiftSessionControllerTests {
 				.content(payload));
 	}
 
+	/**
+	 * Reads a shift summary as the supplied caller.
+	 *
+	 * @param accessToken JWT for the caller
+	 * @param shiftId target shift id
+	 * @return MockMvc result actions for assertions
+	 */
 	private ResultActions getSummary(String accessToken, long shiftId) throws Exception {
 		return mockMvc.perform(get(summaryUrl(shiftId))
 				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken));
 	}
 
+	/**
+	 * Moves actualStartTime backward to make salary tests deterministic without waiting in real time.
+	 *
+	 * @param shiftId shift to update
+	 * @param actualStartTime timestamp to persist
+	 */
 	private void setActualStartTime(long shiftId, OffsetDateTime actualStartTime) {
 		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId).orElseThrow();
 		shiftSession.setActualStartTime(actualStartTime);
 		shiftSessionRepository.saveAndFlush(shiftSession);
 	}
 
+	/**
+	 * Mirrors the production worked-minute formula so controller tests can assert persisted salary output.
+	 *
+	 * @param shift closed shift entity
+	 * @param attendance attendance row with break minutes
+	 * @return expected worked minutes
+	 */
 	private int expectedWorkedMinutes(ShiftSession shift, ShiftAttendance attendance) {
 		return Math.toIntExact(Duration.between(shift.getActualStartTime(), shift.getActualEndTime()).toMinutes()
 				- attendance.getBreakMinutes());
 	}
 
+	/**
+	 * Mirrors salary rounding used by the service for expected values in close tests.
+	 *
+	 * @param workedMinutes expected worked minutes
+	 * @param hourlyRate attendance hourly rate
+	 * @return expected salary rounded to scale two
+	 */
 	private BigDecimal expectedSalary(int workedMinutes, BigDecimal hourlyRate) {
 		return hourlyRate.multiply(BigDecimal.valueOf(workedMinutes))
 				.divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_UP);
 	}
 
+	/**
+	 * Builds the summary endpoint URL for a shift.
+	 *
+	 * @param shiftId shift id
+	 * @return endpoint path
+	 */
 	private String summaryUrl(long shiftId) {
 		return shiftUrl(shiftId) + "/summary";
 	}
 
+	/**
+	 * Extracts the generated join code from a create-shift response.
+	 *
+	 * @param result MockMvc result containing a create response
+	 * @return join code
+	 */
 	private String extractJoinCode(MvcResult result) throws Exception {
 		Matcher matcher = JOIN_CODE_PATTERN.matcher(result.getResponse().getContentAsString());
 		assertThat(matcher.find()).isTrue();

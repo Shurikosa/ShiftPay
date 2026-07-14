@@ -9,10 +9,19 @@ import java.time.OffsetDateTime;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+/**
+ * Service unit tests for salary and worked-minute calculation.
+ *
+ * <p>The class covers the core salary formula, break deduction, zero-rate behavior, HALF_UP money rounding, and
+ * validation for impossible break durations.</p>
+ */
 class SalaryCalculationServiceTests {
 
 	private final SalaryCalculationService salaryCalculationService = new SalaryCalculationService();
 
+	/**
+	 * Calculates a nine-hour shift with a one-hour break and expects 480 worked minutes and salary scale two.
+	 */
 	@Test
 	void standardDayCalculatesWorkedMinutesAndSalary() {
 		SalaryCalculationService.SalaryCalculationResult result = salaryCalculationService.calculate(
@@ -27,6 +36,9 @@ class SalaryCalculationServiceTests {
 		assertThat(result.calculatedSalary().scale()).isEqualTo(2);
 	}
 
+	/**
+	 * Uses a half-hour duration and fractional rate to verify salary is rounded HALF_UP to two decimals.
+	 */
 	@Test
 	void salaryRoundsHalfUpToTwoDecimalPlaces() {
 		SalaryCalculationService.SalaryCalculationResult result = salaryCalculationService.calculate(
@@ -39,6 +51,9 @@ class SalaryCalculationServiceTests {
 		assertThat(result.calculatedSalary()).isEqualByComparingTo("10.01");
 	}
 
+	/**
+	 * Confirms a zero-minute break leaves the full shift duration as worked time.
+	 */
 	@Test
 	void zeroBreakKeepsFullShiftDuration() {
 		SalaryCalculationService.SalaryCalculationResult result = salaryCalculationService.calculate(
@@ -52,6 +67,9 @@ class SalaryCalculationServiceTests {
 		assertThat(result.calculatedSalary()).isEqualByComparingTo("12.00");
 	}
 
+	/**
+	 * Allows a valid zero hourly rate and expects worked minutes with a zero salary.
+	 */
 	@Test
 	void zeroRateProducesZeroSalary() {
 		SalaryCalculationService.SalaryCalculationResult result = salaryCalculationService.calculate(
@@ -65,6 +83,9 @@ class SalaryCalculationServiceTests {
 		assertThat(result.calculatedSalary()).isEqualByComparingTo("0.00");
 	}
 
+	/**
+	 * Rejects break minutes greater than total duration because that would create negative worked time.
+	 */
 	@Test
 	void breakGreaterThanDurationFails() {
 		assertThatThrownBy(() -> salaryCalculationService.calculate(

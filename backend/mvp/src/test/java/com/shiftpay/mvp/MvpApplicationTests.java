@@ -14,6 +14,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * Context and smoke tests for the complete Spring Boot backend application.
+ *
+ * <p>The class verifies that the application context starts, the public health endpoint responds, and Flyway creates
+ * the MVP schema expected by authentication, shift, attendance, and salary tests.</p>
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 class MvpApplicationTests {
@@ -24,10 +30,16 @@ class MvpApplicationTests {
 	@Autowired
 	private JdbcTemplate jdbcTemplate;
 
+	/**
+	 * Starts the full Spring context to catch configuration, bean wiring, and migration startup failures.
+	 */
 	@Test
 	void contextLoads() {
 	}
 
+	/**
+	 * Checks the unauthenticated health endpoint used by clients and deployment probes.
+	 */
 	@Test
 	void healthEndpointReturnsUp() throws Exception {
 		mockMvc.perform(get("/api/v1/health"))
@@ -36,6 +48,9 @@ class MvpApplicationTests {
 				.andExpect(jsonPath("$.status").value("UP"));
 	}
 
+	/**
+	 * Confirms Flyway has created the backend MVP tables and applied the latest expected migration.
+	 */
 	@Test
 	void flywayMigrationsCreateMvpTables() {
 		assertThat(countRows("users")).isNotNegative();
@@ -46,10 +61,23 @@ class MvpApplicationTests {
 		assertThat(latestFlywayVersion()).isEqualTo("5");
 	}
 
+	/**
+	 * Counts rows in a migrated table to prove that the table exists and can be queried.
+	 *
+	 * @param tableName database table name
+	 * @return number of rows currently in the table
+	 */
 	private Long countRows(String tableName) {
 		return jdbcTemplate.queryForObject("select count(*) from " + tableName, Long.class);
 	}
 
+	/**
+	 * Checks whether a specific column exists in the H2 information schema.
+	 *
+	 * @param tableName database table name
+	 * @param columnName column expected on the table
+	 * @return number of matching columns
+	 */
 	private Long countColumn(String tableName, String columnName) {
 		return jdbcTemplate.queryForObject(
 				"""
@@ -63,6 +91,11 @@ class MvpApplicationTests {
 		);
 	}
 
+	/**
+	 * Reads the newest successful Flyway migration version recorded in schema history.
+	 *
+	 * @return latest applied migration version
+	 */
 	private String latestFlywayVersion() {
 		return jdbcTemplate.queryForObject(
 				"""

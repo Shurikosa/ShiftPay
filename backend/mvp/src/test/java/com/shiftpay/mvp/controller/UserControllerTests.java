@@ -21,6 +21,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * Controller integration tests for the authenticated current-user endpoint.
+ *
+ * <p>The class verifies JWT access to {@code GET /api/v1/users/me}, unauthorized handling for missing or invalid
+ * tokens, and response DTO safety around password fields.</p>
+ */
 @SpringBootTest
 @AutoConfigureMockMvc
 class UserControllerTests {
@@ -36,11 +42,17 @@ class UserControllerTests {
 	@Autowired
 	private JdbcTemplate jdbcTemplate;
 
+	/**
+	 * Removes users and related data so each current-user scenario owns its authentication state.
+	 */
 	@BeforeEach
 	void setUp() {
 		TestDataCleaner.clean(jdbcTemplate);
 	}
 
+	/**
+	 * Registers and logs in a worker, then expects the current-user endpoint to return that account.
+	 */
 	@Test
 	void currentUserWithValidTokenReturnsCurrentUser() throws Exception {
 		String accessToken = registerAndLoginWorker();
@@ -55,6 +67,9 @@ class UserControllerTests {
 				.andExpect(jsonPath("$.role").value("WORKER"));
 	}
 
+	/**
+	 * Calls the protected endpoint without Authorization and expects the standard 401 response.
+	 */
 	@Test
 	void currentUserWithoutTokenReturnsUnauthorized() throws Exception {
 		mockMvc.perform(get(CURRENT_USER_URL))
@@ -65,6 +80,9 @@ class UserControllerTests {
 				.andExpect(jsonPath("$.path").value(CURRENT_USER_URL));
 	}
 
+	/**
+	 * Sends a malformed Bearer token and expects JWT filtering to reject the request with 401.
+	 */
 	@Test
 	void currentUserWithInvalidTokenReturnsUnauthorized() throws Exception {
 		mockMvc.perform(get(CURRENT_USER_URL)
@@ -76,6 +94,9 @@ class UserControllerTests {
 				.andExpect(jsonPath("$.path").value(CURRENT_USER_URL));
 	}
 
+	/**
+	 * Ensures the authenticated profile response exposes only public user fields.
+	 */
 	@Test
 	void currentUserDoesNotExposePasswordOrPasswordHash() throws Exception {
 		String accessToken = registerAndLoginWorker();
@@ -87,6 +108,11 @@ class UserControllerTests {
 				.andExpect(jsonPath("$.passwordHash").doesNotExist());
 	}
 
+	/**
+	 * Creates a worker through the public API, logs in, and extracts the access token from the JSON response.
+	 *
+	 * @return JWT access token for the registered worker
+	 */
 	private String registerAndLoginWorker() throws Exception {
 		mockMvc.perform(post(REGISTER_URL)
 						.contentType(MediaType.APPLICATION_JSON)
