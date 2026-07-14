@@ -36,6 +36,13 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 
+/**
+ * Business service for shift lifecycle and closed-shift salary summaries.
+ *
+ * <p>It creates shifts, starts and closes them with pessimistic locks, calculates salary for approved attendance on
+ * close, and reads persisted summary data without recalculating salary. Foreman ownership and admin access are
+ * enforced here in addition to route-level role checks.</p>
+ */
 @Service
 public class ShiftSessionService {
 
@@ -51,6 +58,15 @@ public class ShiftSessionService {
 	private final SalaryCalculationService salaryCalculationService;
 	private final SecureRandom secureRandom;
 
+	/**
+	 * Creates the service with repositories, salary service, and secure join code generation.
+	 *
+	 * @param companyRepository company repository used for the MVP default company
+	 * @param shiftAttendanceRepository attendance repository used for close and summary data
+	 * @param shiftSessionRepository shift repository used for lifecycle persistence and locks
+	 * @param userRepository user repository used to resolve the authenticated creator
+	 * @param salaryCalculationService salary calculation service used on close
+	 */
 	public ShiftSessionService(
 			CompanyRepository companyRepository,
 			ShiftAttendanceRepository shiftAttendanceRepository,
@@ -66,6 +82,16 @@ public class ShiftSessionService {
 		this.secureRandom = new SecureRandom();
 	}
 
+	/**
+	 * Creates an OPEN shift for a foreman or admin.
+	 *
+	 * <p>The method validates planned time ordering, creates or reuses the default company, trims text fields,
+	 * generates a unique join code, stores default break minutes and default hourly rate, and records the creator.</p>
+	 *
+	 * @param request shift creation request
+	 * @param principal authenticated foreman or admin principal
+	 * @return created shift response
+	 */
 	@Transactional
 	public ShiftCreateResponse createShift(CreateShiftRequest request, AuthenticatedUserPrincipal principal) {
 		validatePlannedTimeOrder(request.plannedStartTime(), request.plannedEndTime());
@@ -88,6 +114,13 @@ public class ShiftSessionService {
 		return ShiftCreateResponse.from(shiftSessionRepository.save(shiftSession));
 	}
 
+	/**
+	 * Reads a shift by id for an owner foreman or admin.
+	 *
+	 * @param shiftId shift session id
+	 * @param principal authenticated foreman or admin principal
+	 * @return shift details response
+	 */
 	@Transactional(readOnly = true)
 	public ShiftResponse getShift(Long shiftId, AuthenticatedUserPrincipal principal) {
 		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId)
@@ -97,6 +130,15 @@ public class ShiftSessionService {
 		return ShiftResponse.from(shiftSession);
 	}
 
+	/**
+	 * Starts an OPEN shift and records the actual start time in UTC.
+	 *
+	 * <p>The shift row is locked so concurrent joins, approvals, starts, and closes see a consistent lifecycle state.</p>
+	 *
+	 * @param shiftId shift session id
+	 * @param principal authenticated owner foreman or admin principal
+	 * @return start response with actual start time
+	 */
 	@Transactional
 	public ShiftStartResponse startShift(Long shiftId, AuthenticatedUserPrincipal principal) {
 		ShiftSession shiftSession = shiftSessionRepository.findByIdForUpdate(shiftId)
@@ -112,6 +154,17 @@ public class ShiftSessionService {
 		return ShiftStartResponse.from(shiftSession);
 	}
 
+	/**
+	 * Closes an ACTIVE shift, records actual end time, and persists salary results.
+	 *
+	 * <p>The method locks the shift and all attendance rows. Only APPROVED attendance receives worked minutes and
+	 * calculated salary; JOINED, REJECTED, and CANCELLED attendance salary fields are cleared. Any salary validation
+	 * failure rolls back the transaction so the shift remains ACTIVE.</p>
+	 *
+	 * @param shiftId shift session id
+	 * @param principal authenticated owner foreman or admin principal
+	 * @return close response with actual end time
+	 */
 	@Transactional
 	public ShiftCloseResponse closeShift(Long shiftId, AuthenticatedUserPrincipal principal) {
 		ShiftSession shiftSession = shiftSessionRepository.findByIdForUpdate(shiftId)
@@ -149,6 +202,16 @@ public class ShiftSessionService {
 		return ShiftCloseResponse.from(shiftSession);
 	}
 
+	/**
+	 * Builds the salary summary for a CLOSED shift.
+	 *
+	 * <p>The summary reads persisted attendance salary fields and does not recalculate salary. It includes only
+	 * approved attendance and fails if any approved attendance is missing close-time salary data.</p>
+	 *
+	 * @param shiftId shift session id
+	 * @param principal authenticated owner foreman or admin principal
+	 * @return closed shift summary response
+	 */
 	@Transactional(readOnly = true)
 	public ShiftSummaryResponse getShiftSummary(Long shiftId, AuthenticatedUserPrincipal principal) {
 		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId)
@@ -179,6 +242,12 @@ public class ShiftSessionService {
 		);
 	}
 
+	/**
+	 * Maps one approved attendance row to a worker summary row.
+	 *
+	 * @param attendance approved attendance with worker already fetched
+	 * @return worker summary response
+	 */
 	private WorkerSummaryResponse toWorkerSummary(ShiftAttendance attendance) {
 		if (attendance.getWorkedMinutes() == null || attendance.getCalculatedSalary() == null) {
 			throw new ShiftStateConflictException("Approved attendance has incomplete salary calculation");
@@ -195,6 +264,12 @@ public class ShiftSessionService {
 		);
 	}
 
+	/**
+	 * Verifies that the principal may manage or read the shift.
+	 *
+	 * @param shiftSession shift being accessed
+	 * @param principal authenticated foreman or admin principal
+	 */
 	private void validateShiftAccess(ShiftSession shiftSession, AuthenticatedUserPrincipal principal) {
 		if (principal.role() == Role.ADMIN) {
 			return;
@@ -206,6 +281,11 @@ public class ShiftSessionService {
 		throw new ForbiddenException();
 	}
 
+	/**
+	 * Returns the default company used by the MVP, creating it if needed.
+	 *
+	 * @return default company entity
+	 */
 	private Company getOrCreateDefaultCompany() {
 		return companyRepository.findFirstByName(DEFAULT_COMPANY_NAME)
 				.orElseGet(() -> {
@@ -215,6 +295,11 @@ public class ShiftSessionService {
 				});
 	}
 
+	/**
+	 * Generates a join code that is not already used by another shift.
+	 *
+	 * @return unique join code
+	 */
 	private String generateUniqueJoinCode() {
 		for (int attempt = 0; attempt < JOIN_CODE_MAX_ATTEMPTS; attempt++) {
 			String joinCode = generateJoinCode();
@@ -225,6 +310,11 @@ public class ShiftSessionService {
 		throw new IllegalStateException("Failed to generate unique join code");
 	}
 
+	/**
+	 * Generates one random six-character join code candidate.
+	 *
+	 * @return join code candidate
+	 */
 	private String generateJoinCode() {
 		StringBuilder joinCode = new StringBuilder(JOIN_CODE_LENGTH);
 		for (int index = 0; index < JOIN_CODE_LENGTH; index++) {
@@ -233,16 +323,34 @@ public class ShiftSessionService {
 		return joinCode.toString();
 	}
 
+	/**
+	 * Validates that the planned end is after the planned start when both are provided.
+	 *
+	 * @param plannedStartTime planned start time from the request
+	 * @param plannedEndTime planned end time from the request
+	 */
 	private void validatePlannedTimeOrder(LocalDateTime plannedStartTime, LocalDateTime plannedEndTime) {
 		if (plannedStartTime != null && plannedEndTime != null && !plannedEndTime.isAfter(plannedStartTime)) {
 			throw new BadRequestException("plannedEndTime must be after plannedStartTime");
 		}
 	}
 
+	/**
+	 * Converts local request timestamps to UTC offset timestamps for persistence.
+	 *
+	 * @param value request timestamp value
+	 * @return UTC offset timestamp, or null
+	 */
 	private OffsetDateTime toUtcOffsetDateTime(LocalDateTime value) {
 		return value == null ? null : value.atOffset(ZoneOffset.UTC);
 	}
 
+	/**
+	 * Trims optional text values and stores blank text as null.
+	 *
+	 * @param value optional request text
+	 * @return trimmed value, or null when blank
+	 */
 	private String trimToNull(String value) {
 		if (value == null || value.isBlank()) {
 			return null;

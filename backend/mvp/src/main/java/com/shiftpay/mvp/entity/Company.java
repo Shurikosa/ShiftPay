@@ -13,6 +13,12 @@ import lombok.Setter;
 
 import java.time.Instant;
 
+/**
+ * Company entity used to group shift sessions.
+ *
+ * <p>The MVP currently creates and reuses a default company, while the schema keeps this entity ready for later
+ * admin-managed companies.</p>
+ */
 @Getter
 @Entity
 @Table(name = "companies")
@@ -32,6 +38,9 @@ public class Company {
 	@Column(name = "updated_at", nullable = false)
 	private Instant updatedAt;
 
+	/**
+	 * Sets creation and update timestamps before the company is first persisted.
+	 */
 	@PrePersist
 	void prePersist() {
 		Instant now = Instant.now();
@@ -39,6 +48,9 @@ public class Company {
 		updatedAt = now;
 	}
 
+	/**
+	 * Refreshes the update timestamp before an existing company is stored.
+	 */
 	@PreUpdate
 	void preUpdate() {
 		updatedAt = Instant.now();

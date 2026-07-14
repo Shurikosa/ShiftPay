@@ -20,6 +20,12 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 
+/**
+ * Attendance entity connecting a worker to one shift session.
+ *
+ * <p>It stores the worker's status, hourly-rate snapshot or override, break minutes, and close-time salary results.
+ * Only approved attendance receives worked minutes and calculated salary when a shift is closed.</p>
+ */
 @Getter
 @Entity
 @Table(name = "shift_attendance")
@@ -74,6 +80,9 @@ public class ShiftAttendance {
 	@Column(name = "updated_at", nullable = false)
 	private Instant updatedAt;
 
+	/**
+	 * Sets creation and update timestamps before the attendance row is first persisted.
+	 */
 	@PrePersist
 	void prePersist() {
 		Instant now = Instant.now();
@@ -81,6 +90,9 @@ public class ShiftAttendance {
 		updatedAt = now;
 	}
 
+	/**
+	 * Refreshes the update timestamp before an existing attendance row is stored.
+	 */
 	@PreUpdate
 	void preUpdate() {
 		updatedAt = Instant.now();

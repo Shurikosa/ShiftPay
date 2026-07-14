@@ -14,9 +14,25 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
+/**
+ * Defines HTTP security rules for the stateless JWT-protected backend API.
+ *
+ * <p>Public routes are limited to health, authentication, and Swagger/OpenAPI endpoints. Business endpoints keep
+ * role-based access checks and are authenticated through {@link JwtAuthenticationFilter}.</p>
+ */
 @Configuration
 public class SecurityConfig {
 
+	/**
+	 * Creates the Spring Security filter chain for the REST API.
+	 *
+	 * @param http Spring Security HTTP builder
+	 * @param jwtAuthenticationFilter filter that reads and validates Bearer JWT tokens
+	 * @param jwtAuthenticationEntryPoint entry point used when authentication is missing or invalid
+	 * @param authenticationErrorWriter writer for JSON authentication and authorization errors
+	 * @return configured stateless security filter chain
+	 * @throws Exception if Spring Security cannot build the filter chain
+	 */
 	@Bean
 	SecurityFilterChain securityFilterChain(
 			HttpSecurity http,
@@ -60,6 +76,11 @@ public class SecurityConfig {
 				.build();
 	}
 
+	/**
+	 * Provides BCrypt password hashing for user registration and login checks.
+	 *
+	 * @return BCrypt password encoder used by authentication services
+	 */
 	@Bean
 	PasswordEncoder passwordEncoder() {
 		return new BCryptPasswordEncoder();

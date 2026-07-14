@@ -15,6 +15,12 @@ import lombok.Setter;
 
 import java.time.Instant;
 
+/**
+ * User account entity for authentication and role-based authorization.
+ *
+ * <p>Controllers never return this entity directly because it contains the password hash. Public responses use
+ * {@code UserResponse} instead.</p>
+ */
 @Getter
 @Entity
 @Table(name = "users")
@@ -51,6 +57,9 @@ public class User {
 	@Column(name = "updated_at", nullable = false)
 	private Instant updatedAt;
 
+	/**
+	 * Sets creation and update timestamps before the user is first persisted.
+	 */
 	@PrePersist
 	void prePersist() {
 		Instant now = Instant.now();
@@ -58,6 +67,9 @@ public class User {
 		updatedAt = now;
 	}
 
+	/**
+	 * Refreshes the update timestamp before an existing user is stored.
+	 */
 	@PreUpdate
 	void preUpdate() {
 		updatedAt = Instant.now();

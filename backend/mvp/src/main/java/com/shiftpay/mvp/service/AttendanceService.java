@@ -32,6 +32,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
+/**
+ * Business service for worker attendance workflows.
+ *
+ * <p>It owns join, personal history, attendance list, and approval rules. Write operations are transactional and use
+ * repository locks where needed so join, approval, start, and close operations serialize around shift state.</p>
+ */
 @Service
 public class AttendanceService {
 
@@ -39,6 +45,13 @@ public class AttendanceService {
 	private final ShiftSessionRepository shiftSessionRepository;
 	private final UserRepository userRepository;
 
+	/**
+	 * Creates the service with repositories required for attendance workflows.
+	 *
+	 * @param shiftAttendanceRepository attendance repository
+	 * @param shiftSessionRepository shift repository used for state checks and locks
+	 * @param userRepository user repository used to resolve the authenticated worker
+	 */
 	public AttendanceService(
 			ShiftAttendanceRepository shiftAttendanceRepository,
 			ShiftSessionRepository shiftSessionRepository,
@@ -49,6 +62,17 @@ public class AttendanceService {
 		this.userRepository = userRepository;
 	}
 
+	/**
+	 * Joins the authenticated worker to an OPEN shift by join code.
+	 *
+	 * <p>The method trims and uppercases the join code, locks the target shift, rejects non-open shifts and duplicate
+	 * joins, copies the shift default hourly rate and break minutes into attendance, and stores the join timestamp in
+	 * UTC. Workers never provide their own hourly rate.</p>
+	 *
+	 * @param request join request containing the join code
+	 * @param principal authenticated worker principal
+	 * @return created attendance response
+	 */
 	@Transactional
 	public JoinShiftResponse joinShift(JoinShiftRequest request, AuthenticatedUserPrincipal principal) {
 		String normalizedJoinCode = request.joinCode().trim().toUpperCase(Locale.ROOT);
@@ -81,6 +105,15 @@ public class AttendanceService {
 		}
 	}
 
+	/**
+	 * Reads shift history for the authenticated user as a worker.
+	 *
+	 * <p>All roles are filtered the same way: only attendance rows where the current user is the worker are returned.
+	 * The endpoint does not recalculate salary; it returns persisted worked minutes and salary values.</p>
+	 *
+	 * @param principal authenticated user principal
+	 * @return personal shift history ordered newest first
+	 */
 	@Transactional(readOnly = true)
 	public List<MyShiftHistoryResponse> getMyShiftHistory(AuthenticatedUserPrincipal principal) {
 		return shiftAttendanceRepository.findMyShiftHistoryByWorkerId(principal.id()).stream()
@@ -88,6 +121,16 @@ public class AttendanceService {
 				.toList();
 	}
 
+	/**
+	 * Lists attendance for one shift for a foreman owner or admin.
+	 *
+	 * <p>The service verifies the shift exists and applies ownership rules before fetching attendance with worker
+	 * data to avoid N+1 queries.</p>
+	 *
+	 * @param shiftId shift session id
+	 * @param principal authenticated foreman or admin principal
+	 * @return attendance rows for the shift
+	 */
 	@Transactional(readOnly = true)
 	public List<AttendanceResponse> getShiftAttendance(
 			Long shiftId,
@@ -102,6 +145,19 @@ public class AttendanceService {
 				.toList();
 	}
 
+	/**
+	 * Approves a joined worker attendance record while the shift is OPEN.
+	 *
+	 * <p>The method locks the shift first and attendance second, enforces owner/admin access, allows only
+	 * JOINED-to-APPROVED transition, optionally overrides the attendance hourly rate, and records approval time in UTC.
+	 * The attendance-specific rate override does not change the shift default rate.</p>
+	 *
+	 * @param shiftId shift id from the URL
+	 * @param attendanceId attendance id from the URL
+	 * @param request optional request with an attendance-specific hourly-rate override
+	 * @param principal authenticated foreman or admin principal
+	 * @return approval response for the updated attendance
+	 */
 	@Transactional
 	public ApproveAttendanceResponse approveAttendance(
 			Long shiftId,
@@ -133,6 +189,12 @@ public class AttendanceService {
 		return ApproveAttendanceResponse.from(attendance);
 	}
 
+	/**
+	 * Verifies that the current principal may manage attendance for the shift.
+	 *
+	 * @param shiftSession shift being managed
+	 * @param principal authenticated foreman or admin principal
+	 */
 	private void validateAttendanceManagementAccess(
 			ShiftSession shiftSession,
 			AuthenticatedUserPrincipal principal

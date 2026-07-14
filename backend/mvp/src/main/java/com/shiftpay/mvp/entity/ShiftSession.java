@@ -20,6 +20,12 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 
+/**
+ * Shift session entity managed by a foreman or admin.
+ *
+ * <p>The session owns lifecycle timestamps, join code, default break and hourly-rate values, and is the parent for
+ * worker attendance rows.</p>
+ */
 @Getter
 @Entity
 @Table(name = "shift_sessions")
@@ -86,6 +92,9 @@ public class ShiftSession {
 	@Column(name = "updated_at", nullable = false)
 	private Instant updatedAt;
 
+	/**
+	 * Sets creation and update timestamps before the shift is first persisted.
+	 */
 	@PrePersist
 	void prePersist() {
 		Instant now = Instant.now();
@@ -93,6 +102,9 @@ public class ShiftSession {
 		updatedAt = now;
 	}
 
+	/**
+	 * Refreshes the update timestamp before an existing shift is stored.
+	 */
 	@PreUpdate
 	void preUpdate() {
 		updatedAt = Instant.now();
