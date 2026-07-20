@@ -64,6 +64,7 @@ A worker can:
 - create an account
 - log in
 - join an active shift session
+- join without entering or selecting an hourly rate
 - leave or finish a shift if allowed
 - see own worked hours
 - see own salary calculation
@@ -79,6 +80,7 @@ A foreman can:
 - invite workers or share join code
 - approve joined workers
 - set break duration
+- set the default hourly rate for a shift
 - view shift summary
 - view worker salary summary
 
@@ -99,19 +101,22 @@ Admin features are not required for the first MVP, but the backend architecture 
 Basic flow:
 
 1. Foreman logs in.
-2. Foreman creates a shift session.
+2. Foreman creates a shift session and sets its default hourly rate.
 3. System generates a join code.
 4. Worker logs in.
 5. Worker enters the join code.
-6. Worker joins the session.
-7. Foreman starts the shift.
-8. System records shift start time.
-9. Foreman closes the shift.
-10. System records shift end time.
-11. System calculates worked time.
-12. System calculates salary.
-13. Worker can view result.
-14. Foreman can view shift summary.
+6. Worker joins the session without providing an hourly rate.
+7. System copies the shift default hourly rate into the worker attendance record as a snapshot.
+8. While the shift is OPEN, the foreman approves joined workers and may override the rate for an individual attendance.
+9. If no rate override is provided, the attendance keeps its join-time rate snapshot.
+10. Foreman starts the shift.
+11. System records shift start time.
+12. Foreman closes the shift.
+13. System records shift end time.
+14. System calculates worked time for approved attendance.
+15. System calculates salary for approved attendance.
+16. Worker can view result.
+17. Foreman can view shift summary.
 
 ## 6. Shift Statuses
 
@@ -145,7 +150,21 @@ salary = 8 * 15 = 120 EUR/DOL
 -Break time cannot be greater than total shift time.
 -If shift is not closed, final salary should not be calculated.
 -Hourly rate should be stored for the attendance record, because rates can change later.
+-WORKER never sets an hourly rate.
+-FOREMAN sets one default hourly rate for a shift that they own.
+-ADMIN can set the default hourly rate for any shift.
+-The attendance hourly rate is copied from the shift default hourly rate when the worker joins and remains a snapshot for that attendance record.
+-During approval, FOREMAN may override the hourly rate for an attendance on a shift they own.
+-During approval, ADMIN may override the hourly rate for an attendance on any shift.
+-An approval without an hourly rate override preserves the attendance rate snapshot.
+-An attendance-specific override does not change the shift default hourly rate or another worker's attendance rate.
 -Salary calculation should use precise decimal values, not floating-point double.
+-Salary is calculated when a shift closes successfully.
+-Only APPROVED attendance receives worked minutes and calculated salary.
+-JOINED, REJECTED, and CANCELLED attendance keep worked minutes and calculated salary empty.
+-Salary calculation uses the attendance hourly rate snapshot or override.
+-Calculated salary is rounded to 2 decimal places with HALF_UP.
+-Closing fails if actualStartTime is missing or break time is greater than the shift duration.
 
 10. Authentication
 

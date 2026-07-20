@@ -99,9 +99,22 @@ plannedEndTime
 actualStartTime
 actualEndTime
 defaultBreakMinutes
+defaultHourlyRate
 createdBy
 createdAt
 updatedAt
+
+Hourly Rate Ownership
+
+- WORKER does not provide or modify hourly rates.
+- FOREMAN sets defaultHourlyRate when creating an owned shift.
+- ADMIN can set defaultHourlyRate for any shift.
+- ShiftAttendance.hourlyRate is copied from ShiftSession.defaultHourlyRate when a worker joins.
+- ShiftAttendance.hourlyRate is a snapshot for that worker and shift, so later shift-rate changes do not rewrite historical attendance.
+- FOREMAN can override ShiftAttendance.hourlyRate while approving attendance for an owned OPEN shift.
+- ADMIN can override ShiftAttendance.hourlyRate while approving attendance for any OPEN shift.
+- Approval without an override preserves the join-time attendance rate snapshot.
+- An attendance-specific override does not modify ShiftSession.defaultHourlyRate or other attendance records.
 ShiftAttendance
 
 Fields:
@@ -118,6 +131,78 @@ joinedAt
 approvedAt
 createdAt
 updatedAt
+
+Attendance Approval
+
+- The approval endpoint is available only to FOREMAN and ADMIN.
+- FOREMAN ownership is enforced in the service layer against ShiftSession.createdBy.
+- Attendance is loaded by both attendance id and shift session id, so a URL shift mismatch is returned as not found.
+- Approval is allowed only while the shift is OPEN.
+- The only allowed approval transition is JOINED -> APPROVED.
+- approvedAt is recorded using the current server time in UTC.
+- The optional hourly-rate override uses BigDecimal and is limited to non-negative values with two decimal places.
+
+Attendance Query
+
+- FOREMAN can list attendance only for an owned shift; ADMIN can list attendance for any shift.
+- Attendance can be listed for OPEN, ACTIVE, and CLOSED shifts.
+- The repository fetches attendance and worker in one query to avoid N+1 loading.
+- Results are ordered by joinedAt ascending and then attendance id ascending.
+- Controllers return attendance DTOs and never expose User entities or password hashes.
+- Attendance DTOs expose workedMinutes and calculatedSalary so close-time salary results can be read without a summary endpoint.
+
+Worker Shift History
+
+- GET /api/v1/me/shifts is available to any authenticated user.
+- The endpoint always filters by the current user's worker attendance records.
+- WORKER, FOREMAN, and ADMIN all see only attendance where ShiftAttendance.worker.id equals the current user id.
+- FOREMAN and ADMIN do not receive managed-shift attendance through this endpoint unless they also have their own attendance record.
+- OPEN, ACTIVE, and CLOSED shifts are included.
+- The endpoint reads persisted workedMinutes and calculatedSalary from ShiftAttendance and never recalculates salary.
+- OPEN, ACTIVE, and unapproved attendance can return null workedMinutes and calculatedSalary.
+- The repository fetches attendance with shift in one query to avoid N+1 loading.
+- Results are ordered by joinedAt descending and then attendance id descending.
+- DTOs expose shift and attendance fields only, never User entities, emails, or password hashes.
+
+Salary Calculation
+
+- SalaryCalculationService owns worked-minute and salary math.
+- ShiftSessionService.closeShift invokes SalaryCalculationService after locking the ShiftSession and before setting status CLOSED.
+- Close locks all attendance rows for the shift with PESSIMISTIC_WRITE after locking the ShiftSession.
+- Salary is calculated only for APPROVED attendance.
+- JOINED, REJECTED, and CANCELLED attendance keep workedMinutes and calculatedSalary null.
+- workedMinutes = minutes_between(actualStartTime, actualEndTime) - attendance.breakMinutes.
+- calculatedSalary = workedMinutes / 60 * attendance.hourlyRate.
+- calculatedSalary is stored with scale 2 and RoundingMode.HALF_UP.
+- Salary uses ShiftAttendance.hourlyRate, including any attendance-specific approval override.
+- Close fails with 409 if actualStartTime is missing or breakMinutes is greater than shift duration.
+- Close is transactional: when salary validation fails, the shift remains ACTIVE and attendance salary fields are not written.
+
+Shift Summary
+
+- ShiftSessionService owns summary business rules.
+- Summary is available only for CLOSED shifts.
+- Summary reads persisted ShiftAttendance.workedMinutes and ShiftAttendance.calculatedSalary.
+- Summary does not call SalaryCalculationService and does not recalculate salary.
+- Summary includes only APPROVED attendance.
+- The repository fetches approved attendance with worker in one query to avoid N+1 loading.
+- Workers are ordered by worker lastName, firstName, and worker id.
+- totalWorkers is the count of included attendance rows.
+- totalSalary is the sum of included calculatedSalary values with scale 2.
+- If approved attendance is missing workedMinutes or calculatedSalary, summary returns a conflict.
+- Summary DTOs expose worker identity fields but never expose User entities or password hashes.
+
+Concurrency Control
+
+- Join, start, close, and approval run inside transactions with pessimistic write locks.
+- ShiftSession is locked by id for start, close, and approval.
+- ShiftSession is locked by joinCode for worker join.
+- ShiftAttendance is locked by attendance id and shift id for approval.
+- ShiftAttendance is locked by shift id during close before salary fields are updated.
+- Operations that require both rows always lock ShiftSession first and ShiftAttendance second.
+- Concurrent approvals serialize so only the first JOINED -> APPROVED transition succeeds.
+- Start serializes with join and approval, preventing either operation from succeeding after the shift becomes ACTIVE.
+- Close serializes concurrent lifecycle transitions and prevents duplicate successful close operations.
 
 4. Database
 
