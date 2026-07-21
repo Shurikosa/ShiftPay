@@ -2,11 +2,11 @@
 
 ## 1. Overview
 
-ShiftPay is planned as a monorepo with separate modules:
+ShiftPay is planned as a monorepo with these main areas:
 
-backend/      Spring Boot REST API
+backend/      Spring Boot REST API and Vaadin admin UI
 mobile/       React Native / Expo app
-web-admin/    Future admin dashboard
+webadmin/     Historical or placeholder admin directory; not planned as a separate MVP frontend
 infra/        Docker and deployment files
 docs/         Documentation
 
@@ -21,6 +21,7 @@ shift sessions
 attendance
 salary calculation
 reports
+admin dashboard served with Vaadin
 
 Recommended backend layers:
 
@@ -62,6 +63,19 @@ DTOs
 DTOs are used for API requests and responses.
 
 Do not expose entities directly through the API.
+
+Admin UI Architecture
+
+- Vaadin runs in the same Spring Boot application as the backend REST API.
+- The admin dashboard is implemented as Vaadin routes, layouts, and views inside `backend/`.
+- Admin UI shares backend services and repositories.
+- REST API remains the contract for mobile clients.
+- Admin UI should not duplicate business logic.
+- Controllers are for REST/mobile API endpoints.
+- Vaadin views call services directly or use dedicated admin application services for UI-specific workflows.
+- Core business rules stay in backend services and remain testable outside Vaadin views.
+- Security must protect Vaadin routes by the ADMIN role.
+- Admin UI changes that alter services, API behavior, security, or business rules must update docs and tests.
 
 3. Main Backend Entities
 User
@@ -312,6 +326,13 @@ backend
 
 Mobile app can connect to local backend during development.
 
+Deployment model:
+
+- Build and deploy one backend artifact/container that contains both the REST API and Vaadin admin UI.
+- PostgreSQL remains a separate service.
+- Mobile app continues to consume the REST API.
+- The admin dashboard is served by the backend application; no separate web-admin frontend artifact is planned for the MVP.
+
 9. Development Workflow with Codex
 
 Recommended agents:
@@ -322,7 +343,7 @@ Root Codex session:
 - task planning
 
 Backend Codex session:
-- Spring Boot backend
+- Spring Boot backend and Vaadin admin UI
 
 Mobile Codex session:
 - React Native app

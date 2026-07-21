@@ -15,7 +15,7 @@ This project is in MVP development.
 
 The first MVP goal is to build:
 
-- Spring Boot backend
+- Spring Boot backend REST API
 - PostgreSQL database
 - JWT authentication
 - Role-based access
@@ -59,16 +59,20 @@ An admin can:
 ## Planned Monorepo Structure
 
 ShiftPay/
-  backend/      Spring Boot REST API
+  backend/      Spring Boot REST API + Vaadin admin UI
   mobile/       React Native / Expo mobile app
-  web-admin/    Future admin dashboard
+  webadmin/     Historical or placeholder admin directory, not planned as separate MVP frontend
   infra/        Docker, compose, deployment files
   docs/         Specifications and architecture docs
+
+The current MVP plan is to serve the admin dashboard from the backend using Vaadin.
+A separate `web-admin/` React, Vue, or Angular module is not planned for the MVP.
 
   Technology Stack
 -Backend
 -Java 21
 -Spring Boot
+-Vaadin admin UI
 -Spring Security
 -JWT
 -PostgreSQL

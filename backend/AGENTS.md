@@ -12,6 +12,7 @@ Use:
 - Spring Boot
 - Maven
 - Spring Web
+- Vaadin for future admin UI
 - Spring Security
 - JWT
 - Spring Data JPA
@@ -33,6 +34,7 @@ The backend is responsible for:
 - worker attendance
 - salary calculation
 - reports API
+- Vaadin admin UI served from the Spring Boot application
 
 ## Package Structure
 
@@ -123,6 +125,20 @@ Use JWT for authentication.
 Use role-based authorization.
 
 Endpoints should be protected by role where needed.
+
+Vaadin Admin UI Rules
+
+Vaadin views are part of the backend application.
+
+Vaadin views must not contain core business logic.
+
+Business logic stays in services.
+
+Vaadin views should call services directly or use dedicated admin application services when a UI-specific workflow is needed.
+
+Admin UI security must use role-based authorization.
+
+Vaadin routes for admin features must be protected by the ADMIN role.
 
 Testing Rules
 

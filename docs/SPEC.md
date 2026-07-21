@@ -20,9 +20,9 @@ The application should support teams where a foreman manages a work shift and wo
 
 The product should be cross-platform:
 
-- Android
-- iOS
-- later web dashboard
+- Android mobile app
+- iOS mobile app
+- web admin dashboard served by the backend using Vaadin
 
 ## 2. Main Problem
 
@@ -94,7 +94,8 @@ An admin can:
 - view reports
 - manage system settings
 
-Admin features are not required for the first MVP, but the backend architecture should support them later.
+Admin features will be available through the Vaadin admin dashboard.
+Advanced admin features are not required for the first MVP, but the backend architecture should support them later.
 
 ## 5. Shift Session Flow
 
@@ -202,6 +203,9 @@ iOS
 Recommended technology:
 
 React Native + Expo + TypeScript
+
+The admin dashboard should be a web UI served by the backend Spring Boot application using Vaadin.
+It should not be a separate React, Vue, or Angular frontend project for the MVP.
 
 13. Out of Scope for First MVP
 

@@ -121,8 +121,13 @@ Each Codex session should take one small task from this file.
 
 This is optional for first MVP.
 
-- [ ] Create web-admin project
-- [ ] Add login page
-- [ ] Add users page
-- [ ] Add shifts page
-- [ ] Add reports page
+Admin dashboard is planned as Vaadin UI inside the backend Spring Boot application.
+A separate `web-admin/` project is no longer planned for the MVP.
+
+- [ ] Add Vaadin dependency to `backend/`
+- [ ] Configure Vaadin routes and ADMIN role security
+- [ ] Create admin layout
+- [ ] Add admin login/access behavior if needed
+- [ ] Add users admin view
+- [ ] Add shifts admin view
+- [ ] Add reports/admin summary view
