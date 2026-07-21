@@ -178,6 +178,24 @@ Worker Shift History
 - Results are ordered by joinedAt descending and then attendance id descending.
 - DTOs expose shift and attendance fields only, never User entities, emails, or password hashes.
 
+Foreman Managed Shifts
+
+- Foreman-created shift lists should not be mixed into worker attendance history.
+- `GET /api/v1/me/shifts` remains personal worker attendance history.
+- The planned `GET /api/v1/me/managed-shifts` endpoint will support the Foreman mobile dashboard.
+- For the MVP, FOREMAN should see shifts where ShiftSession.createdBy equals the current user id.
+- ADMIN listing behavior for this endpoint can be refined later and should not block the mobile MVP.
+- The endpoint should reuse ShiftSession service/repository logic and must not recalculate salary.
+- Response DTOs should expose shift/session fields needed by the mobile dashboard and should not expose User entities or password hashes.
+
+Admin User Management
+
+- ADMIN role and role-based authorization remain supported in the backend.
+- Public registration must continue to reject ADMIN accounts.
+- Full ADMIN user management is deferred until after the mobile MVP.
+- User management should be implemented through the Vaadin admin dashboard rather than mobile screens.
+- Vaadin admin user management must keep business logic in services and protect routes by ADMIN role.
+
 Salary Calculation
 
 - SalaryCalculationService owns worked-minute and salary math.

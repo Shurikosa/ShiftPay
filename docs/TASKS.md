@@ -87,8 +87,18 @@ Each Codex session should take one small task from this file.
 - [x] Document implemented backend API contract
 - [x] Add backend local run instructions
 - [x] Add Swagger/OpenAPI documentation for backend MVP
-- [ ] Decide whether managed foreman-created shifts should appear in a separate foreman history endpoint
-- [ ] Decide whether ADMIN user management is needed before or after mobile MVP
+- [x] Decide whether managed foreman-created shifts should appear in a separate foreman history endpoint
+- [x] Decide whether ADMIN user management is needed before or after mobile MVP
+
+Decisions:
+
+- Managed foreman-created shifts should use a separate endpoint. `GET /api/v1/me/shifts` remains worker attendance history only.
+- Planned endpoint: `GET /api/v1/me/managed-shifts`.
+- ADMIN user management is deferred until after the mobile MVP and should be implemented as part of the Vaadin admin dashboard work.
+
+Follow-up backend task:
+
+- [ ] Implement `GET /api/v1/me/managed-shifts` for the Foreman mobile dashboard
 
 ## Milestone 7: Mobile Foundation
 
@@ -129,5 +139,6 @@ A separate `web-admin/` project is no longer planned for the MVP.
 - [ ] Create admin layout
 - [ ] Add admin login/access behavior if needed
 - [ ] Add users admin view
+- [ ] Implement ADMIN user management after mobile MVP
 - [ ] Add shifts admin view
 - [ ] Add reports/admin summary view

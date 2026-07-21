@@ -987,6 +987,43 @@ Status: 401 Unauthorized
   "path": "/api/v1/me/shifts"
 }
 
+Planned: get my managed shifts
+
+This endpoint is planned and not implemented yet.
+
+GET /api/v1/me/managed-shifts
+
+Purpose:
+
+- The Foreman mobile dashboard needs a list of shifts created and managed by the current foreman.
+- This endpoint must stay separate from `GET /api/v1/me/shifts`.
+- `GET /api/v1/me/shifts` remains personal worker attendance history only.
+
+Planned access rules:
+
+- FOREMAN can list shifts where `createdBy` is the current user.
+- ADMIN behavior can be refined later and should not block the mobile MVP.
+- WORKER is not allowed.
+
+Planned response shape:
+
+[
+  {
+    "id": 100,
+    "title": "Monday construction shift",
+    "location": "Cologne",
+    "status": "OPEN",
+    "joinCode": "ABCD12",
+    "plannedStartTime": "2026-07-01T08:00:00Z",
+    "plannedEndTime": "2026-07-01T17:00:00Z",
+    "actualStartTime": null,
+    "actualEndTime": null,
+    "defaultBreakMinutes": 60,
+    "defaultHourlyRate": 15.00,
+    "createdBy": 5
+  }
+]
+
 6. Error Response Format
 
 All API errors should use this format:
@@ -1010,7 +1047,9 @@ FOREMAN:
 - can start shift
 - can close shift
 - can approve attendance
+- can see own managed shifts when the planned managed-shifts endpoint is implemented
 - can see shift summary
 
 ADMIN:
-- can do everything
+- can do everything supported by the current backend
+- full user management is deferred until after the mobile MVP and should be implemented through the Vaadin admin dashboard

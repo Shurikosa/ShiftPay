@@ -81,6 +81,7 @@ A foreman can:
 - approve joined workers
 - set break duration
 - set the default hourly rate for a shift
+- view shifts they created and manage
 - view shift summary
 - view worker salary summary
 
@@ -96,6 +97,7 @@ An admin can:
 
 Admin features will be available through the Vaadin admin dashboard.
 Advanced admin features are not required for the first MVP, but the backend architecture should support them later.
+ADMIN user management is deferred until after the mobile MVP.
 
 ## 5. Shift Session Flow
 
@@ -118,6 +120,7 @@ Basic flow:
 15. System calculates salary for approved attendance.
 16. Worker can view result.
 17. Foreman can view shift summary.
+18. Foreman can view the list of shifts they created and manage.
 
 ## 6. Shift Statuses
 
