@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -23,6 +24,23 @@ public interface ShiftSessionRepository extends JpaRepository<ShiftSession, Long
 	 * @return true when the join code is already in use
 	 */
 	boolean existsByJoinCode(String joinCode);
+
+	/**
+	 * Lists shifts created by the current user for the managed-shifts dashboard.
+	 *
+	 * <p>The stable order keeps the newest created shifts first and uses id as a deterministic tie-breaker.</p>
+	 *
+	 * @param createdById current foreman or admin user id
+	 * @return shifts created by the user ordered by createdAt descending and id descending
+	 */
+	@Query("""
+			select shiftSession
+			from ShiftSession shiftSession
+			join fetch shiftSession.createdBy
+			where shiftSession.createdBy.id = :createdById
+			order by shiftSession.createdAt desc, shiftSession.id desc
+			""")
+	List<ShiftSession> findManagedShiftsByCreatedById(@Param("createdById") Long createdById);
 
 	/**
 	 * Loads a shift by id with a pessimistic write lock for start, close, and approval workflows.

@@ -182,11 +182,14 @@ Foreman Managed Shifts
 
 - Foreman-created shift lists should not be mixed into worker attendance history.
 - `GET /api/v1/me/shifts` remains personal worker attendance history.
-- The planned `GET /api/v1/me/managed-shifts` endpoint will support the Foreman mobile dashboard.
-- For the MVP, FOREMAN should see shifts where ShiftSession.createdBy equals the current user id.
-- ADMIN listing behavior for this endpoint can be refined later and should not block the mobile MVP.
-- The endpoint should reuse ShiftSession service/repository logic and must not recalculate salary.
-- Response DTOs should expose shift/session fields needed by the mobile dashboard and should not expose User entities or password hashes.
+- `GET /api/v1/me/managed-shifts` supports the Foreman mobile dashboard.
+- The endpoint is available only to FOREMAN and ADMIN.
+- WORKER receives 403 Forbidden.
+- FOREMAN sees shifts where ShiftSession.createdBy equals the current user id.
+- ADMIN also sees shifts where ShiftSession.createdBy equals the current user id for the MVP; full admin listing is deferred to Vaadin admin UI.
+- The endpoint reuses ShiftSession service/repository logic and does not recalculate salary.
+- Results are ordered by createdAt descending and shift id descending.
+- Response DTOs expose shift/session fields needed by the mobile dashboard and do not expose User entities, password hashes, company entity, createdAt, or updatedAt.
 
 Admin User Management
 
