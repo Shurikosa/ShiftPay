@@ -98,7 +98,7 @@ Decisions:
 
 Follow-up backend task:
 
-- [ ] Implement `GET /api/v1/me/managed-shifts` for the Foreman mobile dashboard
+- [x] Implement `GET /api/v1/me/managed-shifts` for the Foreman mobile dashboard
 
 ## Milestone 7: Mobile Foundation
 

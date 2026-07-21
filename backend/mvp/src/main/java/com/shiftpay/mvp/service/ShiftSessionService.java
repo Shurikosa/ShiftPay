@@ -40,8 +40,8 @@ import java.util.Objects;
  * Business service for shift lifecycle and closed-shift salary summaries.
  *
  * <p>It creates shifts, starts and closes them with pessimistic locks, calculates salary for approved attendance on
- * close, and reads persisted summary data without recalculating salary. Foreman ownership and admin access are
- * enforced here in addition to route-level role checks.</p>
+ * close, reads managed-shift lists for the current creator, and reads persisted summary data without recalculating
+ * salary. Foreman ownership and admin access are enforced here in addition to route-level role checks.</p>
  */
 @Service
 public class ShiftSessionService {
@@ -128,6 +128,22 @@ public class ShiftSessionService {
 
 		validateShiftAccess(shiftSession, principal);
 		return ShiftResponse.from(shiftSession);
+	}
+
+	/**
+	 * Lists shifts created by the current foreman or admin for their managed-shifts dashboard.
+	 *
+	 * <p>The method does not recalculate salary or include worker attendance. The repository returns rows ordered by
+	 * createdAt descending and id descending for stable newest-first results.</p>
+	 *
+	 * @param principal authenticated foreman or admin principal
+	 * @return shift responses for shifts created by the current user
+	 */
+	@Transactional(readOnly = true)
+	public List<ShiftResponse> getMyManagedShifts(AuthenticatedUserPrincipal principal) {
+		return shiftSessionRepository.findManagedShiftsByCreatedById(principal.id()).stream()
+				.map(ShiftResponse::from)
+				.toList();
 	}
 
 	/**

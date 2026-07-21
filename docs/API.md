@@ -987,9 +987,7 @@ Status: 401 Unauthorized
   "path": "/api/v1/me/shifts"
 }
 
-Planned: get my managed shifts
-
-This endpoint is planned and not implemented yet.
+Get my managed shifts
 
 GET /api/v1/me/managed-shifts
 
@@ -999,13 +997,19 @@ Purpose:
 - This endpoint must stay separate from `GET /api/v1/me/shifts`.
 - `GET /api/v1/me/shifts` remains personal worker attendance history only.
 
-Planned access rules:
+Access rules:
 
 - FOREMAN can list shifts where `createdBy` is the current user.
-- ADMIN behavior can be refined later and should not block the mobile MVP.
+- ADMIN also receives shifts where `createdBy` is the current user for the MVP. Full admin listing is deferred to the Vaadin admin UI.
 - WORKER is not allowed.
+- Missing, invalid, or expired JWT returns 401.
+- The endpoint does not include attendance data and does not recalculate salary.
+- Results are sorted by createdAt descending, then shift id descending.
+- The response uses shift DTO fields and does not expose User entities, passwordHash, company entity, createdAt, or updatedAt.
 
-Planned response shape:
+Response:
+
+Status: 200 OK
 
 [
   {
@@ -1023,6 +1027,30 @@ Planned response shape:
     "createdBy": 5
   }
 ]
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/me/managed-shifts"
+}
+
+WORKER:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/me/managed-shifts"
+}
 
 6. Error Response Format
 
@@ -1047,9 +1075,10 @@ FOREMAN:
 - can start shift
 - can close shift
 - can approve attendance
-- can see own managed shifts when the planned managed-shifts endpoint is implemented
+- can see own managed shifts
 - can see shift summary
 
 ADMIN:
 - can do everything supported by the current backend
+- can see own created managed shifts through `GET /api/v1/me/managed-shifts`
 - full user management is deferred until after the mobile MVP and should be implemented through the Vaadin admin dashboard
