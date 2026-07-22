@@ -15,7 +15,7 @@ Each Codex session should take one small task from this file.
 - [x] Add `docs/API.md`
 - [x] Add `docs/ARCHITECTURE.md`
 - [x] Add `.gitignore`
-- [ ] Create initial Git commit
+- [x] Create initial Git commit
 
 ## Milestone 1: Backend Foundation
 
@@ -102,6 +102,7 @@ Follow-up backend task:
 
 ## Milestone 7: Mobile Foundation
 
+- [x] Add mobile MVP UX plan
 - [ ] Create React Native / Expo project in `mobile/`
 - [ ] Add TypeScript
 - [ ] Add navigation
@@ -122,7 +123,7 @@ Follow-up backend task:
 
 ## Milestone 9: Infrastructure
 
-- [ ] Add Docker Compose for PostgreSQL
+- [x] Add Docker Compose for PostgreSQL
 - [ ] Add backend Dockerfile
 - [ ] Add local development compose file
 - [ ] Add README instructions for running locally
