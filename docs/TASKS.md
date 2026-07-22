@@ -103,13 +103,13 @@ Follow-up backend task:
 ## Milestone 7: Mobile Foundation
 
 - [x] Add mobile MVP UX plan
-- [ ] Create React Native / Expo project in `mobile/`
-- [ ] Add TypeScript
-- [ ] Add navigation
-- [ ] Add API client structure
-- [ ] Add environment configuration
-- [ ] Create login screen
-- [ ] Create register screen
+- [x] Create React Native / Expo project in `mobile/`
+- [x] Add TypeScript
+- [x] Add navigation
+- [x] Add API client structure
+- [x] Add environment configuration
+- [x] Create login screen
+- [x] Create register screen
 
 ## Milestone 8: Mobile MVP Screens
 
