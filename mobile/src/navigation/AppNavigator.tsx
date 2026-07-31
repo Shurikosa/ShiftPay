@@ -1,12 +1,16 @@
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
+import { WorkerShiftHistoryProvider } from "../context/WorkerShiftHistoryContext";
 import { ForemanDashboardScreen } from "../screens/ForemanDashboardScreen";
+import { JoinShiftScreen } from "../screens/JoinShiftScreen";
 import { LoginScreen } from "../screens/LoginScreen";
+import { MyShiftHistoryScreen } from "../screens/MyShiftHistoryScreen";
 import { RegisterScreen } from "../screens/RegisterScreen";
 import { RestoreSessionScreen } from "../screens/RestoreSessionScreen";
 import { UnsupportedRoleScreen } from "../screens/UnsupportedRoleScreen";
 import { WorkerDashboardScreen } from "../screens/WorkerDashboardScreen";
+import { WorkerShiftDetailsScreen } from "../screens/WorkerShiftDetailsScreen";
 import type {
   AuthStackParamList,
   ForemanStackParamList,
@@ -28,9 +32,14 @@ function AuthNavigator() {
 
 function WorkerNavigator() {
   return (
-    <WorkerStack.Navigator screenOptions={{ headerShown: false }}>
-      <WorkerStack.Screen component={WorkerDashboardScreen} name="WorkerDashboard" />
-    </WorkerStack.Navigator>
+    <WorkerShiftHistoryProvider>
+      <WorkerStack.Navigator screenOptions={{ headerShown: false }}>
+        <WorkerStack.Screen component={WorkerDashboardScreen} name="WorkerDashboard" />
+        <WorkerStack.Screen component={JoinShiftScreen} name="JoinShift" />
+        <WorkerStack.Screen component={MyShiftHistoryScreen} name="MyShiftHistory" />
+        <WorkerStack.Screen component={WorkerShiftDetailsScreen} name="WorkerShiftDetails" />
+      </WorkerStack.Navigator>
+    </WorkerShiftHistoryProvider>
   );
 }
 

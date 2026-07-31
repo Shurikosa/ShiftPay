@@ -8,7 +8,7 @@ import {
   useState
 } from "react";
 import { getCurrentUser, loginUser, registerUser } from "../api/auth";
-import { getErrorMessage } from "../api/errors";
+import { ApiError, getErrorMessage } from "../api/errors";
 import {
   clearSession,
   loadSession,
@@ -23,10 +23,15 @@ import type {
 
 type AuthStatus = "restoring" | "authenticated" | "unauthenticated";
 
+type AuthenticatedRequest<TResponse> = (token: string) => Promise<TResponse>;
+
 type AuthContextValue = {
   status: AuthStatus;
   user: User | null;
   error: string | null;
+  authenticatedRequest: <TResponse>(
+    request: AuthenticatedRequest<TResponse>
+  ) => Promise<TResponse>;
   signIn: (payload: LoginRequest) => Promise<void>;
   register: (payload: RegisterRequest) => Promise<User>;
   signOut: () => Promise<void>;
@@ -109,6 +114,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const authenticatedRequest = useCallback(
+    async <TResponse,>(
+      request: AuthenticatedRequest<TResponse>
+    ): Promise<TResponse> => {
+      const token = session?.accessToken;
+
+      if (!token) {
+        throw new ApiError("Sign in required.", 401);
+      }
+
+      return request(token);
+    },
+    [session?.accessToken]
+  );
+
   const register = useCallback(async (payload: RegisterRequest) => {
     setError(null);
 
@@ -141,12 +161,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       status,
       user: session?.user ?? null,
       error,
+      authenticatedRequest,
       signIn,
       register,
       signOut,
       clearError: clearErrorValue
     }),
-    [clearErrorValue, error, register, session?.user, signIn, signOut, status]
+    [
+      authenticatedRequest,
+      clearErrorValue,
+      error,
+      register,
+      session?.user,
+      signIn,
+      signOut,
+      status
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

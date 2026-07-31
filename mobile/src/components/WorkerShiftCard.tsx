@@ -1,0 +1,104 @@
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import type { WorkerShiftHistoryItem } from "../types/shifts";
+import { formatDateTime, formatMoney, formatMinutes } from "../utils/format";
+import { getAttendanceStatusTone, getShiftStatusTone } from "../utils/status";
+import { colors, radii, spacing, typography } from "../utils/theme";
+import { StatusBadge } from "./StatusBadge";
+
+type WorkerShiftCardProps = {
+  shift: WorkerShiftHistoryItem;
+  onPress?: () => void;
+};
+
+export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
+  const startTime = shift.actualStartTime ?? shift.plannedStartTime;
+  const salaryLabel =
+    shift.calculatedSalary === null ? "Salary pending" : `Salary ${formatMoney(shift.calculatedSalary)}`;
+  const workedLabel =
+    shift.workedMinutes === null ? "Worked time pending" : `Worked ${formatMinutes(shift.workedMinutes)}`;
+
+  return (
+    <Pressable
+      accessibilityRole={onPress ? "button" : undefined}
+      disabled={!onPress}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.card,
+        pressed && Boolean(onPress) && styles.pressed
+      ]}
+    >
+      <View style={styles.header}>
+        <View style={styles.titleBlock}>
+          <Text numberOfLines={2} style={styles.title}>
+            {shift.title}
+          </Text>
+          <Text numberOfLines={1} style={styles.location}>
+            {shift.location}
+          </Text>
+        </View>
+        <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
+      </View>
+
+      <Text style={styles.time}>{formatDateTime(startTime)}</Text>
+
+      <View style={styles.metaRow}>
+        <StatusBadge
+          label={shift.attendanceStatus}
+          tone={getAttendanceStatusTone(shift.attendanceStatus)}
+        />
+        <View style={styles.numbers}>
+          <Text style={styles.metaText}>{workedLabel}</Text>
+          <Text style={styles.metaText}>{salaryLabel}</Text>
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  card: {
+    gap: spacing.md,
+    borderRadius: radii.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+    padding: spacing.md
+  },
+  pressed: {
+    opacity: 0.88
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.md
+  },
+  titleBlock: {
+    flex: 1,
+    gap: spacing.xs
+  },
+  title: {
+    ...typography.label,
+    color: colors.text
+  },
+  location: {
+    ...typography.caption,
+    color: colors.textSecondary
+  },
+  time: {
+    ...typography.caption,
+    color: colors.textSecondary
+  },
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md
+  },
+  numbers: {
+    flex: 1,
+    gap: spacing.xs
+  },
+  metaText: {
+    ...typography.caption,
+    color: colors.textSecondary
+  }
+});

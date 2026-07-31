@@ -113,13 +113,13 @@ Follow-up backend task:
 
 ## Milestone 8: Mobile MVP Screens
 
-- [ ] Worker dashboard
+- [x] Worker dashboard
 - [ ] Foreman dashboard
-- [ ] Join shift screen
+- [x] Join shift screen
 - [ ] Create shift screen
-- [ ] Shift details screen
+- [x] Shift details screen
 - [ ] Shift summary screen
-- [ ] My shift history screen
+- [x] My shift history screen
 
 ## Milestone 9: Infrastructure
 
