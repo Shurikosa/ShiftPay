@@ -4,12 +4,16 @@ export type StatusTone = "neutral" | "primary" | "success" | "warning" | "error"
 
 export function getShiftStatusTone(status: ShiftStatus): StatusTone {
   switch (status) {
+    case "CREATED":
+      return "neutral";
     case "OPEN":
       return "primary";
     case "ACTIVE":
       return "warning";
     case "CLOSED":
       return "success";
+    case "CANCELLED":
+      return "error";
   }
 }
 

@@ -1,5 +1,5 @@
 import type { MobileRegistrationRole } from "./auth";
-import type { WorkerShiftHistoryItem } from "./shifts";
+import type { ManagedShift, WorkerShiftHistoryItem } from "./shifts";
 
 export type AuthStackParamList = {
   Login: undefined;
@@ -19,4 +19,13 @@ export type WorkerStackParamList = {
 
 export type ForemanStackParamList = {
   ForemanDashboard: undefined;
+  CreateShift: undefined;
+  ForemanShiftDetails: {
+    shiftId: number;
+    initialShift?: ManagedShift;
+  };
+  ShiftSummary: {
+    shiftId: number;
+    shiftTitle?: string;
+  };
 };

@@ -1,13 +1,17 @@
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
+import { ForemanManagedShiftsProvider } from "../context/ForemanManagedShiftsContext";
 import { WorkerShiftHistoryProvider } from "../context/WorkerShiftHistoryContext";
+import { CreateShiftScreen } from "../screens/CreateShiftScreen";
 import { ForemanDashboardScreen } from "../screens/ForemanDashboardScreen";
+import { ForemanShiftDetailsScreen } from "../screens/ForemanShiftDetailsScreen";
 import { JoinShiftScreen } from "../screens/JoinShiftScreen";
 import { LoginScreen } from "../screens/LoginScreen";
 import { MyShiftHistoryScreen } from "../screens/MyShiftHistoryScreen";
 import { RegisterScreen } from "../screens/RegisterScreen";
 import { RestoreSessionScreen } from "../screens/RestoreSessionScreen";
+import { ShiftSummaryScreen } from "../screens/ShiftSummaryScreen";
 import { UnsupportedRoleScreen } from "../screens/UnsupportedRoleScreen";
 import { WorkerDashboardScreen } from "../screens/WorkerDashboardScreen";
 import { WorkerShiftDetailsScreen } from "../screens/WorkerShiftDetailsScreen";
@@ -45,9 +49,17 @@ function WorkerNavigator() {
 
 function ForemanNavigator() {
   return (
-    <ForemanStack.Navigator screenOptions={{ headerShown: false }}>
-      <ForemanStack.Screen component={ForemanDashboardScreen} name="ForemanDashboard" />
-    </ForemanStack.Navigator>
+    <ForemanManagedShiftsProvider>
+      <ForemanStack.Navigator screenOptions={{ headerShown: false }}>
+        <ForemanStack.Screen component={ForemanDashboardScreen} name="ForemanDashboard" />
+        <ForemanStack.Screen component={CreateShiftScreen} name="CreateShift" />
+        <ForemanStack.Screen
+          component={ForemanShiftDetailsScreen}
+          name="ForemanShiftDetails"
+        />
+        <ForemanStack.Screen component={ShiftSummaryScreen} name="ShiftSummary" />
+      </ForemanStack.Navigator>
+    </ForemanManagedShiftsProvider>
   );
 }
 
