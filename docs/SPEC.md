@@ -81,9 +81,11 @@ A foreman can:
 - approve joined workers
 - set break duration
 - set the default hourly rate for a shift
+- set their own hourly rate for a shift
 - view shifts they created and manage
 - view shift summary
 - view worker salary summary
+- view their own private foreman salary summary
 
 ### 4.3 Admin
 
@@ -104,23 +106,25 @@ ADMIN user management is deferred until after the mobile MVP.
 Basic flow:
 
 1. Foreman logs in.
-2. Foreman creates a shift session and sets its default hourly rate.
-3. System generates a join code.
-4. Worker logs in.
-5. Worker enters the join code.
-6. Worker joins the session without providing an hourly rate.
-7. System copies the shift default hourly rate into the worker attendance record as a snapshot.
-8. While the shift is OPEN, the foreman approves joined workers and may override the rate for an individual attendance.
-9. If no rate override is provided, the attendance keeps its join-time rate snapshot.
-10. Foreman starts the shift.
-11. System records shift start time.
-12. Foreman closes the shift.
-13. System records shift end time.
-14. System calculates worked time for approved attendance.
-15. System calculates salary for approved attendance.
-16. Worker can view result.
-17. Foreman can view shift summary.
-18. Foreman can view the list of shifts they created and manage.
+2. Foreman creates a shift session with optional location, default break minutes, default worker hourly rate, and foreman hourly rate.
+3. System generates a default title from date/time and company name.
+4. System generates a join code.
+5. Worker logs in.
+6. Worker enters the join code.
+7. Worker joins the session without providing an hourly rate.
+8. System copies the shift default hourly rate into the worker attendance record as a snapshot.
+9. While the shift is OPEN, the foreman approves joined workers and may override the rate for an individual attendance.
+10. If no rate override is provided, the attendance keeps its join-time rate snapshot.
+11. Foreman starts the shift.
+12. System records shift start time as actualStartTime.
+13. Foreman closes the shift.
+14. System records shift end time as actualEndTime.
+15. System calculates worked time for approved worker attendance.
+16. System calculates salary for approved worker attendance.
+17. System calculates the foreman's private salary from ShiftSession.foremanHourlyRate without creating ShiftAttendance for the foreman.
+18. Worker can view their own worker result.
+19. Foreman can view shift summary, including worker salary summary and their own private foreman salary.
+20. Foreman can view the list of shifts they created and manage.
 
 ## 6. Shift Statuses
 
@@ -132,7 +136,33 @@ ACTIVE
 CLOSED
 CANCELLED
 
-8. Salary Calculation
+## 7. Shift Creation Rules
+
+For the mobile MVP, the foreman does not enter plannedStartTime or plannedEndTime when creating a shift.
+
+Shift creation should not require planned times.
+
+The foreman should not manually enter a shift title in the mobile MVP.
+
+The backend generates a default title automatically from date/time and company name.
+Example format:
+
+Tuesday 10:00 - Default Company
+
+The MVP title format uses English locale and Europe/Berlin timezone.
+
+Shift creation still includes:
+
+- optional location
+- defaultBreakMinutes
+- defaultHourlyRate for workers
+- foremanHourlyRate for the foreman
+
+actualStartTime is set by the backend when the foreman starts the shift.
+
+actualEndTime is set by the backend when the foreman closes the shift.
+
+## 8. Salary Calculation
 
 Basic formula:
 
@@ -149,13 +179,24 @@ hourly rate: 15 EUR/DOL
 worked time = 8 hours
 salary = 8 * 15 = 120 EUR/DOL
 
-9. Important Salary Rules
+Worker salary:
+
+worker_worked_minutes = actualEndTime - actualStartTime - attendance.breakMinutes
+worker_salary = worker_worked_minutes / 60 * attendance.hourlyRate
+
+Foreman salary:
+
+foreman_worked_minutes = actualEndTime - actualStartTime - shift.defaultBreakMinutes
+foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
+
+## 9. Important Salary Rules
 -Salary must not be negative.
 -Break time cannot be greater than total shift time.
 -If shift is not closed, final salary should not be calculated.
 -Hourly rate should be stored for the attendance record, because rates can change later.
 -WORKER never sets an hourly rate.
 -FOREMAN sets one default hourly rate for a shift that they own.
+-FOREMAN sets foremanHourlyRate for their own salary on the shift.
 -ADMIN can set the default hourly rate for any shift.
 -The attendance hourly rate is copied from the shift default hourly rate when the worker joins and remains a snapshot for that attendance record.
 -During approval, FOREMAN may override the hourly rate for an attendance on a shift they own.
@@ -167,6 +208,12 @@ salary = 8 * 15 = 120 EUR/DOL
 -Only APPROVED attendance receives worked minutes and calculated salary.
 -JOINED, REJECTED, and CANCELLED attendance keep worked minutes and calculated salary empty.
 -Salary calculation uses the attendance hourly rate snapshot or override.
+-Worker salary is calculated from ShiftAttendance.hourlyRate and must not use ShiftSession.foremanHourlyRate.
+-Foreman salary is calculated separately from worker attendance using ShiftSession.foremanHourlyRate.
+-The system must not create a ShiftAttendance row for foreman salary.
+-Foreman salary fields are private and visible only to the owner FOREMAN of the shift.
+-WORKER never receives foreman salary fields.
+-For the MVP REST/mobile API, ADMIN does not receive foreman salary fields.
 -Calculated salary is rounded to 2 decimal places with HALF_UP.
 -Closing fails if actualStartTime is missing or break time is greater than the shift duration.
 
@@ -241,7 +288,8 @@ join shift by code
 start shift
 close shift
 calculate worked time
-calculate salary
+calculate worker salary
+calculate private foreman salary
 worker shift history
 foreman shift summary
 

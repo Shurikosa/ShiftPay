@@ -108,20 +108,34 @@ title
 location
 joinCode
 status
-plannedStartTime
-plannedEndTime
 actualStartTime
 actualEndTime
 defaultBreakMinutes
 defaultHourlyRate
+foremanHourlyRate
+foremanWorkedMinutes
+foremanCalculatedSalary
 createdBy
 createdAt
 updatedAt
+
+Shift Creation
+
+- For the mobile MVP, ShiftSession creation does not require plannedStartTime or plannedEndTime.
+- The foreman does not enter planned start or planned end times in mobile.
+- The foreman does not manually enter title in mobile.
+- The backend generates ShiftSession.title automatically from date/time and company name.
+- Example generated title format: `Tuesday 10:00 - Default Company`.
+- The generated title uses English locale and Europe/Berlin timezone for the MVP.
+- actualStartTime is set by the backend when the foreman starts the shift.
+- actualEndTime is set by the backend when the foreman closes the shift.
+- Shift creation keeps optional location, defaultBreakMinutes, defaultHourlyRate, and foremanHourlyRate.
 
 Hourly Rate Ownership
 
 - WORKER does not provide or modify hourly rates.
 - FOREMAN sets defaultHourlyRate when creating an owned shift.
+- FOREMAN sets foremanHourlyRate when creating an owned shift.
 - ADMIN can set defaultHourlyRate for any shift.
 - ShiftAttendance.hourlyRate is copied from ShiftSession.defaultHourlyRate when a worker joins.
 - ShiftAttendance.hourlyRate is a snapshot for that worker and shift, so later shift-rate changes do not rewrite historical attendance.
@@ -129,6 +143,9 @@ Hourly Rate Ownership
 - ADMIN can override ShiftAttendance.hourlyRate while approving attendance for any OPEN shift.
 - Approval without an override preserves the join-time attendance rate snapshot.
 - An attendance-specific override does not modify ShiftSession.defaultHourlyRate or other attendance records.
+- ShiftSession.foremanHourlyRate is private to the owner FOREMAN in the REST/mobile MVP.
+- WORKER DTOs never expose ShiftSession.foremanHourlyRate.
+- ADMIN REST/mobile DTOs do not expose ShiftSession.foremanHourlyRate for the MVP; future ADMIN/Vaadin visibility can be decided later.
 ShiftAttendance
 
 Fields:
@@ -176,7 +193,7 @@ Worker Shift History
 - OPEN, ACTIVE, and unapproved attendance can return null workedMinutes and calculatedSalary.
 - The repository fetches attendance with shift in one query to avoid N+1 loading.
 - Results are ordered by joinedAt descending and then attendance id descending.
-- DTOs expose shift and attendance fields only, never User entities, emails, or password hashes.
+- DTOs expose shift and attendance fields only, never User entities, emails, password hashes, foremanHourlyRate, foremanWorkedMinutes, or foremanSalary.
 
 Foreman Managed Shifts
 
@@ -190,6 +207,8 @@ Foreman Managed Shifts
 - The endpoint reuses ShiftSession service/repository logic and does not recalculate salary.
 - Results are ordered by createdAt descending and shift id descending.
 - Response DTOs expose shift/session fields needed by the mobile dashboard and do not expose User entities, password hashes, company entity, createdAt, or updatedAt.
+- foremanHourlyRate is included only for the owner FOREMAN in the REST/mobile MVP.
+- ADMIN can use the endpoint only for shifts they personally created during the MVP, but ADMIN responses do not include foremanHourlyRate or foreman salary fields.
 
 Admin User Management
 
@@ -204,28 +223,42 @@ Salary Calculation
 - SalaryCalculationService owns worked-minute and salary math.
 - ShiftSessionService.closeShift invokes SalaryCalculationService after locking the ShiftSession and before setting status CLOSED.
 - Close locks all attendance rows for the shift with PESSIMISTIC_WRITE after locking the ShiftSession.
-- Salary is calculated only for APPROVED attendance.
+- Worker salary is calculated only for APPROVED attendance.
 - JOINED, REJECTED, and CANCELLED attendance keep workedMinutes and calculatedSalary null.
 - workedMinutes = minutes_between(actualStartTime, actualEndTime) - attendance.breakMinutes.
 - calculatedSalary = workedMinutes / 60 * attendance.hourlyRate.
 - calculatedSalary is stored with scale 2 and RoundingMode.HALF_UP.
 - Salary uses ShiftAttendance.hourlyRate, including any attendance-specific approval override.
-- Close fails with 409 if actualStartTime is missing or breakMinutes is greater than shift duration.
+- Foreman salary is calculated separately from worker attendance.
+- The backend must not create a ShiftAttendance row for foreman salary.
+- Foreman salary uses ShiftSession.foremanHourlyRate.
+- foremanWorkedMinutes = minutes_between(actualStartTime, actualEndTime) - ShiftSession.defaultBreakMinutes.
+- foremanSalary = foremanWorkedMinutes / 60 * ShiftSession.foremanHourlyRate.
+- foremanSalary is stored or returned with scale 2 and RoundingMode.HALF_UP.
+- No client should calculate worker or foreman salary.
+- Close fails with 409 if actualStartTime is missing, an attendance breakMinutes is greater than shift duration, or ShiftSession.defaultBreakMinutes is greater than shift duration.
 - Close is transactional: when salary validation fails, the shift remains ACTIVE and attendance salary fields are not written.
 
 Shift Summary
 
 - ShiftSessionService owns summary business rules.
 - Summary is available only for CLOSED shifts.
+- FOREMAN can get summary only for a shift they created.
+- ADMIN can get worker summary for any shift.
 - Summary reads persisted ShiftAttendance.workedMinutes and ShiftAttendance.calculatedSalary.
-- Summary does not call SalaryCalculationService and does not recalculate salary.
+- Summary does not recalculate worker or foreman salary.
 - Summary includes only APPROVED attendance.
 - The repository fetches approved attendance with worker in one query to avoid N+1 loading.
 - Workers are ordered by worker lastName, firstName, and worker id.
 - totalWorkers is the count of included attendance rows.
-- totalSalary is the sum of included calculatedSalary values with scale 2.
+- totalSalary is the sum of included worker calculatedSalary values with scale 2.
 - If approved attendance is missing workedMinutes or calculatedSalary, summary returns a conflict.
 - Summary DTOs expose worker identity fields but never expose User entities or password hashes.
+- Worker summary remains based on approved ShiftAttendance rows.
+- Foreman private salary fields are separate from worker rows: foremanWorkedMinutes, foremanHourlyRate, and foremanSalary.
+- Foreman salary fields are returned only to the owner FOREMAN.
+- WORKER never receives foreman salary fields.
+- ADMIN REST/mobile MVP does not receive foreman salary fields; future ADMIN/Vaadin visibility can be decided later.
 
 Concurrency Control
 

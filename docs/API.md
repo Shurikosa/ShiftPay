@@ -204,28 +204,56 @@ Authorization: Bearer <token>
 Request:
 
 {
-  "title": "Monday construction shift",
   "location": "Cologne",
-  "plannedStartTime": "2026-07-01T08:00:00",
-  "plannedEndTime": "2026-07-01T17:00:00",
   "defaultBreakMinutes": 60,
-  "defaultHourlyRate": 15.00
+  "defaultHourlyRate": 15.00,
+  "foremanHourlyRate": 25.00
 }
 
-Response:
+Response for owner FOREMAN:
 
 Status: 201 Created
 
 {
   "id": 100,
-  "title": "Monday construction shift",
+  "title": "Tuesday 10:00 - Default Company",
+  "location": "Cologne",
   "joinCode": "ABCD12",
   "status": "OPEN",
+  "actualStartTime": null,
+  "actualEndTime": null,
+  "defaultBreakMinutes": 60,
+  "defaultHourlyRate": 15.00,
+  "foremanHourlyRate": 25.00,
+  "createdBy": 5
+}
+
+Response for ADMIN:
+
+Status: 201 Created
+
+{
+  "id": 100,
+  "title": "Tuesday 10:00 - Default Company",
+  "location": "Cologne",
+  "joinCode": "ABCD12",
+  "status": "OPEN",
+  "actualStartTime": null,
+  "actualEndTime": null,
+  "defaultBreakMinutes": 60,
   "defaultHourlyRate": 15.00,
   "createdBy": 5
 }
 
-defaultHourlyRate is required, must be greater than or equal to 0, and supports up to two decimal places. It is set by the FOREMAN creating the shift or by an ADMIN.
+The mobile MVP create-shift contract does not accept title, plannedStartTime, or plannedEndTime. The backend generates a default title automatically from date/time and company name. MVP format: `Tuesday 10:00 - Default Company`, using English locale and Europe/Berlin timezone.
+
+location is optional.
+
+defaultBreakMinutes is optional, defaults to 0 when omitted, and must be greater than or equal to 0 when provided.
+
+defaultHourlyRate is required, must be greater than or equal to 0, and supports up to two decimal places. It is used only as the worker attendance rate snapshot when workers join.
+
+foremanHourlyRate is required, must be greater than or equal to 0, supports up to two decimal places, and is stored on ShiftSession for the foreman's private salary calculation. The owner FOREMAN can see foremanHourlyRate. WORKER never receives it. For the MVP REST/mobile API, ADMIN does not receive foremanHourlyRate or foreman salary fields in responses.
 
 Validation error:
 
@@ -235,7 +263,7 @@ Status: 400 Bad Request
   "timestamp": "2026-07-01T10:00:00Z",
   "status": 400,
   "error": "Bad Request",
-  "message": "plannedEndTime must be after plannedStartTime",
+  "message": "foremanHourlyRate: must be greater than or equal to 0.00",
   "path": "/api/v1/shifts"
 }
 
@@ -276,18 +304,36 @@ Access rules:
 - ADMIN can get any shift.
 - WORKER is not allowed until worker attendance access is implemented.
 
-Response:
+Response for owner FOREMAN:
 
 Status: 200 OK
 
 {
   "id": 100,
-  "title": "Monday construction shift",
+  "title": "Tuesday 10:00 - Default Company",
   "location": "Cologne",
   "status": "OPEN",
   "joinCode": "ABCD12",
-  "plannedStartTime": "2026-07-01T08:00:00Z",
-  "plannedEndTime": "2026-07-01T17:00:00Z",
+  "actualStartTime": null,
+  "actualEndTime": null,
+  "defaultBreakMinutes": 60,
+  "defaultHourlyRate": 15.00,
+  "foremanHourlyRate": 25.00,
+  "createdBy": 5
+}
+
+foremanHourlyRate is included only when the current user is the owner FOREMAN of the shift. WORKER never receives it. For the MVP REST/mobile API, ADMIN does not receive foremanHourlyRate.
+
+Response for ADMIN:
+
+Status: 200 OK
+
+{
+  "id": 100,
+  "title": "Tuesday 10:00 - Default Company",
+  "location": "Cologne",
+  "status": "OPEN",
+  "joinCode": "ABCD12",
   "actualStartTime": null,
   "actualEndTime": null,
   "defaultBreakMinutes": 60,
@@ -344,6 +390,7 @@ Access and state rules:
 - ADMIN can start any shift.
 - WORKER is not allowed.
 - Only a shift with status OPEN can be started.
+- The backend sets actualStartTime to the current server time in UTC.
 
 Response:
 
@@ -424,7 +471,13 @@ Access and state rules:
 - calculatedSalary = workedMinutes / 60 * attendance.hourlyRate, rounded to 2 decimal places with HALF_UP.
 - Salary uses the attendance hourlyRate snapshot or attendance-specific override, not shift.defaultHourlyRate.
 - JOINED, REJECTED, and CANCELLED attendance keep workedMinutes and calculatedSalary as null.
+- The backend calculates foremanWorkedMinutes and foremanSalary separately from worker attendance.
+- foremanWorkedMinutes = minutes_between(actualStartTime, actualEndTime) - shift.defaultBreakMinutes.
+- foremanSalary = foremanWorkedMinutes / 60 * shift.foremanHourlyRate, rounded to 2 decimal places with HALF_UP.
+- Foreman salary uses ShiftSession.foremanHourlyRate.
+- The backend must not create a ShiftAttendance row for foreman salary.
 - If breakMinutes is greater than the shift duration, close returns 409 and the shift remains ACTIVE.
+- If defaultBreakMinutes is greater than the shift duration, close returns 409 and the shift remains ACTIVE.
 
 Response:
 
@@ -842,7 +895,7 @@ Authorization: Bearer <token>
 Rules:
 
 - FOREMAN can get summary only for a shift they created.
-- ADMIN can get summary for any shift.
+- ADMIN can get worker summary for any shift.
 - WORKER is not allowed.
 - Summary is available only for CLOSED shifts.
 - The endpoint uses stored workedMinutes and calculatedSalary from shift_attendance.
@@ -850,11 +903,43 @@ Rules:
 - Only APPROVED attendance is included in workers.
 - JOINED, REJECTED, and CANCELLED attendance is excluded.
 - totalWorkers is the number of included APPROVED attendance records.
-- totalSalary is the sum of included calculatedSalary values with scale 2.
+- totalSalary is the sum of included worker calculatedSalary values with scale 2.
+- Worker summary remains limited to APPROVED worker attendance.
 - Workers are sorted by lastName ascending, firstName ascending, then workerId ascending.
 - If an APPROVED attendance has null workedMinutes or calculatedSalary, the endpoint returns 409.
+- The owner FOREMAN receives private foreman salary fields separately from workers: foremanWorkedMinutes, foremanHourlyRate, and foremanSalary.
+- foremanWorkedMinutes uses actualEndTime - actualStartTime - ShiftSession.defaultBreakMinutes.
+- foremanSalary uses ShiftSession.foremanHourlyRate.
+- WORKER never receives foreman salary fields.
+- For the MVP REST/mobile API, ADMIN does not receive foreman salary fields.
+- Future ADMIN/Vaadin visibility for foreman salary can be decided later.
 
-Response:
+Response for owner FOREMAN:
+
+Status: 200 OK
+
+{
+  "shiftId": 100,
+  "status": "CLOSED",
+  "totalWorkers": 2,
+  "totalSalary": 240.00,
+  "foremanWorkedMinutes": 480,
+  "foremanHourlyRate": 25.00,
+  "foremanSalary": 200.00,
+  "workers": [
+    {
+      "attendanceId": 500,
+      "workerId": 1,
+      "firstName": "John",
+      "lastName": "Worker",
+      "workedMinutes": 480,
+      "hourlyRate": 15.00,
+      "salary": 120.00
+    }
+  ]
+}
+
+Response for ADMIN:
 
 Status: 200 OK
 
@@ -960,11 +1045,9 @@ Response:
   {
     "shiftId": 100,
     "attendanceId": 500,
-    "title": "Monday construction shift",
+    "title": "Tuesday 10:00 - Default Company",
     "location": "Cologne",
     "status": "CLOSED",
-    "plannedStartTime": "2026-07-01T08:00:00Z",
-    "plannedEndTime": "2026-07-01T17:00:00Z",
     "actualStartTime": "2026-07-01T08:05:00Z",
     "actualEndTime": "2026-07-01T17:00:00Z",
     "attendanceStatus": "APPROVED",
@@ -974,6 +1057,8 @@ Response:
     "calculatedSalary": 120.00
   }
 ]
+
+Worker history never returns foremanHourlyRate, foremanWorkedMinutes, or foremanSalary.
 
 Missing, invalid, or expired token:
 
@@ -1007,19 +1092,39 @@ Access rules:
 - Results are sorted by createdAt descending, then shift id descending.
 - The response uses shift DTO fields and does not expose User entities, passwordHash, company entity, createdAt, or updatedAt.
 
-Response:
+Response for owner FOREMAN:
 
 Status: 200 OK
 
 [
   {
     "id": 100,
-    "title": "Monday construction shift",
+    "title": "Tuesday 10:00 - Default Company",
     "location": "Cologne",
     "status": "OPEN",
     "joinCode": "ABCD12",
-    "plannedStartTime": "2026-07-01T08:00:00Z",
-    "plannedEndTime": "2026-07-01T17:00:00Z",
+    "actualStartTime": null,
+    "actualEndTime": null,
+    "defaultBreakMinutes": 60,
+    "defaultHourlyRate": 15.00,
+    "foremanHourlyRate": 25.00,
+    "createdBy": 5
+  }
+]
+
+foremanHourlyRate is included only for FOREMAN users who own the managed shift. WORKER cannot call this endpoint. For the MVP REST/mobile API, ADMIN does not receive foremanHourlyRate.
+
+Response for ADMIN:
+
+Status: 200 OK
+
+[
+  {
+    "id": 100,
+    "title": "Tuesday 10:00 - Default Company",
+    "location": "Cologne",
+    "status": "OPEN",
+    "joinCode": "ABCD12",
     "actualStartTime": null,
     "actualEndTime": null,
     "defaultBreakMinutes": 60,
@@ -1081,4 +1186,6 @@ FOREMAN:
 ADMIN:
 - can do everything supported by the current backend
 - can see own created managed shifts through `GET /api/v1/me/managed-shifts`
+- can see worker-only shift summary through `GET /api/v1/shifts/{shiftId}/summary`
+- does not receive foremanHourlyRate, foremanWorkedMinutes, or foremanSalary through the MVP REST/mobile API
 - full user management is deferred until after the mobile MVP and should be implemented through the Vaadin admin dashboard

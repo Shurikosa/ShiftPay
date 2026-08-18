@@ -34,7 +34,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.matchesPattern;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -89,7 +92,7 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
-	 * Creates a shift as a FOREMAN and expects an OPEN shift with the requested default hourly rate persisted.
+	 * Creates a shift as a FOREMAN without title or planned times and expects generated shift metadata.
 	 */
 	@Test
 	void foremanCanCreateShift() throws Exception {
@@ -101,15 +104,30 @@ class ShiftSessionControllerTests {
 						.content(validCreateShiftPayload("Foreman shift")))
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.id").isNumber())
-				.andExpect(jsonPath("$.title").value("Foreman shift"))
+				.andExpect(jsonPath("$.title").value(matchesPattern("[A-Za-z]+ \\d{2}:\\d{2} - Default Company")))
+				.andExpect(jsonPath("$.title").value(containsString("Default Company")))
+				.andExpect(jsonPath("$.location").value("Cologne"))
 				.andExpect(jsonPath("$.joinCode").isString())
 				.andExpect(jsonPath("$.status").value("OPEN"))
+				.andExpect(jsonPath("$.actualStartTime").value(nullValue()))
+				.andExpect(jsonPath("$.actualEndTime").value(nullValue()))
+				.andExpect(jsonPath("$.defaultBreakMinutes").value(60))
 				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25))
-				.andExpect(jsonPath("$.createdBy").isNumber());
+				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
+				.andExpect(jsonPath("$.createdBy").isNumber())
+				.andExpect(jsonPath("$.plannedStartTime").doesNotExist())
+				.andExpect(jsonPath("$.plannedEndTime").doesNotExist())
+				.andExpect(jsonPath("$.*", hasSize(11)));
 
 		assertThat(shiftSessionRepository.count()).isEqualTo(1);
-		assertThat(shiftSessionRepository.findAll().getFirst().getDefaultHourlyRate())
-				.isEqualByComparingTo("15.25");
+		ShiftSession createdShift = shiftSessionRepository.findAll().getFirst();
+		assertThat(createdShift.getTitle()).contains("Default Company");
+		assertThat(createdShift.getPlannedStartTime()).isNull();
+		assertThat(createdShift.getPlannedEndTime()).isNull();
+		assertThat(createdShift.getActualStartTime()).isNull();
+		assertThat(createdShift.getActualEndTime()).isNull();
+		assertThat(createdShift.getDefaultHourlyRate()).isEqualByComparingTo("15.25");
+		assertThat(createdShift.getForemanHourlyRate()).isEqualByComparingTo("25.00");
 	}
 
 	/**
@@ -124,9 +142,11 @@ class ShiftSessionControllerTests {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content(validCreateShiftPayload("Admin shift")))
 				.andExpect(status().isCreated())
-				.andExpect(jsonPath("$.title").value("Admin shift"))
+				.andExpect(jsonPath("$.title").value(containsString("Default Company")))
 				.andExpect(jsonPath("$.status").value("OPEN"))
-				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25));
+				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25))
+				.andExpect(jsonPath("$.foremanHourlyRate").doesNotExist())
+				.andExpect(jsonPath("$.*", hasSize(10)));
 	}
 
 	/**
@@ -174,12 +194,10 @@ class ShiftSessionControllerTests {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{
-								  "title": "Invalid break shift",
 								  "location": "Cologne",
-								  "plannedStartTime": "2026-07-01T08:00:00",
-								  "plannedEndTime": "2026-07-01T17:00:00",
 								  "defaultBreakMinutes": -1,
-								  "defaultHourlyRate": 15.25
+								  "defaultHourlyRate": 15.25,
+								  "foremanHourlyRate": 25.00
 								}
 								"""))
 				.andExpect(status().isBadRequest())
@@ -189,30 +207,34 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
-	 * Sends planned end before planned start and expects the service business validation message.
+	 * Sends legacy title and planned fields and expects create to ignore them for the MVP contract.
 	 */
 	@Test
-	void invalidPlannedTimeOrderReturnsBadRequest() throws Exception {
+	void plannedFieldsAreNotUsedByCreateContract() throws Exception {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
 
-		mockMvc.perform(post(CREATE_SHIFT_URL)
-						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
-						.contentType(MediaType.APPLICATION_JSON)
-						.content("""
-								{
-								  "title": "Invalid time shift",
-								  "location": "Cologne",
-								  "plannedStartTime": "2026-07-01T17:00:00",
-								  "plannedEndTime": "2026-07-01T08:00:00",
-								  "defaultBreakMinutes": 60,
-								  "defaultHourlyRate": 15.25
-								}
-								"""))
-				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.status").value(400))
-				.andExpect(jsonPath("$.error").value("Bad Request"))
-				.andExpect(jsonPath("$.message").value("plannedEndTime must be after plannedStartTime"))
-				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
+		MvcResult result = createShiftWithPayload(accessToken, """
+				{
+				  "title": "Client supplied title",
+				  "location": "Cologne",
+				  "plannedStartTime": "2026-07-01T17:00:00",
+				  "plannedEndTime": "2026-07-01T08:00:00",
+				  "defaultBreakMinutes": 60,
+				  "defaultHourlyRate": 15.25,
+				  "foremanHourlyRate": 25.00
+				}
+				""")
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.title").value(containsString("Default Company")))
+				.andExpect(jsonPath("$.title").value(not("Client supplied title")))
+				.andExpect(jsonPath("$.plannedStartTime").doesNotExist())
+				.andExpect(jsonPath("$.plannedEndTime").doesNotExist())
+				.andReturn();
+
+		ShiftSession shift = shiftSessionRepository.findById(extractShiftId(result)).orElseThrow();
+		assertThat(shift.getTitle()).isNotEqualTo("Client supplied title");
+		assertThat(shift.getPlannedStartTime()).isNull();
+		assertThat(shift.getPlannedEndTime()).isNull();
 	}
 
 	/**
@@ -250,18 +272,19 @@ class ShiftSessionControllerTests {
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.id").value(shiftId))
-				.andExpect(jsonPath("$.title").value("Owner shift"))
+				.andExpect(jsonPath("$.title").value(containsString("Default Company")))
 				.andExpect(jsonPath("$.location").value("Cologne"))
 				.andExpect(jsonPath("$.status").value("OPEN"))
 				.andExpect(jsonPath("$.joinCode").isString())
-				.andExpect(jsonPath("$.plannedStartTime").value("2026-07-01T08:00:00Z"))
-				.andExpect(jsonPath("$.plannedEndTime").value("2026-07-01T17:00:00Z"))
 				.andExpect(jsonPath("$.actualStartTime").value(nullValue()))
 				.andExpect(jsonPath("$.actualEndTime").value(nullValue()))
 				.andExpect(jsonPath("$.defaultBreakMinutes").value(60))
 				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25))
+				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
 				.andExpect(jsonPath("$.createdBy").isNumber())
-				.andExpect(jsonPath("$.*", hasSize(12)))
+				.andExpect(jsonPath("$.plannedStartTime").doesNotExist())
+				.andExpect(jsonPath("$.plannedEndTime").doesNotExist())
+				.andExpect(jsonPath("$.*", hasSize(11)))
 				.andExpect(jsonPath("$.company").doesNotExist())
 				.andExpect(jsonPath("$.createdAt").doesNotExist())
 				.andExpect(jsonPath("$.updatedAt").doesNotExist());
@@ -298,7 +321,9 @@ class ShiftSessionControllerTests {
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.id").value(shiftId))
-				.andExpect(jsonPath("$.title").value("Foreman shift"));
+				.andExpect(jsonPath("$.title").value(containsString("Default Company")))
+				.andExpect(jsonPath("$.foremanHourlyRate").doesNotExist())
+				.andExpect(jsonPath("$.*", hasSize(10)));
 	}
 
 	/**
@@ -700,6 +725,28 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
+	 * Closes a shift and expects private foreman salary fields to be persisted on the shift, not attendance.
+	 */
+	@Test
+	void closeCalculatesAndPersistsForemanSalaryWithoutForemanAttendance() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Foreman salary shift");
+		startShift(foremanToken, shiftId).andExpect(status().isOk());
+		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(540));
+		long attendanceCountBeforeClose = shiftAttendanceRepository.count();
+
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
+
+		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		int expectedForemanWorkedMinutes = expectedForemanWorkedMinutes(shift);
+		assertThat(shift.getForemanWorkedMinutes()).isEqualTo(expectedForemanWorkedMinutes);
+		assertThat(shift.getForemanCalculatedSalary())
+				.isEqualByComparingTo(expectedSalary(expectedForemanWorkedMinutes, shift.getForemanHourlyRate()));
+		assertThat(shift.getForemanCalculatedSalary().scale()).isEqualTo(2);
+		assertThat(shiftAttendanceRepository.count()).isEqualTo(attendanceCountBeforeClose);
+	}
+
+	/**
 	 * Approves attendance with a rate override and expects close-time salary to use the attendance override.
 	 */
 	@Test
@@ -754,6 +801,9 @@ class ShiftSessionControllerTests {
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
 		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
 		approveAttendance(foremanToken, shiftId, attendanceId, "{}").andExpect(status().isOk());
+		ShiftSession shiftBeforeClose = shiftSessionRepository.findById(shiftId).orElseThrow();
+		shiftBeforeClose.setDefaultBreakMinutes(0);
+		shiftSessionRepository.saveAndFlush(shiftBeforeClose);
 		startShift(foremanToken, shiftId).andExpect(status().isOk());
 		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(10));
 
@@ -768,8 +818,34 @@ class ShiftSessionControllerTests {
 		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
 		assertThat(shift.getStatus()).isEqualTo(ShiftStatus.ACTIVE);
 		assertThat(shift.getActualEndTime()).isNull();
+		assertThat(shift.getForemanWorkedMinutes()).isNull();
+		assertThat(shift.getForemanCalculatedSalary()).isNull();
 		assertThat(attendance.getWorkedMinutes()).isNull();
 		assertThat(attendance.getCalculatedSalary()).isNull();
+	}
+
+	/**
+	 * Makes the shift duration shorter than the default break and expects private foreman salary validation to roll back.
+	 */
+	@Test
+	void defaultBreakGreaterThanDurationReturnsConflictAndDoesNotCloseShift() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Invalid foreman break salary shift");
+		startShift(foremanToken, shiftId).andExpect(status().isOk());
+		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(10));
+
+		closeShift(foremanToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Break minutes cannot be greater than shift duration"))
+				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
+
+		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		assertThat(shift.getStatus()).isEqualTo(ShiftStatus.ACTIVE);
+		assertThat(shift.getActualEndTime()).isNull();
+		assertThat(shift.getForemanWorkedMinutes()).isNull();
+		assertThat(shift.getForemanCalculatedSalary()).isNull();
 	}
 
 	/**
@@ -814,6 +890,7 @@ class ShiftSessionControllerTests {
 		BigDecimal totalSalary = firstAttendance.getCalculatedSalary()
 				.add(secondAttendance.getCalculatedSalary())
 				.setScale(2, RoundingMode.HALF_UP);
+		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
 
 		getSummary(foremanToken, shiftId)
 				.andExpect(status().isOk())
@@ -821,6 +898,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.status").value("CLOSED"))
 				.andExpect(jsonPath("$.totalWorkers").value(2))
 				.andExpect(jsonPath("$.totalSalary").value(totalSalary.doubleValue()))
+				.andExpect(jsonPath("$.foremanWorkedMinutes").value(shift.getForemanWorkedMinutes()))
+				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
+				.andExpect(jsonPath("$.foremanSalary").value(shift.getForemanCalculatedSalary().doubleValue()))
 				.andExpect(jsonPath("$.workers", hasSize(2)))
 				.andExpect(jsonPath("$.workers[0].attendanceId").value(firstAttendanceId))
 				.andExpect(jsonPath("$.workers[0].workerId").isNumber())
@@ -840,7 +920,7 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.workers[1].hourlyRate").value(18.50))
 				.andExpect(jsonPath("$.workers[1].salary")
 						.value(secondAttendance.getCalculatedSalary().doubleValue()))
-				.andExpect(jsonPath("$.*", hasSize(5)))
+				.andExpect(jsonPath("$.*", hasSize(8)))
 				.andExpect(jsonPath("$.workers[?(@.attendanceId == %d)]".formatted(joinedAttendanceId))
 						.isEmpty());
 		assertThat(joinedAttendance.getCalculatedSalary()).isNull();
@@ -859,7 +939,11 @@ class ShiftSessionControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.shiftId").value(shiftId))
 				.andExpect(jsonPath("$.status").value("CLOSED"))
-				.andExpect(jsonPath("$.totalWorkers").value(1));
+				.andExpect(jsonPath("$.totalWorkers").value(1))
+				.andExpect(jsonPath("$.foremanWorkedMinutes").doesNotExist())
+				.andExpect(jsonPath("$.foremanHourlyRate").doesNotExist())
+				.andExpect(jsonPath("$.foremanSalary").doesNotExist())
+				.andExpect(jsonPath("$.*", hasSize(5)));
 	}
 
 	/**
@@ -985,16 +1069,35 @@ class ShiftSessionControllerTests {
 
 		createShiftWithPayload(accessToken, """
 				{
-				  "title": "Missing rate shift",
 				  "location": "Cologne",
-				  "plannedStartTime": "2026-07-01T08:00:00",
-				  "plannedEndTime": "2026-07-01T17:00:00",
-				  "defaultBreakMinutes": 60
+				  "defaultBreakMinutes": 60,
+				  "foremanHourlyRate": 25.00
 				}
 				""")
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.status").value(400))
 				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
+	}
+
+	/**
+	 * Omits foremanHourlyRate during shift creation and expects request validation to reject the payload.
+	 */
+	@Test
+	void missingForemanHourlyRateReturnsBadRequest() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		createShiftWithPayload(accessToken, """
+				{
+				  "location": "Cologne",
+				  "defaultBreakMinutes": 60,
+				  "defaultHourlyRate": 15.25
+				}
+				""")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.message").value("foremanHourlyRate: must not be null"))
 				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
 	}
 
@@ -1020,6 +1123,24 @@ class ShiftSessionControllerTests {
 		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
 
 		createShiftWithPayload(accessToken, validCreateShiftPayload("Invalid rate shift", "15.123"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
+	}
+
+	/**
+	 * Sends a negative foreman hourly rate and expects validation to reject private salary input before persistence.
+	 */
+	@Test
+	void negativeForemanHourlyRateReturnsBadRequest() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		createShiftWithPayload(accessToken, validCreateShiftPayload(
+				"Negative foreman rate shift",
+				"15.25",
+				"-0.01"
+		))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.status").value(400))
 				.andExpect(jsonPath("$.error").value("Bad Request"))
@@ -1109,33 +1230,47 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
-	 * Builds a valid shift creation request with the default hourly rate used by most tests.
+	 * Builds a valid shift creation request with the default worker and foreman hourly rates used by most tests.
 	 *
-	 * @param title shift title
+	 * @param title ignored legacy shift title kept so callers document scenario names
 	 * @return JSON request body
 	 */
 	private String validCreateShiftPayload(String title) {
-		return validCreateShiftPayload(title, "15.25");
+		return validCreateShiftPayload(title, "15.25", "25.00");
 	}
 
 	/**
-	 * Builds a shift creation request while allowing tests to vary hourly-rate validation input.
+	 * Builds a shift creation request while allowing tests to vary worker hourly-rate validation input.
 	 *
-	 * @param title shift title
+	 * @param title ignored legacy shift title
 	 * @param defaultHourlyRate literal JSON number for defaultHourlyRate
 	 * @return JSON request body
 	 */
 	private String validCreateShiftPayload(String title, String defaultHourlyRate) {
+		return validCreateShiftPayload(title, defaultHourlyRate, "25.00");
+	}
+
+	/**
+	 * Builds a shift creation request while allowing tests to vary worker and foreman hourly-rate validation input.
+	 *
+	 * @param title ignored legacy shift title
+	 * @param defaultHourlyRate literal JSON number for defaultHourlyRate
+	 * @param foremanHourlyRate literal JSON number for foremanHourlyRate
+	 * @return JSON request body
+	 */
+	private String validCreateShiftPayload(
+			String title,
+			String defaultHourlyRate,
+			String foremanHourlyRate
+	) {
 		return """
 				{
-				  "title": "%s",
 				  "location": "Cologne",
-				  "plannedStartTime": "2026-07-01T08:00:00",
-				  "plannedEndTime": "2026-07-01T17:00:00",
 				  "defaultBreakMinutes": 60,
-				  "defaultHourlyRate": %s
+				  "defaultHourlyRate": %s,
+				  "foremanHourlyRate": %s
 				}
-				""".formatted(title, defaultHourlyRate);
+				""".formatted(defaultHourlyRate, foremanHourlyRate);
 	}
 
 	/**
@@ -1150,9 +1285,7 @@ class ShiftSessionControllerTests {
 				.andExpect(status().isCreated())
 				.andReturn();
 
-		Matcher matcher = SHIFT_ID_PATTERN.matcher(result.getResponse().getContentAsString());
-		assertThat(matcher.find()).isTrue();
-		return Long.parseLong(matcher.group(1));
+		return extractShiftId(result);
 	}
 
 	/**
@@ -1179,6 +1312,7 @@ class ShiftSessionControllerTests {
 	private long createActiveShift(String accessToken, String title) throws Exception {
 		long shiftId = createShift(accessToken, title);
 		startShift(accessToken, shiftId).andExpect(status().isOk());
+		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(120));
 		return shiftId;
 	}
 
@@ -1335,6 +1469,17 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
+	 * Mirrors the private foreman worked-minute formula used on close.
+	 *
+	 * @param shift closed shift entity
+	 * @return expected foreman worked minutes
+	 */
+	private int expectedForemanWorkedMinutes(ShiftSession shift) {
+		return Math.toIntExact(Duration.between(shift.getActualStartTime(), shift.getActualEndTime()).toMinutes()
+				- shift.getDefaultBreakMinutes());
+	}
+
+	/**
 	 * Mirrors salary rounding used by the service for expected values in close tests.
 	 *
 	 * @param workedMinutes expected worked minutes
@@ -1366,5 +1511,17 @@ class ShiftSessionControllerTests {
 		Matcher matcher = JOIN_CODE_PATTERN.matcher(result.getResponse().getContentAsString());
 		assertThat(matcher.find()).isTrue();
 		return matcher.group(1);
+	}
+
+	/**
+	 * Extracts the shift id from a create-shift response.
+	 *
+	 * @param result MockMvc result containing a create response
+	 * @return created shift id
+	 */
+	private long extractShiftId(MvcResult result) throws Exception {
+		Matcher matcher = SHIFT_ID_PATTERN.matcher(result.getResponse().getContentAsString());
+		assertThat(matcher.find()).isTrue();
+		return Long.parseLong(matcher.group(1));
 	}
 }

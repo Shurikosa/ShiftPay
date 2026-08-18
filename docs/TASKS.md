@@ -15,7 +15,7 @@ Each Codex session should take one small task from this file.
 - [x] Add `docs/API.md`
 - [x] Add `docs/ARCHITECTURE.md`
 - [x] Add `.gitignore`
-- [ ] Create initial Git commit
+- [x] Create initial Git commit
 
 ## Milestone 1: Backend Foundation
 
@@ -96,12 +96,24 @@ Decisions:
 - Planned endpoint: `GET /api/v1/me/managed-shifts`.
 - ADMIN user management is deferred until after the mobile MVP and should be implemented as part of the Vaadin admin dashboard work.
 
-Follow-up backend task:
+Follow-up backend tasks:
 
 - [x] Implement `GET /api/v1/me/managed-shifts` for the Foreman mobile dashboard
+- [x] Remove planned time inputs from create shift API/mobile contract
+- [x] Generate shift title automatically from date/time and company name
+- [x] Add `foremanHourlyRate` to shift creation and ShiftSession
+- [x] Calculate private foreman salary on close and summary
+- [x] Keep foreman salary separate from worker attendance; do not create ShiftAttendance for foreman salary
+
+Follow-up mobile tasks:
+
+- [ ] Update `CreateShiftScreen` after backend create-shift contract changes
+- [ ] Update shift details to show generated title, backend actual times, and owner-foreman rate visibility
+- [ ] Update summary screen to show worker summary plus private owner-foreman salary fields
 
 ## Milestone 7: Mobile Foundation
 
+- [x] Add mobile MVP UX plan
 - [ ] Create React Native / Expo project in `mobile/`
 - [ ] Add TypeScript
 - [ ] Add navigation
@@ -122,7 +134,7 @@ Follow-up backend task:
 
 ## Milestone 9: Infrastructure
 
-- [ ] Add Docker Compose for PostgreSQL
+- [x] Add Docker Compose for PostgreSQL
 - [ ] Add backend Dockerfile
 - [ ] Add local development compose file
 - [ ] Add README instructions for running locally

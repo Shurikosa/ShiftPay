@@ -14,7 +14,6 @@ import com.shiftpay.mvp.entity.ShiftAttendance;
 import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.ShiftStatus;
 import com.shiftpay.mvp.entity.User;
-import com.shiftpay.mvp.exception.BadRequestException;
 import com.shiftpay.mvp.exception.ForbiddenException;
 import com.shiftpay.mvp.exception.ShiftNotFoundException;
 import com.shiftpay.mvp.exception.ShiftStateConflictException;
@@ -30,10 +29,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.security.SecureRandom;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -47,6 +48,11 @@ import java.util.Objects;
 public class ShiftSessionService {
 
 	private static final String DEFAULT_COMPANY_NAME = "Default Company";
+	private static final ZoneId TITLE_ZONE = ZoneId.of("Europe/Berlin");
+	private static final DateTimeFormatter TITLE_FORMATTER = DateTimeFormatter.ofPattern(
+			"EEEE HH:mm",
+			Locale.ENGLISH
+	);
 	private static final char[] JOIN_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".toCharArray();
 	private static final int JOIN_CODE_LENGTH = 6;
 	private static final int JOIN_CODE_MAX_ATTEMPTS = 20;
@@ -85,8 +91,9 @@ public class ShiftSessionService {
 	/**
 	 * Creates an OPEN shift for a foreman or admin.
 	 *
-	 * <p>The method validates planned time ordering, creates or reuses the default company, trims text fields,
-	 * generates a unique join code, stores default break minutes and default hourly rate, and records the creator.</p>
+	 * <p>The method creates or reuses the default company, generates the MVP title and a unique join code, stores
+	 * default worker and foreman rates, and records the creator. Planned times are no longer accepted by the mobile
+	 * contract; actual times are set only by start and close.</p>
 	 *
 	 * @param request shift creation request
 	 * @param principal authenticated foreman or admin principal
@@ -94,24 +101,25 @@ public class ShiftSessionService {
 	 */
 	@Transactional
 	public ShiftCreateResponse createShift(CreateShiftRequest request, AuthenticatedUserPrincipal principal) {
-		validatePlannedTimeOrder(request.plannedStartTime(), request.plannedEndTime());
-
 		User createdBy = userRepository.findById(principal.id())
 				.orElseThrow(() -> new JwtAuthenticationException("Authenticated user not found"));
+		Company company = getOrCreateDefaultCompany();
 
 		ShiftSession shiftSession = new ShiftSession();
-		shiftSession.setCompany(getOrCreateDefaultCompany());
-		shiftSession.setTitle(request.title().trim());
+		shiftSession.setCompany(company);
+		shiftSession.setTitle(generateTitle(OffsetDateTime.now(ZoneOffset.UTC), company));
 		shiftSession.setLocation(trimToNull(request.location()));
 		shiftSession.setJoinCode(generateUniqueJoinCode());
 		shiftSession.setStatus(ShiftStatus.OPEN);
-		shiftSession.setPlannedStartTime(toUtcOffsetDateTime(request.plannedStartTime()));
-		shiftSession.setPlannedEndTime(toUtcOffsetDateTime(request.plannedEndTime()));
 		shiftSession.setDefaultBreakMinutes(request.defaultBreakMinutes() == null ? 0 : request.defaultBreakMinutes());
 		shiftSession.setDefaultHourlyRate(request.defaultHourlyRate());
+		shiftSession.setForemanHourlyRate(request.foremanHourlyRate());
 		shiftSession.setCreatedBy(createdBy);
 
-		return ShiftCreateResponse.from(shiftSessionRepository.save(shiftSession));
+		return ShiftCreateResponse.from(
+				shiftSessionRepository.save(shiftSession),
+				shouldIncludePrivateForemanFields(shiftSession, principal)
+		);
 	}
 
 	/**
@@ -127,7 +135,7 @@ public class ShiftSessionService {
 				.orElseThrow(ShiftNotFoundException::new);
 
 		validateShiftAccess(shiftSession, principal);
-		return ShiftResponse.from(shiftSession);
+		return ShiftResponse.from(shiftSession, shouldIncludePrivateForemanFields(shiftSession, principal));
 	}
 
 	/**
@@ -142,7 +150,10 @@ public class ShiftSessionService {
 	@Transactional(readOnly = true)
 	public List<ShiftResponse> getMyManagedShifts(AuthenticatedUserPrincipal principal) {
 		return shiftSessionRepository.findManagedShiftsByCreatedById(principal.id()).stream()
-				.map(ShiftResponse::from)
+				.map((shiftSession) -> ShiftResponse.from(
+						shiftSession,
+						shouldIncludePrivateForemanFields(shiftSession, principal)
+				))
 				.toList();
 	}
 
@@ -196,8 +207,15 @@ public class ShiftSessionService {
 				shiftSession.getActualStartTime(),
 				actualEndTime
 		);
+		List<ShiftAttendance> attendanceRows = shiftAttendanceRepository.findAllByShiftSessionIdForUpdate(shiftId);
+		SalaryCalculationService.SalaryCalculationResult foremanSalary = salaryCalculationService.calculate(
+				durationMinutes,
+				shiftSession.getDefaultBreakMinutes(),
+				shiftSession.getForemanHourlyRate(),
+				"foremanHourlyRate"
+		);
 
-		for (ShiftAttendance attendance : shiftAttendanceRepository.findAllByShiftSessionIdForUpdate(shiftId)) {
+		for (ShiftAttendance attendance : attendanceRows) {
 			if (attendance.getStatus() == AttendanceStatus.APPROVED) {
 				SalaryCalculationService.SalaryCalculationResult salary = salaryCalculationService.calculate(
 						durationMinutes,
@@ -213,6 +231,8 @@ public class ShiftSessionService {
 			}
 		}
 
+		shiftSession.setForemanWorkedMinutes(foremanSalary.workedMinutes());
+		shiftSession.setForemanCalculatedSalary(foremanSalary.calculatedSalary());
 		shiftSession.setStatus(ShiftStatus.CLOSED);
 		shiftSession.setActualEndTime(actualEndTime);
 		return ShiftCloseResponse.from(shiftSession);
@@ -248,12 +268,16 @@ public class ShiftSessionService {
 				.map(WorkerSummaryResponse::salary)
 				.reduce(BigDecimal.ZERO, BigDecimal::add)
 				.setScale(2, RoundingMode.HALF_UP);
+		boolean includePrivateForemanFields = shouldIncludePrivateForemanFields(shiftSession, principal);
 
 		return new ShiftSummaryResponse(
 				shiftSession.getId(),
 				shiftSession.getStatus(),
 				workers.size(),
 				totalSalary,
+				includePrivateForemanFields ? shiftSession.getForemanWorkedMinutes() : null,
+				includePrivateForemanFields ? shiftSession.getForemanHourlyRate() : null,
+				includePrivateForemanFields ? privateForemanSalary(shiftSession) : null,
 				workers
 		);
 	}
@@ -298,6 +322,21 @@ public class ShiftSessionService {
 	}
 
 	/**
+	 * Checks whether the current REST/mobile caller can see private owner-foreman fields.
+	 *
+	 * @param shiftSession shift being mapped
+	 * @param principal authenticated caller
+	 * @return true only for the FOREMAN who owns the shift
+	 */
+	private boolean shouldIncludePrivateForemanFields(
+			ShiftSession shiftSession,
+			AuthenticatedUserPrincipal principal
+	) {
+		return principal.role() == Role.FOREMAN
+				&& Objects.equals(shiftSession.getCreatedBy().getId(), principal.id());
+	}
+
+	/**
 	 * Returns the default company used by the MVP, creating it if needed.
 	 *
 	 * @return default company entity
@@ -309,6 +348,30 @@ public class ShiftSessionService {
 					company.setName(DEFAULT_COMPANY_NAME);
 					return companyRepository.save(company);
 				});
+	}
+
+	/**
+	 * Generates the MVP default shift title in English using Europe/Berlin local time.
+	 *
+	 * @param now current instant represented as an offset date-time
+	 * @param company company assigned to the shift
+	 * @return generated shift title
+	 */
+	private String generateTitle(OffsetDateTime now, Company company) {
+		return TITLE_FORMATTER.format(now.atZoneSameInstant(TITLE_ZONE)) + " - " + company.getName();
+	}
+
+	/**
+	 * Returns persisted private foreman salary with the API money scale.
+	 *
+	 * @param shiftSession closed shift session
+	 * @return persisted foreman salary at scale two, or null if absent
+	 */
+	private BigDecimal privateForemanSalary(ShiftSession shiftSession) {
+		if (shiftSession.getForemanCalculatedSalary() == null) {
+			return null;
+		}
+		return shiftSession.getForemanCalculatedSalary().setScale(2, RoundingMode.HALF_UP);
 	}
 
 	/**
@@ -337,28 +400,6 @@ public class ShiftSessionService {
 			joinCode.append(JOIN_CODE_CHARS[secureRandom.nextInt(JOIN_CODE_CHARS.length)]);
 		}
 		return joinCode.toString();
-	}
-
-	/**
-	 * Validates that the planned end is after the planned start when both are provided.
-	 *
-	 * @param plannedStartTime planned start time from the request
-	 * @param plannedEndTime planned end time from the request
-	 */
-	private void validatePlannedTimeOrder(LocalDateTime plannedStartTime, LocalDateTime plannedEndTime) {
-		if (plannedStartTime != null && plannedEndTime != null && !plannedEndTime.isAfter(plannedStartTime)) {
-			throw new BadRequestException("plannedEndTime must be after plannedStartTime");
-		}
-	}
-
-	/**
-	 * Converts local request timestamps to UTC offset timestamps for persistence.
-	 *
-	 * @param value request timestamp value
-	 * @return UTC offset timestamp, or null
-	 */
-	private OffsetDateTime toUtcOffsetDateTime(LocalDateTime value) {
-		return value == null ? null : value.atOffset(ZoneOffset.UTC);
 	}
 
 	/**

@@ -327,6 +327,7 @@ class AttendanceConcurrencyTests {
 		shift.setStatus(shiftStatus);
 		shift.setDefaultBreakMinutes(60);
 		shift.setDefaultHourlyRate(new BigDecimal("15.00"));
+		shift.setForemanHourlyRate(new BigDecimal("25.00"));
 		shift.setCreatedBy(foreman);
 		if (shiftStatus == ShiftStatus.ACTIVE) {
 			shift.setActualStartTime(OffsetDateTime.now(ZoneOffset.UTC).minusHours(1));

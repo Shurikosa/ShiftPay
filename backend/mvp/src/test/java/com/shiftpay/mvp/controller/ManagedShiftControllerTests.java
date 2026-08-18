@@ -23,6 +23,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -80,10 +81,10 @@ class ManagedShiftControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$", hasSize(2)))
 				.andExpect(jsonPath("$[0].id").value(secondShiftId))
-				.andExpect(jsonPath("$[0].title").value("Second managed shift"))
+				.andExpect(jsonPath("$[0].title").value(containsString("Default Company")))
 				.andExpect(jsonPath("$[0].status").value("OPEN"))
 				.andExpect(jsonPath("$[1].id").value(firstShiftId))
-				.andExpect(jsonPath("$[1].title").value("First managed shift"));
+				.andExpect(jsonPath("$[1].title").value(containsString("Default Company")));
 	}
 
 	/**
@@ -118,7 +119,8 @@ class ManagedShiftControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$", hasSize(1)))
 				.andExpect(jsonPath("$[0].id").value(adminShiftId))
-				.andExpect(jsonPath("$[0].title").value("Admin shift"))
+				.andExpect(jsonPath("$[0].title").value(containsString("Default Company")))
+				.andExpect(jsonPath("$[0].foremanHourlyRate").doesNotExist())
 				.andExpect(jsonPath("$[?(@.id == %d)]".formatted(foremanShiftId)).isEmpty());
 	}
 
@@ -177,17 +179,18 @@ class ManagedShiftControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$", hasSize(1)))
 				.andExpect(jsonPath("$[0].id").value(shiftId))
-				.andExpect(jsonPath("$[0].title").value("Safe response shift"))
+				.andExpect(jsonPath("$[0].title").value(containsString("Default Company")))
 				.andExpect(jsonPath("$[0].location").value("Cologne"))
 				.andExpect(jsonPath("$[0].joinCode").isString())
-				.andExpect(jsonPath("$[0].plannedStartTime").value("2026-07-01T08:00:00Z"))
-				.andExpect(jsonPath("$[0].plannedEndTime").value("2026-07-01T17:00:00Z"))
 				.andExpect(jsonPath("$[0].actualStartTime").value(nullValue()))
 				.andExpect(jsonPath("$[0].actualEndTime").value(nullValue()))
 				.andExpect(jsonPath("$[0].defaultBreakMinutes").value(60))
 				.andExpect(jsonPath("$[0].defaultHourlyRate").value(15.25))
+				.andExpect(jsonPath("$[0].foremanHourlyRate").value(25.00))
 				.andExpect(jsonPath("$[0].createdBy").isNumber())
-				.andExpect(jsonPath("$[0].*", hasSize(12)))
+				.andExpect(jsonPath("$[0].plannedStartTime").doesNotExist())
+				.andExpect(jsonPath("$[0].plannedEndTime").doesNotExist())
+				.andExpect(jsonPath("$[0].*", hasSize(11)))
 				.andExpect(jsonPath("$[0].company").doesNotExist())
 				.andExpect(jsonPath("$[0].createdByUser").doesNotExist())
 				.andExpect(jsonPath("$[0].createdAt").doesNotExist())
@@ -294,14 +297,12 @@ class ManagedShiftControllerTests {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{
-								  "title": "%s",
 								  "location": "Cologne",
-								  "plannedStartTime": "2026-07-01T08:00:00",
-								  "plannedEndTime": "2026-07-01T17:00:00",
 								  "defaultBreakMinutes": 60,
-								  "defaultHourlyRate": 15.25
+								  "defaultHourlyRate": 15.25,
+								  "foremanHourlyRate": 25.00
 								}
-								""".formatted(title)))
+								"""))
 				.andExpect(status().isCreated())
 				.andReturn();
 

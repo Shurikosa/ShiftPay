@@ -73,6 +73,24 @@ public class SalaryCalculationService {
 			Integer breakMinutes,
 			BigDecimal hourlyRate
 	) {
+		return calculate(durationMinutes, breakMinutes, hourlyRate, "Attendance hourlyRate");
+	}
+
+	/**
+	 * Calculates worked minutes and salary from an already known shift duration with a caller-specific rate label.
+	 *
+	 * @param durationMinutes non-negative shift duration in minutes
+	 * @param breakMinutes break minutes to deduct, null treated as zero
+	 * @param hourlyRate hourly rate used for the calculation
+	 * @param hourlyRateLabel label used in validation messages for the supplied rate
+	 * @return calculated worked minutes and salary
+	 */
+	public SalaryCalculationResult calculate(
+			long durationMinutes,
+			Integer breakMinutes,
+			BigDecimal hourlyRate,
+			String hourlyRateLabel
+	) {
 		int safeBreakMinutes = breakMinutes == null ? 0 : breakMinutes;
 		if (safeBreakMinutes < 0) {
 			throw new ShiftStateConflictException("Break minutes cannot be negative");
@@ -81,10 +99,10 @@ public class SalaryCalculationService {
 			throw new ShiftStateConflictException("Break minutes cannot be greater than shift duration");
 		}
 		if (hourlyRate == null) {
-			throw new ShiftStateConflictException("Attendance hourlyRate is required for salary calculation");
+			throw new ShiftStateConflictException(hourlyRateLabel + " is required for salary calculation");
 		}
 		if (hourlyRate.signum() < 0) {
-			throw new ShiftStateConflictException("Attendance hourlyRate cannot be negative");
+			throw new ShiftStateConflictException(hourlyRateLabel + " cannot be negative");
 		}
 
 		long workedMinutes = durationMinutes - safeBreakMinutes;

@@ -82,6 +82,18 @@ public class ShiftSession {
 	private BigDecimal defaultHourlyRate;
 
 	@Setter
+	@Column(name = "foreman_hourly_rate", nullable = false, precision = 12, scale = 2)
+	private BigDecimal foremanHourlyRate;
+
+	@Setter
+	@Column(name = "foreman_worked_minutes")
+	private Integer foremanWorkedMinutes;
+
+	@Setter
+	@Column(name = "foreman_calculated_salary", precision = 12, scale = 2)
+	private BigDecimal foremanCalculatedSalary;
+
+	@Setter
 	@ManyToOne(fetch = FetchType.LAZY, optional = false)
 	@JoinColumn(name = "created_by", nullable = false)
 	private User createdBy;

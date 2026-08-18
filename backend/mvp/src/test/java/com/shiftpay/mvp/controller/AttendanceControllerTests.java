@@ -29,6 +29,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -804,11 +805,9 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$", hasSize(1)))
 				.andExpect(jsonPath("$[0].shiftId").value(shift.id()))
 				.andExpect(jsonPath("$[0].attendanceId").value(attendanceId))
-				.andExpect(jsonPath("$[0].title").value("Open history shift"))
+				.andExpect(jsonPath("$[0].title").value(containsString("Default Company")))
 				.andExpect(jsonPath("$[0].location").value("Cologne"))
 				.andExpect(jsonPath("$[0].status").value("OPEN"))
-				.andExpect(jsonPath("$[0].plannedStartTime").value("2026-07-01T08:00:00Z"))
-				.andExpect(jsonPath("$[0].plannedEndTime").value("2026-07-01T17:00:00Z"))
 				.andExpect(jsonPath("$[0].actualStartTime").value((Object) null))
 				.andExpect(jsonPath("$[0].actualEndTime").value((Object) null))
 				.andExpect(jsonPath("$[0].attendanceStatus").value("JOINED"))
@@ -816,7 +815,12 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$[0].breakMinutes").value(60))
 				.andExpect(jsonPath("$[0].workedMinutes").value((Object) null))
 				.andExpect(jsonPath("$[0].calculatedSalary").value((Object) null))
-				.andExpect(jsonPath("$[0].*", hasSize(14)))
+				.andExpect(jsonPath("$[0].plannedStartTime").doesNotExist())
+				.andExpect(jsonPath("$[0].plannedEndTime").doesNotExist())
+				.andExpect(jsonPath("$[0].foremanHourlyRate").doesNotExist())
+				.andExpect(jsonPath("$[0].foremanWorkedMinutes").doesNotExist())
+				.andExpect(jsonPath("$[0].foremanSalary").doesNotExist())
+				.andExpect(jsonPath("$[0].*", hasSize(12)))
 				.andExpect(jsonPath("$[0].passwordHash").doesNotExist())
 				.andExpect(jsonPath("$[0].user").doesNotExist())
 				.andExpect(jsonPath("$[0].worker").doesNotExist())
@@ -1093,14 +1097,12 @@ class AttendanceControllerTests {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{
-								  "title": "%s",
 								  "location": "Cologne",
-								  "plannedStartTime": "2026-07-01T08:00:00",
-								  "plannedEndTime": "2026-07-01T17:00:00",
 								  "defaultBreakMinutes": 60,
-								  "defaultHourlyRate": %s
+								  "defaultHourlyRate": %s,
+								  "foremanHourlyRate": 25.00
 								}
-								""".formatted(title, defaultHourlyRate)))
+								""".formatted(defaultHourlyRate)))
 				.andExpect(status().isCreated())
 				.andReturn();
 
@@ -1127,6 +1129,7 @@ class AttendanceControllerTests {
 	 * @param shiftId target shift id
 	 */
 	private void closeShift(String accessToken, long shiftId) throws Exception {
+		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(120));
 		mockMvc.perform(post(CREATE_SHIFT_URL + "/" + shiftId + "/close")
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
 				.andExpect(status().isOk());
