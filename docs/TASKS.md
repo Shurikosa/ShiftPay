@@ -96,9 +96,34 @@ Decisions:
 - Planned endpoint: `GET /api/v1/me/managed-shifts`.
 - ADMIN user management is deferred until after the mobile MVP and should be implemented as part of the Vaadin admin dashboard work.
 
-Follow-up backend task:
+Follow-up backend tasks:
 
 - [x] Implement `GET /api/v1/me/managed-shifts` for the Foreman mobile dashboard
+- [ ] Implement company creation
+- [ ] Implement company join by code
+- [ ] Enforce company membership before worker joins shift
+- [ ] Attach shifts to foreman company
+- [ ] Remove planned time inputs from create shift API/mobile contract
+- [ ] Generate shift title automatically from date/time and company name
+- [ ] Add `foremanHourlyRate` to shift creation and ShiftSession
+- [ ] Calculate private foreman salary on close and summary
+- [ ] Keep foreman salary separate from worker attendance; do not create ShiftAttendance for foreman salary
+- [ ] Implement shift cancel endpoint and lifecycle rules
+- [ ] Make `defaultBreakMinutes` optional and default it to 0
+- [ ] Implement pause system in a separate task
+- [ ] Set default JWT expiration to 8 hours
+
+Follow-up mobile tasks:
+
+- [ ] Add foreman company onboarding
+- [ ] Add worker company join
+- [ ] Show company name in dashboards/menu
+- [ ] Update `CreateShiftScreen` after backend create-shift contract changes
+- [ ] Update shift details to show generated title, backend actual times, and owner-foreman rate visibility
+- [ ] Update summary screen to show worker summary plus private owner-foreman salary fields
+- [ ] Implement shift cancel UI after backend endpoint is ready
+- [ ] Make `defaultBreakMinutes` optional and default it to 0 in mobile forms
+- [ ] Implement pause system in a separate backend/mobile task
 
 ## Milestone 7: Mobile Foundation
 
