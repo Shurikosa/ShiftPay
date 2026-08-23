@@ -18,6 +18,21 @@ import java.util.Optional;
 public interface ShiftSessionRepository extends JpaRepository<ShiftSession, Long> {
 
 	/**
+	 * Loads a shift with company and creator for response mapping and access checks.
+	 *
+	 * @param shiftId shift session id
+	 * @return shift session when it exists
+	 */
+	@Query("""
+			select shiftSession
+			from ShiftSession shiftSession
+			join fetch shiftSession.company
+			join fetch shiftSession.createdBy
+			where shiftSession.id = :shiftId
+			""")
+	Optional<ShiftSession> findByIdWithCompanyAndCreatedBy(@Param("shiftId") Long shiftId);
+
+	/**
 	 * Checks whether a generated join code is already assigned to a shift.
 	 *
 	 * @param joinCode generated join code
@@ -30,12 +45,13 @@ public interface ShiftSessionRepository extends JpaRepository<ShiftSession, Long
 	 *
 	 * <p>The stable order keeps the newest created shifts first and uses id as a deterministic tie-breaker.</p>
 	 *
-	 * @param createdById current foreman or admin user id
+	 * @param createdById current foreman or admin user id; admins have no REST create flow in the mobile MVP
 	 * @return shifts created by the user ordered by createdAt descending and id descending
 	 */
 	@Query("""
 			select shiftSession
 			from ShiftSession shiftSession
+			join fetch shiftSession.company
 			join fetch shiftSession.createdBy
 			where shiftSession.createdBy.id = :createdById
 			order by shiftSession.createdAt desc, shiftSession.id desc
@@ -49,7 +65,13 @@ public interface ShiftSessionRepository extends JpaRepository<ShiftSession, Long
 	 * @return locked shift session when it exists
 	 */
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
-	@Query("select shiftSession from ShiftSession shiftSession where shiftSession.id = :shiftId")
+	@Query("""
+			select shiftSession
+			from ShiftSession shiftSession
+			join fetch shiftSession.company
+			join fetch shiftSession.createdBy
+			where shiftSession.id = :shiftId
+			""")
 	Optional<ShiftSession> findByIdForUpdate(@Param("shiftId") Long shiftId);
 
 	/**
@@ -59,6 +81,11 @@ public interface ShiftSessionRepository extends JpaRepository<ShiftSession, Long
 	 * @return locked shift session when the code exists
 	 */
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
-	@Query("select shiftSession from ShiftSession shiftSession where shiftSession.joinCode = :joinCode")
+	@Query("""
+			select shiftSession
+			from ShiftSession shiftSession
+			join fetch shiftSession.company
+			where shiftSession.joinCode = :joinCode
+			""")
 	Optional<ShiftSession> findByJoinCodeForUpdate(@Param("joinCode") String joinCode);
 }

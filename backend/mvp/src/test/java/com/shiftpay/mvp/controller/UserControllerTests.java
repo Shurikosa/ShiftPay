@@ -16,6 +16,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -64,7 +65,8 @@ class UserControllerTests {
 				.andExpect(jsonPath("$.email").value("worker@example.com"))
 				.andExpect(jsonPath("$.firstName").value("John"))
 				.andExpect(jsonPath("$.lastName").value("Worker"))
-				.andExpect(jsonPath("$.role").value("WORKER"));
+				.andExpect(jsonPath("$.role").value("WORKER"))
+				.andExpect(jsonPath("$.company").value(nullValue()));
 	}
 
 	/**

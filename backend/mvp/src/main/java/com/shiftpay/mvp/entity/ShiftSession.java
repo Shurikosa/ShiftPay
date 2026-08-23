@@ -21,7 +21,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 
 /**
- * Shift session entity managed by a foreman or admin.
+ * Shift session entity managed by a foreman.
  *
  * <p>The session owns lifecycle timestamps, join code, default break and hourly-rate values, and is the parent for
  * worker attendance rows.</p>

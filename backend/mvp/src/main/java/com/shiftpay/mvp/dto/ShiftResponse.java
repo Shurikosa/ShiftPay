@@ -12,6 +12,8 @@ import java.time.OffsetDateTime;
  * Response DTO for retrieving shift details.
  *
  * @param id shift session id
+ * @param companyId company assigned to the shift
+ * @param companyName company display name assigned to the shift
  * @param title shift title
  * @param location optional shift location
  * @param status current shift lifecycle status
@@ -25,6 +27,8 @@ import java.time.OffsetDateTime;
  */
 public record ShiftResponse(
 		Long id,
+		Long companyId,
+		String companyName,
 		String title,
 		String location,
 		ShiftStatus status,
@@ -48,6 +52,8 @@ public record ShiftResponse(
 	public static ShiftResponse from(ShiftSession shiftSession, boolean includePrivateForemanFields) {
 		return new ShiftResponse(
 				shiftSession.getId(),
+				shiftSession.getCompany().getId(),
+				shiftSession.getCompany().getName(),
 				shiftSession.getTitle(),
 				shiftSession.getLocation(),
 				shiftSession.getStatus(),

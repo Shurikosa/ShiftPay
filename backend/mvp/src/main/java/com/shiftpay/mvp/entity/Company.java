@@ -14,10 +14,7 @@ import lombok.Setter;
 import java.time.Instant;
 
 /**
- * Company entity used to group shift sessions.
- *
- * <p>The MVP currently creates and reuses a default company, while the schema keeps this entity ready for later
- * admin-managed companies.</p>
+ * Company entity used to group users and shift sessions.
  */
 @Getter
 @Entity
@@ -31,6 +28,10 @@ public class Company {
 	@Setter
 	@Column(nullable = false, length = 255)
 	private String name;
+
+	@Setter
+	@Column(name = "join_code", nullable = false, unique = true, length = 32)
+	private String joinCode;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;

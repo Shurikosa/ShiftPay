@@ -28,6 +28,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -163,6 +164,8 @@ class AttendanceConcurrencyTests {
 	void joinWaitsForConcurrentStartAndThenReturnsConflict() throws Exception {
 		Scenario scenario = createScenario(ShiftStatus.OPEN);
 		User secondWorker = createUser("second.worker@example.com", Role.WORKER);
+		secondWorker.setCompany(scenario.shift().getCompany());
+		userRepository.saveAndFlush(secondWorker);
 		AuthenticatedUserPrincipal secondWorkerPrincipal = principal(secondWorker);
 
 		ConcurrentResults<?, ?> results = runWithFirstTransactionHeld(
@@ -314,11 +317,15 @@ class AttendanceConcurrencyTests {
 	 */
 	private Scenario createScenario(ShiftStatus shiftStatus) {
 		Company company = new Company();
-		company.setName("Default Company");
+		company.setName("Concurrent Company");
+		company.setJoinCode("LOCKCO");
 		company = companyRepository.save(company);
 
 		User foreman = createUser("foreman@example.com", Role.FOREMAN);
 		User worker = createUser("worker@example.com", Role.WORKER);
+		foreman.setCompany(company);
+		worker.setCompany(company);
+		userRepository.saveAll(List.of(foreman, worker));
 
 		ShiftSession shift = new ShiftSession();
 		shift.setCompany(company);

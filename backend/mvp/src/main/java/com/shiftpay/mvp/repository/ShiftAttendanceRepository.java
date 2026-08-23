@@ -91,6 +91,7 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 			select attendance
 			from ShiftAttendance attendance
 			join fetch attendance.shiftSession shiftSession
+			join fetch shiftSession.company
 			where attendance.worker.id = :workerId
 			  and shiftSession.status in (
 				com.shiftpay.mvp.entity.ShiftStatus.OPEN,

@@ -2,11 +2,13 @@ package com.shiftpay.mvp.controller;
 
 import com.shiftpay.mvp.TestDataCleaner;
 import com.shiftpay.mvp.entity.AttendanceStatus;
+import com.shiftpay.mvp.entity.Company;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftAttendance;
 import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.ShiftStatus;
 import com.shiftpay.mvp.entity.User;
+import com.shiftpay.mvp.repository.CompanyRepository;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
@@ -57,6 +59,8 @@ class ShiftSessionControllerTests {
 
 	private static final String REGISTER_URL = "/api/v1/auth/register";
 	private static final String LOGIN_URL = "/api/v1/auth/login";
+	private static final String CREATE_COMPANY_URL = "/api/v1/companies";
+	private static final String JOIN_COMPANY_URL = "/api/v1/companies/join";
 	private static final String CREATE_SHIFT_URL = "/api/v1/shifts";
 	private static final String JOIN_SHIFT_URL = "/api/v1/shifts/join";
 	private static final Pattern ACCESS_TOKEN_PATTERN = Pattern.compile("\"accessToken\":\"([^\"]+)\"");
@@ -69,6 +73,9 @@ class ShiftSessionControllerTests {
 
 	@Autowired
 	private JdbcTemplate jdbcTemplate;
+
+	@Autowired
+	private CompanyRepository companyRepository;
 
 	@Autowired
 	private ShiftAttendanceRepository shiftAttendanceRepository;
@@ -104,8 +111,10 @@ class ShiftSessionControllerTests {
 						.content(validCreateShiftPayload("Foreman shift")))
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.id").isNumber())
-				.andExpect(jsonPath("$.title").value(matchesPattern("[A-Za-z]+ \\d{2}:\\d{2} - Default Company")))
-				.andExpect(jsonPath("$.title").value(containsString("Default Company")))
+				.andExpect(jsonPath("$.companyId").isNumber())
+				.andExpect(jsonPath("$.companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$.title").value(matchesPattern("[A-Za-z]+ \\d{2}:\\d{2} - Acme Construction")))
+				.andExpect(jsonPath("$.title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$.location").value("Cologne"))
 				.andExpect(jsonPath("$.joinCode").isString())
 				.andExpect(jsonPath("$.status").value("OPEN"))
@@ -117,11 +126,22 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.createdBy").isNumber())
 				.andExpect(jsonPath("$.plannedStartTime").doesNotExist())
 				.andExpect(jsonPath("$.plannedEndTime").doesNotExist())
-				.andExpect(jsonPath("$.*", hasSize(11)));
+				.andExpect(jsonPath("$.*", hasSize(13)));
 
 		assertThat(shiftSessionRepository.count()).isEqualTo(1);
 		ShiftSession createdShift = shiftSessionRepository.findAll().getFirst();
-		assertThat(createdShift.getTitle()).contains("Default Company");
+		Long foremanCompanyId = jdbcTemplate.queryForObject(
+				"select company_id from users where email = ?",
+				Long.class,
+				"foreman@example.com"
+		);
+		Long shiftCompanyId = jdbcTemplate.queryForObject(
+				"select company_id from shift_sessions where id = ?",
+				Long.class,
+				createdShift.getId()
+		);
+		assertThat(shiftCompanyId).isEqualTo(foremanCompanyId);
+		assertThat(createdShift.getTitle()).contains("Acme Construction");
 		assertThat(createdShift.getPlannedStartTime()).isNull();
 		assertThat(createdShift.getPlannedEndTime()).isNull();
 		assertThat(createdShift.getActualStartTime()).isNull();
@@ -131,22 +151,21 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
-	 * Creates a shift as an ADMIN, which is allowed to manage any shift in the MVP contract.
+	 * Attempts shift creation as ADMIN and expects the mobile MVP REST contract to reject lifecycle writes.
 	 */
 	@Test
-	void adminCanCreateShift() throws Exception {
+	void adminCannotCreateShift() throws Exception {
 		String accessToken = createAdminAndLogin();
 
 		mockMvc.perform(post(CREATE_SHIFT_URL)
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content(validCreateShiftPayload("Admin shift")))
-				.andExpect(status().isCreated())
-				.andExpect(jsonPath("$.title").value(containsString("Default Company")))
-				.andExpect(jsonPath("$.status").value("OPEN"))
-				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25))
-				.andExpect(jsonPath("$.foremanHourlyRate").doesNotExist())
-				.andExpect(jsonPath("$.*", hasSize(10)));
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
 	}
 
 	/**
@@ -207,6 +226,25 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
+	 * Attempts shift creation before company onboarding and expects the MVP company requirement to return 409.
+	 */
+	@Test
+	void foremanCannotCreateShiftWithoutCompany() throws Exception {
+		String accessToken = registerAndLoginWithoutCompany("foreman@example.com", "FOREMAN");
+
+		mockMvc.perform(post(CREATE_SHIFT_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content(validCreateShiftPayload("No company shift")))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message")
+						.value("Foreman must create a company before creating shifts"))
+				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
+	}
+
+	/**
 	 * Sends legacy title and planned fields and expects create to ignore them for the MVP contract.
 	 */
 	@Test
@@ -225,7 +263,7 @@ class ShiftSessionControllerTests {
 				}
 				""")
 				.andExpect(status().isCreated())
-				.andExpect(jsonPath("$.title").value(containsString("Default Company")))
+				.andExpect(jsonPath("$.title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$.title").value(not("Client supplied title")))
 				.andExpect(jsonPath("$.plannedStartTime").doesNotExist())
 				.andExpect(jsonPath("$.plannedEndTime").doesNotExist())
@@ -272,7 +310,9 @@ class ShiftSessionControllerTests {
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.id").value(shiftId))
-				.andExpect(jsonPath("$.title").value(containsString("Default Company")))
+				.andExpect(jsonPath("$.companyId").isNumber())
+				.andExpect(jsonPath("$.companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$.title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$.location").value("Cologne"))
 				.andExpect(jsonPath("$.status").value("OPEN"))
 				.andExpect(jsonPath("$.joinCode").isString())
@@ -284,7 +324,7 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.createdBy").isNumber())
 				.andExpect(jsonPath("$.plannedStartTime").doesNotExist())
 				.andExpect(jsonPath("$.plannedEndTime").doesNotExist())
-				.andExpect(jsonPath("$.*", hasSize(11)))
+				.andExpect(jsonPath("$.*", hasSize(13)))
 				.andExpect(jsonPath("$.company").doesNotExist())
 				.andExpect(jsonPath("$.createdAt").doesNotExist())
 				.andExpect(jsonPath("$.updatedAt").doesNotExist());
@@ -321,9 +361,10 @@ class ShiftSessionControllerTests {
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.id").value(shiftId))
-				.andExpect(jsonPath("$.title").value(containsString("Default Company")))
+				.andExpect(jsonPath("$.companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$.title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$.foremanHourlyRate").doesNotExist())
-				.andExpect(jsonPath("$.*", hasSize(10)));
+				.andExpect(jsonPath("$.*", hasSize(12)));
 	}
 
 	/**
@@ -423,20 +464,21 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
-	 * Starts a foreman-owned shift as ADMIN and expects lifecycle transition access to succeed.
+	 * Attempts to start a shift as ADMIN and expects the mobile MVP REST contract to reject lifecycle writes.
 	 */
 	@Test
-	void adminStartsAnyShift() throws Exception {
+	void adminCannotStartShift() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
 		long shiftId = createShift(foremanToken, "Foreman shift");
 		String adminToken = createAdminAndLogin();
 
 		mockMvc.perform(post(startShiftUrl(shiftId))
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.id").value(shiftId))
-				.andExpect(jsonPath("$.status").value("ACTIVE"))
-				.andExpect(jsonPath("$.actualStartTime").isString());
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(startShiftUrl(shiftId)));
 	}
 
 	/**
@@ -571,19 +613,20 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
-	 * Closes a foreman-created active shift as ADMIN, proving admin lifecycle access is global.
+	 * Attempts to close a shift as ADMIN and expects the mobile MVP REST contract to reject lifecycle writes.
 	 */
 	@Test
-	void adminClosesAnyActiveShift() throws Exception {
+	void adminCannotCloseShift() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
 		long shiftId = createActiveShift(foremanToken, "Foreman shift");
 		String adminToken = createAdminAndLogin();
 
 		closeShift(adminToken, shiftId)
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.id").value(shiftId))
-				.andExpect(jsonPath("$.status").value("CLOSED"))
-				.andExpect(jsonPath("$.actualEndTime").isString());
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
 	}
 
 	/**
@@ -1155,7 +1198,14 @@ class ShiftSessionControllerTests {
 	 * @return JWT access token for the created user
 	 */
 	private String registerAndLogin(String email, String role) throws Exception {
-		return registerAndLogin(email, role, "Test", "User");
+		String accessToken = registerAndLoginWithoutCompany(email, role, "Test", "User");
+		if ("FOREMAN".equals(role)) {
+			createCompany(accessToken, "Acme Construction");
+		}
+		else if ("WORKER".equals(role)) {
+			joinFirstCompany(accessToken);
+		}
+		return accessToken;
 	}
 
 	/**
@@ -1168,6 +1218,42 @@ class ShiftSessionControllerTests {
 	 * @return JWT access token for the account
 	 */
 	private String registerAndLogin(
+			String email,
+			String role,
+			String firstName,
+			String lastName
+	) throws Exception {
+		String accessToken = registerAndLoginWithoutCompany(email, role, firstName, lastName);
+		if ("FOREMAN".equals(role)) {
+			createCompany(accessToken, "Acme Construction");
+		}
+		else if ("WORKER".equals(role)) {
+			joinFirstCompany(accessToken);
+		}
+		return accessToken;
+	}
+
+	/**
+	 * Registers a user and returns a JWT without doing company onboarding.
+	 *
+	 * @param email email address used for registration and login
+	 * @param role role sent to registration
+	 * @return JWT access token for the account
+	 */
+	private String registerAndLoginWithoutCompany(String email, String role) throws Exception {
+		return registerAndLoginWithoutCompany(email, role, "Test", "User");
+	}
+
+	/**
+	 * Registers a named user and logs in without doing company onboarding.
+	 *
+	 * @param email email address used for the account
+	 * @param role role sent to registration
+	 * @param firstName first name stored on the user
+	 * @param lastName last name stored on the user
+	 * @return JWT access token for the account
+	 */
+	private String registerAndLoginWithoutCompany(
 			String email,
 			String role,
 			String firstName,
@@ -1204,6 +1290,50 @@ class ShiftSessionControllerTests {
 		userRepository.save(admin);
 
 		return login(admin.getEmail());
+	}
+
+	/**
+	 * Creates a company through the foreman endpoint.
+	 *
+	 * @param accessToken foreman JWT
+	 * @param companyName company name
+	 * @return company join code
+	 */
+	private String createCompany(String accessToken, String companyName) throws Exception {
+		MvcResult result = mockMvc.perform(post(CREATE_COMPANY_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "name": "%s"
+								}
+								""".formatted(companyName)))
+				.andExpect(status().isCreated())
+				.andReturn();
+		return extractJoinCode(result);
+	}
+
+	/**
+	 * Joins the first created company through the worker endpoint.
+	 *
+	 * @param accessToken worker JWT
+	 */
+	private void joinFirstCompany(String accessToken) throws Exception {
+		Company company = companyRepository.findAll().stream()
+				.findFirst()
+				.orElse(null);
+		if (company == null) {
+			return;
+		}
+		mockMvc.perform(post(JOIN_COMPANY_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "joinCode": "%s"
+								}
+								""".formatted(company.getJoinCode())))
+				.andExpect(status().isOk());
 	}
 
 	/**
@@ -1276,7 +1406,7 @@ class ShiftSessionControllerTests {
 	/**
 	 * Creates a valid shift through the API and extracts its generated id.
 	 *
-	 * @param accessToken JWT for a FOREMAN or ADMIN
+	 * @param accessToken JWT for a FOREMAN
 	 * @param title shift title
 	 * @return created shift id
 	 */

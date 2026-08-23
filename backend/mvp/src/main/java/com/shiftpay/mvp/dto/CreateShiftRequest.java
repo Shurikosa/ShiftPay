@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 /**
  * Request DTO for creating a shift session.
  *
- * <p>Used by foremen and admins. The default hourly rate is copied to worker attendance when workers join, while the
+ * <p>Used by foremen. The default hourly rate is copied to worker attendance when workers join, while the
  * foreman hourly rate is stored on the shift for the owner foreman's private salary calculation.</p>
  *
  * @param location optional human-readable work location

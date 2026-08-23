@@ -12,6 +12,8 @@ import java.time.OffsetDateTime;
  * Response DTO returned after creating a shift.
  *
  * @param id created shift id
+ * @param companyId company assigned to the shift
+ * @param companyName company display name assigned to the shift
  * @param title generated shift title
  * @param location optional shift location
  * @param joinCode generated code workers use to join
@@ -20,11 +22,13 @@ import java.time.OffsetDateTime;
  * @param actualEndTime actual end time, null until close
  * @param defaultBreakMinutes default break minutes copied to attendance
  * @param defaultHourlyRate default rate copied to worker attendance when they join
- * @param foremanHourlyRate private owner-foreman rate, omitted for admins
- * @param createdBy user id of the foreman or admin who created the shift
+ * @param foremanHourlyRate private owner-foreman rate
+ * @param createdBy user id of the foreman who created the shift
  */
 public record ShiftCreateResponse(
 		Long id,
+		Long companyId,
+		String companyName,
 		String title,
 		String location,
 		String joinCode,
@@ -48,6 +52,8 @@ public record ShiftCreateResponse(
 	public static ShiftCreateResponse from(ShiftSession shiftSession, boolean includePrivateForemanFields) {
 		return new ShiftCreateResponse(
 				shiftSession.getId(),
+				shiftSession.getCompany().getId(),
+				shiftSession.getCompany().getName(),
 				shiftSession.getTitle(),
 				shiftSession.getLocation(),
 				shiftSession.getJoinCode(),

@@ -22,8 +22,8 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Handles shift session endpoints under {@code /api/v1/shifts}.
  *
- * <p>Foremen and admins use this controller to create, read, start, close, and summarize shifts. Role and ownership
- * rules are enforced by Spring Security and {@link ShiftSessionService}.</p>
+ * <p>Foremen use this controller to create, start, and close shifts. Foremen and admins can read supported shift
+ * views. Role and ownership rules are enforced by Spring Security and {@link ShiftSessionService}.</p>
  */
 @RestController
 @RequestMapping("/api/v1/shifts")
@@ -44,7 +44,7 @@ public class ShiftSessionController {
 	 * Handles {@code POST /api/v1/shifts}.
 	 *
 	 * @param request shift creation request
-	 * @param principal authenticated foreman or admin principal
+	 * @param principal authenticated foreman principal
 	 * @return created shift response with generated join code
 	 */
 	@PostMapping
@@ -75,7 +75,7 @@ public class ShiftSessionController {
 	 * Handles {@code POST /api/v1/shifts/{shiftId}/start}.
 	 *
 	 * @param shiftId shift id from the URL
-	 * @param principal authenticated foreman or admin principal
+	 * @param principal authenticated foreman principal
 	 * @return shift start response with actual start time
 	 */
 	@PostMapping("/{shiftId}/start")
@@ -105,7 +105,7 @@ public class ShiftSessionController {
 	 * Handles {@code POST /api/v1/shifts/{shiftId}/close}.
 	 *
 	 * @param shiftId shift id from the URL
-	 * @param principal authenticated foreman or admin principal
+	 * @param principal authenticated foreman principal
 	 * @return shift close response with actual end time
 	 */
 	@PostMapping("/{shiftId}/close")

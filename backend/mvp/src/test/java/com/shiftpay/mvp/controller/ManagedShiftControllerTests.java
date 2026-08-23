@@ -34,8 +34,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Controller integration tests for the current user's managed-shifts endpoint.
  *
- * <p>The class covers FOREMAN and ADMIN creator-owned shift listing, WORKER denial, JWT failures, response DTO safety,
- * and stable newest-first ordering for the Foreman mobile dashboard.</p>
+ * <p>The class covers FOREMAN creator-owned shift listing, minimal ADMIN access, WORKER denial, JWT failures, response
+ * DTO safety, and stable newest-first ordering for the Foreman mobile dashboard.</p>
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -43,6 +43,7 @@ class ManagedShiftControllerTests {
 
 	private static final String REGISTER_URL = "/api/v1/auth/register";
 	private static final String LOGIN_URL = "/api/v1/auth/login";
+	private static final String CREATE_COMPANY_URL = "/api/v1/companies";
 	private static final String CREATE_SHIFT_URL = "/api/v1/shifts";
 	private static final String MANAGED_SHIFTS_URL = "/api/v1/me/managed-shifts";
 	private static final Pattern ACCESS_TOKEN_PATTERN = Pattern.compile("\"accessToken\":\"([^\"]+)\"");
@@ -81,10 +82,11 @@ class ManagedShiftControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$", hasSize(2)))
 				.andExpect(jsonPath("$[0].id").value(secondShiftId))
-				.andExpect(jsonPath("$[0].title").value(containsString("Default Company")))
+				.andExpect(jsonPath("$[0].companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$[0].title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$[0].status").value("OPEN"))
 				.andExpect(jsonPath("$[1].id").value(firstShiftId))
-				.andExpect(jsonPath("$[1].title").value(containsString("Default Company")));
+				.andExpect(jsonPath("$[1].title").value(containsString("Acme Construction")));
 	}
 
 	/**
@@ -105,22 +107,18 @@ class ManagedShiftControllerTests {
 	}
 
 	/**
-	 * Uses an ADMIN-created shift and a FOREMAN-created shift to document the MVP admin behavior: admins see only
-	 * shifts they created through this endpoint.
+	 * Uses a FOREMAN-created shift to document the MVP admin behavior: admins can call the endpoint but do not receive
+	 * another user's managed shifts. ADMIN REST shift creation is not part of the mobile MVP.
 	 */
 	@Test
-	void adminSeesOnlyOwnCreatedManagedShiftsForMvp() throws Exception {
+	void adminDoesNotSeeForemanManagedShiftsForMvp() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
 		long foremanShiftId = createShift(foremanToken, "Foreman shift");
 		String adminToken = createAdminAndLogin();
-		long adminShiftId = createShift(adminToken, "Admin shift");
 
 		getManagedShifts(adminToken)
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$", hasSize(1)))
-				.andExpect(jsonPath("$[0].id").value(adminShiftId))
-				.andExpect(jsonPath("$[0].title").value(containsString("Default Company")))
-				.andExpect(jsonPath("$[0].foremanHourlyRate").doesNotExist())
+				.andExpect(jsonPath("$", hasSize(0)))
 				.andExpect(jsonPath("$[?(@.id == %d)]".formatted(foremanShiftId)).isEmpty());
 	}
 
@@ -179,7 +177,9 @@ class ManagedShiftControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$", hasSize(1)))
 				.andExpect(jsonPath("$[0].id").value(shiftId))
-				.andExpect(jsonPath("$[0].title").value(containsString("Default Company")))
+				.andExpect(jsonPath("$[0].companyId").isNumber())
+				.andExpect(jsonPath("$[0].companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$[0].title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$[0].location").value("Cologne"))
 				.andExpect(jsonPath("$[0].joinCode").isString())
 				.andExpect(jsonPath("$[0].actualStartTime").value(nullValue()))
@@ -190,7 +190,7 @@ class ManagedShiftControllerTests {
 				.andExpect(jsonPath("$[0].createdBy").isNumber())
 				.andExpect(jsonPath("$[0].plannedStartTime").doesNotExist())
 				.andExpect(jsonPath("$[0].plannedEndTime").doesNotExist())
-				.andExpect(jsonPath("$[0].*", hasSize(11)))
+				.andExpect(jsonPath("$[0].*", hasSize(13)))
 				.andExpect(jsonPath("$[0].company").doesNotExist())
 				.andExpect(jsonPath("$[0].createdByUser").doesNotExist())
 				.andExpect(jsonPath("$[0].createdAt").doesNotExist())
@@ -243,7 +243,11 @@ class ManagedShiftControllerTests {
 								""".formatted(email, role)))
 				.andExpect(status().isCreated());
 
-		return login(email);
+		String accessToken = login(email);
+		if ("FOREMAN".equals(role)) {
+			createCompany(accessToken, "Acme Construction");
+		}
+		return accessToken;
 	}
 
 	/**
@@ -258,9 +262,27 @@ class ManagedShiftControllerTests {
 		admin.setFirstName("System");
 		admin.setLastName("Admin");
 		admin.setRole(Role.ADMIN);
-		userRepository.save(admin);
+		userRepository.saveAndFlush(admin);
 
 		return login(admin.getEmail());
+	}
+
+	/**
+	 * Creates a company through the foreman endpoint.
+	 *
+	 * @param accessToken foreman JWT
+	 * @param companyName company name
+	 */
+	private void createCompany(String accessToken, String companyName) throws Exception {
+		mockMvc.perform(post(CREATE_COMPANY_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "name": "%s"
+								}
+								""".formatted(companyName)))
+				.andExpect(status().isCreated());
 	}
 
 	/**
@@ -287,7 +309,7 @@ class ManagedShiftControllerTests {
 	/**
 	 * Creates a shift through the REST API and returns the generated id.
 	 *
-	 * @param accessToken JWT for a FOREMAN or ADMIN
+	 * @param accessToken JWT for a FOREMAN
 	 * @param title shift title
 	 * @return created shift id
 	 */

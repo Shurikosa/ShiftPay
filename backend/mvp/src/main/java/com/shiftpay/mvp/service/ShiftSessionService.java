@@ -14,10 +14,10 @@ import com.shiftpay.mvp.entity.ShiftAttendance;
 import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.ShiftStatus;
 import com.shiftpay.mvp.entity.User;
+import com.shiftpay.mvp.exception.CompanyConflictException;
 import com.shiftpay.mvp.exception.ForbiddenException;
 import com.shiftpay.mvp.exception.ShiftNotFoundException;
 import com.shiftpay.mvp.exception.ShiftStateConflictException;
-import com.shiftpay.mvp.repository.CompanyRepository;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
@@ -42,12 +42,11 @@ import java.util.Objects;
  *
  * <p>It creates shifts, starts and closes them with pessimistic locks, calculates salary for approved attendance on
  * close, reads managed-shift lists for the current creator, and reads persisted summary data without recalculating
- * salary. Foreman ownership and admin access are enforced here in addition to route-level role checks.</p>
+ * salary. Foreman ownership and admin read access are enforced here in addition to route-level role checks.</p>
  */
 @Service
 public class ShiftSessionService {
 
-	private static final String DEFAULT_COMPANY_NAME = "Default Company";
 	private static final ZoneId TITLE_ZONE = ZoneId.of("Europe/Berlin");
 	private static final DateTimeFormatter TITLE_FORMATTER = DateTimeFormatter.ofPattern(
 			"EEEE HH:mm",
@@ -57,7 +56,6 @@ public class ShiftSessionService {
 	private static final int JOIN_CODE_LENGTH = 6;
 	private static final int JOIN_CODE_MAX_ATTEMPTS = 20;
 
-	private final CompanyRepository companyRepository;
 	private final ShiftAttendanceRepository shiftAttendanceRepository;
 	private final ShiftSessionRepository shiftSessionRepository;
 	private final UserRepository userRepository;
@@ -67,20 +65,17 @@ public class ShiftSessionService {
 	/**
 	 * Creates the service with repositories, salary service, and secure join code generation.
 	 *
-	 * @param companyRepository company repository used for the MVP default company
 	 * @param shiftAttendanceRepository attendance repository used for close and summary data
 	 * @param shiftSessionRepository shift repository used for lifecycle persistence and locks
 	 * @param userRepository user repository used to resolve the authenticated creator
 	 * @param salaryCalculationService salary calculation service used on close
 	 */
 	public ShiftSessionService(
-			CompanyRepository companyRepository,
 			ShiftAttendanceRepository shiftAttendanceRepository,
 			ShiftSessionRepository shiftSessionRepository,
 			UserRepository userRepository,
 			SalaryCalculationService salaryCalculationService
 	) {
-		this.companyRepository = companyRepository;
 		this.shiftAttendanceRepository = shiftAttendanceRepository;
 		this.shiftSessionRepository = shiftSessionRepository;
 		this.userRepository = userRepository;
@@ -89,21 +84,24 @@ public class ShiftSessionService {
 	}
 
 	/**
-	 * Creates an OPEN shift for a foreman or admin.
+	 * Creates an OPEN shift for a foreman.
 	 *
-	 * <p>The method creates or reuses the default company, generates the MVP title and a unique join code, stores
+	 * <p>The method requires the creator to have a company, generates the MVP title and a unique join code, stores
 	 * default worker and foreman rates, and records the creator. Planned times are no longer accepted by the mobile
 	 * contract; actual times are set only by start and close.</p>
 	 *
 	 * @param request shift creation request
-	 * @param principal authenticated foreman or admin principal
+	 * @param principal authenticated foreman principal
 	 * @return created shift response
 	 */
 	@Transactional
 	public ShiftCreateResponse createShift(CreateShiftRequest request, AuthenticatedUserPrincipal principal) {
-		User createdBy = userRepository.findById(principal.id())
+		User createdBy = userRepository.findWithCompanyById(principal.id())
 				.orElseThrow(() -> new JwtAuthenticationException("Authenticated user not found"));
-		Company company = getOrCreateDefaultCompany();
+		Company company = createdBy.getCompany();
+		if (company == null) {
+			throw new CompanyConflictException("Foreman must create a company before creating shifts");
+		}
 
 		ShiftSession shiftSession = new ShiftSession();
 		shiftSession.setCompany(company);
@@ -131,7 +129,7 @@ public class ShiftSessionService {
 	 */
 	@Transactional(readOnly = true)
 	public ShiftResponse getShift(Long shiftId, AuthenticatedUserPrincipal principal) {
-		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId)
+		ShiftSession shiftSession = shiftSessionRepository.findByIdWithCompanyAndCreatedBy(shiftId)
 				.orElseThrow(ShiftNotFoundException::new);
 
 		validateShiftAccess(shiftSession, principal);
@@ -163,7 +161,7 @@ public class ShiftSessionService {
 	 * <p>The shift row is locked so concurrent joins, approvals, starts, and closes see a consistent lifecycle state.</p>
 	 *
 	 * @param shiftId shift session id
-	 * @param principal authenticated owner foreman or admin principal
+	 * @param principal authenticated owner foreman principal
 	 * @return start response with actual start time
 	 */
 	@Transactional
@@ -172,6 +170,7 @@ public class ShiftSessionService {
 				.orElseThrow(ShiftNotFoundException::new);
 
 		validateShiftAccess(shiftSession, principal);
+		validateForemanCompanyConsistency(shiftSession, principal);
 		if (shiftSession.getStatus() != ShiftStatus.OPEN) {
 			throw new ShiftStateConflictException("Shift can only be started when status is OPEN");
 		}
@@ -189,7 +188,7 @@ public class ShiftSessionService {
 	 * failure rolls back the transaction so the shift remains ACTIVE.</p>
 	 *
 	 * @param shiftId shift session id
-	 * @param principal authenticated owner foreman or admin principal
+	 * @param principal authenticated owner foreman principal
 	 * @return close response with actual end time
 	 */
 	@Transactional
@@ -198,6 +197,7 @@ public class ShiftSessionService {
 				.orElseThrow(ShiftNotFoundException::new);
 
 		validateShiftAccess(shiftSession, principal);
+		validateForemanCompanyConsistency(shiftSession, principal);
 		if (shiftSession.getStatus() != ShiftStatus.ACTIVE) {
 			throw new ShiftStateConflictException("Shift can only be closed when status is ACTIVE");
 		}
@@ -250,7 +250,7 @@ public class ShiftSessionService {
 	 */
 	@Transactional(readOnly = true)
 	public ShiftSummaryResponse getShiftSummary(Long shiftId, AuthenticatedUserPrincipal principal) {
-		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId)
+		ShiftSession shiftSession = shiftSessionRepository.findByIdWithCompanyAndCreatedBy(shiftId)
 				.orElseThrow(ShiftNotFoundException::new);
 
 		validateShiftAccess(shiftSession, principal);
@@ -322,6 +322,28 @@ public class ShiftSessionService {
 	}
 
 	/**
+	 * Ensures the owner foreman is still assigned to the company that owns the shift.
+	 *
+	 * @param shiftSession shift being started or closed
+	 * @param principal authenticated caller
+	 */
+	private void validateForemanCompanyConsistency(
+			ShiftSession shiftSession,
+			AuthenticatedUserPrincipal principal
+	) {
+		if (principal.role() != Role.FOREMAN) {
+			return;
+		}
+
+		User foreman = userRepository.findWithCompanyById(principal.id())
+				.orElseThrow(() -> new JwtAuthenticationException("Authenticated user not found"));
+		if (foreman.getCompany() == null
+				|| !Objects.equals(foreman.getCompany().getId(), shiftSession.getCompany().getId())) {
+			throw new ForbiddenException("Foreman must belong to the shift company");
+		}
+	}
+
+	/**
 	 * Checks whether the current REST/mobile caller can see private owner-foreman fields.
 	 *
 	 * @param shiftSession shift being mapped
@@ -334,20 +356,6 @@ public class ShiftSessionService {
 	) {
 		return principal.role() == Role.FOREMAN
 				&& Objects.equals(shiftSession.getCreatedBy().getId(), principal.id());
-	}
-
-	/**
-	 * Returns the default company used by the MVP, creating it if needed.
-	 *
-	 * @return default company entity
-	 */
-	private Company getOrCreateDefaultCompany() {
-		return companyRepository.findFirstByName(DEFAULT_COMPANY_NAME)
-				.orElseGet(() -> {
-					Company company = new Company();
-					company.setName(DEFAULT_COMPANY_NAME);
-					return companyRepository.save(company);
-				});
 	}
 
 	/**

@@ -47,6 +47,7 @@ Services contain business logic.
 Examples:
 
 AuthService
+CompanyService
 ShiftService
 AttendanceService
 SalaryCalculationService
@@ -96,6 +97,20 @@ Fields:
 
 id
 name
+joinCode
+ownerForemanId
+createdAt
+updatedAt
+
+CompanyMembership
+
+Fields:
+
+id
+companyId
+userId
+role
+joinedAt
 createdAt
 updatedAt
 ShiftSession
@@ -113,30 +128,53 @@ actualEndTime
 defaultBreakMinutes
 defaultHourlyRate
 foremanHourlyRate
-foremanWorkedMinutes
-foremanCalculatedSalary
 createdBy
 createdAt
 updatedAt
+
+Company Ownership and Membership
+
+- Company onboarding is part of the mobile MVP.
+- FOREMAN creates a company after registration if they do not already have one.
+- FOREMAN must have a company before creating or starting shifts.
+- The backend must not use Default Company for real MVP shifts.
+- Company has a backend-generated joinCode.
+- WORKER joins a company by company join code.
+- WORKER can join a shift only if they are already a member of that shift's company.
+- ShiftSession.companyId is required for real MVP shifts.
+- Company name is exposed in current-user, shift, managed-shift, and worker-history DTOs where useful for mobile dashboards and menus.
+- ADMIN user management remains deferred until after the mobile MVP and should be implemented in Vaadin.
+- The mobile MVP should not add an ADMIN flow.
 
 Shift Creation
 
 - For the mobile MVP, ShiftSession creation does not require plannedStartTime or plannedEndTime.
 - The foreman does not enter planned start or planned end times in mobile.
 - The foreman does not manually enter title in mobile.
-- The backend generates ShiftSession.title automatically from date/time and company name.
-- Example generated title format: `Tuesday 10:00 - Default Company`.
-- The generated title uses English locale and Europe/Berlin timezone for the MVP.
+- The backend generates ShiftSession.title automatically from date/time and the real company name.
+- Example generated title format: `Tuesday 10:00 - Acme Construction`.
+- Exact locale and format can be refined during implementation.
 - actualStartTime is set by the backend when the foreman starts the shift.
 - actualEndTime is set by the backend when the foreman closes the shift.
 - Shift creation keeps optional location, defaultBreakMinutes, defaultHourlyRate, and foremanHourlyRate.
+- defaultBreakMinutes is optional and defaults to 0 when omitted.
+- Pause tracking is planned separately and is not part of the current implemented shift DTOs.
+
+Shift Cancellation
+
+- Planned, not implemented yet.
+- ShiftSession status includes CANCELLED for later lifecycle support.
+- Owner FOREMAN can cancel only their own OPEN shift before it starts.
+- ADMIN is not planned for the mobile cancel flow.
+- CANCELLED shifts do not calculate salary.
+- Worker history can include CANCELLED shifts/status.
 
 Hourly Rate Ownership
 
 - WORKER does not provide or modify hourly rates.
 - FOREMAN sets defaultHourlyRate when creating an owned shift.
 - FOREMAN sets foremanHourlyRate when creating an owned shift.
-- ADMIN can set defaultHourlyRate for any shift.
+- ADMIN cannot create shifts or set defaultHourlyRate through the REST/mobile API.
 - ShiftAttendance.hourlyRate is copied from ShiftSession.defaultHourlyRate when a worker joins.
 - ShiftAttendance.hourlyRate is a snapshot for that worker and shift, so later shift-rate changes do not rewrite historical attendance.
 - FOREMAN can override ShiftAttendance.hourlyRate while approving attendance for an owned OPEN shift.
@@ -167,6 +205,7 @@ Attendance Approval
 
 - The approval endpoint is available only to FOREMAN and ADMIN.
 - FOREMAN ownership is enforced in the service layer against ShiftSession.createdBy.
+- FOREMAN access is scoped to shifts in their company.
 - Attendance is loaded by both attendance id and shift session id, so a URL shift mismatch is returned as not found.
 - Approval is allowed only while the shift is OPEN.
 - The only allowed approval transition is JOINED -> APPROVED.
@@ -188,12 +227,13 @@ Worker Shift History
 - The endpoint always filters by the current user's worker attendance records.
 - WORKER, FOREMAN, and ADMIN all see only attendance where ShiftAttendance.worker.id equals the current user id.
 - FOREMAN and ADMIN do not receive managed-shift attendance through this endpoint unless they also have their own attendance record.
-- OPEN, ACTIVE, and CLOSED shifts are included.
+- OPEN, ACTIVE, CLOSED, and CANCELLED shifts are included.
 - The endpoint reads persisted workedMinutes and calculatedSalary from ShiftAttendance and never recalculates salary.
-- OPEN, ACTIVE, and unapproved attendance can return null workedMinutes and calculatedSalary.
+- OPEN, ACTIVE, CANCELLED, and unapproved attendance can return null workedMinutes and calculatedSalary.
 - The repository fetches attendance with shift in one query to avoid N+1 loading.
 - Results are ordered by joinedAt descending and then attendance id descending.
 - DTOs expose shift and attendance fields only, never User entities, emails, password hashes, foremanHourlyRate, foremanWorkedMinutes, or foremanSalary.
+- DTOs include company name. Pause status/minutes are planned separately and are not part of current implemented DTOs.
 
 Foreman Managed Shifts
 
@@ -203,12 +243,13 @@ Foreman Managed Shifts
 - The endpoint is available only to FOREMAN and ADMIN.
 - WORKER receives 403 Forbidden.
 - FOREMAN sees shifts where ShiftSession.createdBy equals the current user id.
-- ADMIN also sees shifts where ShiftSession.createdBy equals the current user id for the MVP; full admin listing is deferred to Vaadin admin UI.
+- FOREMAN managed-shift DTOs include companyId and companyName.
+- ADMIN can call the endpoint and sees shifts where ShiftSession.createdBy equals the current user id. Because ADMIN cannot create shifts through the REST/mobile API, this is normally empty for admins. Full admin listing is deferred to Vaadin admin UI.
 - The endpoint reuses ShiftSession service/repository logic and does not recalculate salary.
 - Results are ordered by createdAt descending and shift id descending.
 - Response DTOs expose shift/session fields needed by the mobile dashboard and do not expose User entities, password hashes, company entity, createdAt, or updatedAt.
 - foremanHourlyRate is included only for the owner FOREMAN in the REST/mobile MVP.
-- ADMIN can use the endpoint only for shifts they personally created during the MVP, but ADMIN responses do not include foremanHourlyRate or foreman salary fields.
+- ADMIN responses do not include foremanHourlyRate or foreman salary fields.
 
 Admin User Management
 
@@ -235,9 +276,27 @@ Salary Calculation
 - foremanWorkedMinutes = minutes_between(actualStartTime, actualEndTime) - ShiftSession.defaultBreakMinutes.
 - foremanSalary = foremanWorkedMinutes / 60 * ShiftSession.foremanHourlyRate.
 - foremanSalary is stored or returned with scale 2 and RoundingMode.HALF_UP.
+- Static defaultBreakMinutes is optional and defaults to 0.
+- Dynamic pauses are separate from defaultBreakMinutes and planned separately.
+- CANCELLED shifts are planned and will not calculate salary after implementation.
 - No client should calculate worker or foreman salary.
 - Close fails with 409 if actualStartTime is missing, an attendance breakMinutes is greater than shift duration, or ShiftSession.defaultBreakMinutes is greater than shift duration.
 - Close is transactional: when salary validation fails, the shift remains ACTIVE and attendance salary fields are not written.
+
+Pause System
+
+- Pause tracking should be implemented as a separate backend/mobile task.
+- Planned, not implemented yet.
+- Pause is separate from static defaultBreakMinutes.
+- WORKER can start and stop pause only for themselves.
+- FOREMAN can start and stop self pause on their own active shift.
+- FOREMAN can start and stop global pause for everyone on their own active shift.
+- Pause status must be visible in mobile dashboards and details.
+- Worker views show whether the worker is paused or global pause is active.
+- Foreman views show global pause status, foreman self pause status, and worker pause status.
+- Backend persistence should use PauseInterval or an equivalent auditable model with start/end timestamps, scope, shift, and affected user/attendance where applicable.
+- Pause endpoints can be refined during implementation.
+- Salary calculation consumes backend pause data; clients never calculate pause-adjusted salary.
 
 Shift Summary
 
@@ -248,6 +307,7 @@ Shift Summary
 - Summary reads persisted ShiftAttendance.workedMinutes and ShiftAttendance.calculatedSalary.
 - Summary does not recalculate worker or foreman salary.
 - Summary includes only APPROVED attendance.
+- Summary is not available for CANCELLED shifts.
 - The repository fetches approved attendance with worker in one query to avoid N+1 loading.
 - Workers are ordered by worker lastName, firstName, and worker id.
 - totalWorkers is the count of included attendance rows.
@@ -255,6 +315,7 @@ Shift Summary
 - If approved attendance is missing workedMinutes or calculatedSalary, summary returns a conflict.
 - Summary DTOs expose worker identity fields but never expose User entities or password hashes.
 - Worker summary remains based on approved ShiftAttendance rows.
+- Worker summary does not expose pause fields in the current implemented DTOs.
 - Foreman private salary fields are separate from worker rows: foremanWorkedMinutes, foremanHourlyRate, and foremanSalary.
 - Foreman salary fields are returned only to the owner FOREMAN.
 - WORKER never receives foreman salary fields.
@@ -262,7 +323,7 @@ Shift Summary
 
 Concurrency Control
 
-- Join, start, close, and approval run inside transactions with pessimistic write locks.
+- Company creation, company join, shift join, start, close, and approval run inside transactions with pessimistic write locks where state can change concurrently.
 - ShiftSession is locked by id for start, close, and approval.
 - ShiftSession is locked by joinCode for worker join.
 - ShiftAttendance is locked by attendance id and shift id for approval.
@@ -270,7 +331,9 @@ Concurrency Control
 - Operations that require both rows always lock ShiftSession first and ShiftAttendance second.
 - Concurrent approvals serialize so only the first JOINED -> APPROVED transition succeeds.
 - Start serializes with join and approval, preventing either operation from succeeding after the shift becomes ACTIVE.
+- Cancel serialization is planned with the cancel endpoint.
 - Close serializes concurrent lifecycle transitions and prevents duplicate successful close operations.
+- Pause interval start/stop serialization is planned with the pause system.
 
 4. Database
 
@@ -300,6 +363,10 @@ Backend validates credentials.
 Backend returns JWT token.
 Mobile app stores token securely.
 Mobile app sends token in Authorization header.
+JWT expiration remains enabled.
+Default MVP JWT/session lifetime should be 8 hours.
+Mobile restores a stored session by calling GET /api/v1/users/me.
+Future biometric unlock or refresh-token/long-lived session support can be added later.
 
 Header:
 
@@ -317,17 +384,25 @@ Authorization rules:
 
 WORKER:
 - own profile
+- join company
 - own shifts
 - join shift
+- pause/resume self planned separately
 
 FOREMAN:
+- create own company
 - create shift
 - manage own shifts
 - approve attendance
+- cancel own OPEN shifts before start planned separately
+- pause/resume self and global pause planned separately
 - see shift summaries
 
 ADMIN:
-- full access
+- read shift detail, list/approve attendance, and read worker-only shift summaries through REST where implemented
+- no REST/mobile shift create/start/close/cancel access
+- user management after mobile MVP through Vaadin
+- no mobile admin flow
 
 7. Mobile Architecture
 

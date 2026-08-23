@@ -16,6 +16,8 @@ import java.time.OffsetDateTime;
  *
  * @param shiftId shift session id
  * @param attendanceId attendance id belonging to the current user
+ * @param companyId company assigned to the shift
+ * @param companyName company display name assigned to the shift
  * @param title shift title
  * @param location optional shift location
  * @param status current shift status
@@ -30,6 +32,8 @@ import java.time.OffsetDateTime;
 public record MyShiftHistoryResponse(
 		Long shiftId,
 		Long attendanceId,
+		Long companyId,
+		String companyName,
 		String title,
 		String location,
 		ShiftStatus status,
@@ -53,6 +57,8 @@ public record MyShiftHistoryResponse(
 		return new MyShiftHistoryResponse(
 				shiftSession.getId(),
 				attendance.getId(),
+				shiftSession.getCompany().getId(),
+				shiftSession.getCompany().getName(),
 				shiftSession.getTitle(),
 				shiftSession.getLocation(),
 				shiftSession.getStatus(),

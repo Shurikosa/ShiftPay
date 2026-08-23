@@ -83,8 +83,12 @@ public class AttendanceService {
 			throw new ShiftStateConflictException("Workers can only join shifts with status OPEN");
 		}
 
-		User worker = userRepository.findById(principal.id())
+		User worker = userRepository.findWithCompanyById(principal.id())
 				.orElseThrow(() -> new JwtAuthenticationException("Authenticated user not found"));
+		if (worker.getCompany() == null
+				|| !Objects.equals(worker.getCompany().getId(), shiftSession.getCompany().getId())) {
+			throw new ForbiddenException("Worker must join the company before joining this shift");
+		}
 		if (shiftAttendanceRepository.existsByShiftSessionIdAndWorkerId(shiftSession.getId(), worker.getId())) {
 			throw new AttendanceConflictException("Worker has already joined this shift");
 		}

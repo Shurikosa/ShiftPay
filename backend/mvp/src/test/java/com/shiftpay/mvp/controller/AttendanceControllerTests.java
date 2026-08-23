@@ -2,10 +2,12 @@ package com.shiftpay.mvp.controller;
 
 import com.shiftpay.mvp.TestDataCleaner;
 import com.shiftpay.mvp.entity.AttendanceStatus;
+import com.shiftpay.mvp.entity.Company;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftAttendance;
 import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.User;
+import com.shiftpay.mvp.repository.CompanyRepository;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
@@ -49,6 +51,8 @@ class AttendanceControllerTests {
 
 	private static final String REGISTER_URL = "/api/v1/auth/register";
 	private static final String LOGIN_URL = "/api/v1/auth/login";
+	private static final String CREATE_COMPANY_URL = "/api/v1/companies";
+	private static final String JOIN_COMPANY_URL = "/api/v1/companies/join";
 	private static final String CREATE_SHIFT_URL = "/api/v1/shifts";
 	private static final String JOIN_SHIFT_URL = "/api/v1/shifts/join";
 	private static final String MY_SHIFT_HISTORY_URL = "/api/v1/me/shifts";
@@ -62,6 +66,9 @@ class AttendanceControllerTests {
 
 	@Autowired
 	private JdbcTemplate jdbcTemplate;
+
+	@Autowired
+	private CompanyRepository companyRepository;
 
 	@Autowired
 	private ShiftAttendanceRepository shiftAttendanceRepository;
@@ -172,6 +179,59 @@ class AttendanceControllerTests {
 
 		ShiftAttendance attendance = shiftAttendanceRepository.findAll().getFirst();
 		assertThat(attendance.getHourlyRate()).isEqualByComparingTo(new BigDecimal("18.75"));
+	}
+
+	/**
+	 * Attempts to join a company-scoped shift before company onboarding and expects 403.
+	 */
+	@Test
+	void workerCannotJoinShiftBeforeJoiningCompany() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Open shift");
+		String workerToken = registerAndLoginWithoutCompany("worker@example.com", "WORKER");
+
+		joinShift(workerToken, shift.joinCode())
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message")
+						.value("Worker must join the company before joining this shift"))
+				.andExpect(jsonPath("$.path").value(JOIN_SHIFT_URL));
+	}
+
+	/**
+	 * Attempts to join a shift owned by another company and expects company isolation to return 403.
+	 */
+	@Test
+	void workerCannotJoinShiftFromAnotherCompany() throws Exception {
+		String firstForemanToken = registerAndLogin("first.foreman@example.com", "FOREMAN");
+		CreatedShift firstShift = createShift(firstForemanToken, "First company shift");
+		String secondForemanToken = registerAndLoginWithoutCompany("second.foreman@example.com", "FOREMAN");
+		String secondCompanyJoinCode = createCompany(secondForemanToken, "Second Company");
+		String workerToken = registerAndLoginWithoutCompany("worker@example.com", "WORKER");
+		joinCompany(workerToken, secondCompanyJoinCode);
+
+		joinShift(workerToken, firstShift.joinCode())
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.message")
+						.value("Worker must join the company before joining this shift"))
+				.andExpect(jsonPath("$.path").value(JOIN_SHIFT_URL));
+	}
+
+	/**
+	 * Joins a shift after worker company onboarding and expects the company rule to allow the join.
+	 */
+	@Test
+	void workerCanJoinShiftFromOwnCompany() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Open shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+
+		joinShift(workerToken, shift.joinCode())
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.shiftId").value(shift.id()))
+				.andExpect(jsonPath("$.status").value("JOINED"));
 	}
 
 	/**
@@ -805,7 +865,9 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$", hasSize(1)))
 				.andExpect(jsonPath("$[0].shiftId").value(shift.id()))
 				.andExpect(jsonPath("$[0].attendanceId").value(attendanceId))
-				.andExpect(jsonPath("$[0].title").value(containsString("Default Company")))
+				.andExpect(jsonPath("$[0].companyId").isNumber())
+				.andExpect(jsonPath("$[0].companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$[0].title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$[0].location").value("Cologne"))
 				.andExpect(jsonPath("$[0].status").value("OPEN"))
 				.andExpect(jsonPath("$[0].actualStartTime").value((Object) null))
@@ -820,7 +882,7 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$[0].foremanHourlyRate").doesNotExist())
 				.andExpect(jsonPath("$[0].foremanWorkedMinutes").doesNotExist())
 				.andExpect(jsonPath("$[0].foremanSalary").doesNotExist())
-				.andExpect(jsonPath("$[0].*", hasSize(12)))
+				.andExpect(jsonPath("$[0].*", hasSize(14)))
 				.andExpect(jsonPath("$[0].passwordHash").doesNotExist())
 				.andExpect(jsonPath("$[0].user").doesNotExist())
 				.andExpect(jsonPath("$[0].worker").doesNotExist())
@@ -998,7 +1060,14 @@ class AttendanceControllerTests {
 	 * @return JWT access token
 	 */
 	private String registerAndLogin(String email, String role) throws Exception {
-		return registerAndLogin(email, role, "Test", "User");
+		String accessToken = registerAndLoginWithoutCompany(email, role, "Test", "User");
+		if ("FOREMAN".equals(role)) {
+			createCompany(accessToken, "Acme Construction");
+		}
+		else if ("WORKER".equals(role)) {
+			joinFirstCompany(accessToken);
+		}
+		return accessToken;
 	}
 
 	/**
@@ -1011,6 +1080,42 @@ class AttendanceControllerTests {
 	 * @return JWT access token
 	 */
 	private String registerAndLogin(
+			String email,
+			String role,
+			String firstName,
+			String lastName
+	) throws Exception {
+		String accessToken = registerAndLoginWithoutCompany(email, role, firstName, lastName);
+		if ("FOREMAN".equals(role)) {
+			createCompany(accessToken, "Acme Construction");
+		}
+		else if ("WORKER".equals(role)) {
+			joinFirstCompany(accessToken);
+		}
+		return accessToken;
+	}
+
+	/**
+	 * Registers a user and returns a JWT without doing company onboarding.
+	 *
+	 * @param email email address used for registration and login
+	 * @param role role sent to registration
+	 * @return JWT access token
+	 */
+	private String registerAndLoginWithoutCompany(String email, String role) throws Exception {
+		return registerAndLoginWithoutCompany(email, role, "Test", "User");
+	}
+
+	/**
+	 * Registers a named user and logs in without doing company onboarding.
+	 *
+	 * @param email email address used for the account
+	 * @param role role sent to registration
+	 * @param firstName first name stored on the user
+	 * @param lastName last name stored on the user
+	 * @return JWT access token
+	 */
+	private String registerAndLoginWithoutCompany(
 			String email,
 			String role,
 			String firstName,
@@ -1047,6 +1152,60 @@ class AttendanceControllerTests {
 		userRepository.save(admin);
 
 		return login(admin.getEmail());
+	}
+
+	/**
+	 * Creates a company through the foreman endpoint.
+	 *
+	 * @param accessToken foreman JWT
+	 * @param companyName company name
+	 * @return company join code
+	 */
+	private String createCompany(String accessToken, String companyName) throws Exception {
+		MvcResult result = mockMvc.perform(post(CREATE_COMPANY_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "name": "%s"
+								}
+								""".formatted(companyName)))
+				.andExpect(status().isCreated())
+				.andReturn();
+		return extractString(result.getResponse().getContentAsString(), JOIN_CODE_PATTERN);
+	}
+
+	/**
+	 * Joins the first created company through the worker endpoint.
+	 *
+	 * @param accessToken worker JWT
+	 */
+	private void joinFirstCompany(String accessToken) throws Exception {
+		Company company = companyRepository.findAll().stream()
+				.findFirst()
+				.orElse(null);
+		if (company == null) {
+			return;
+		}
+		joinCompany(accessToken, company.getJoinCode());
+	}
+
+	/**
+	 * Joins a company through the worker endpoint and asserts success.
+	 *
+	 * @param accessToken worker JWT
+	 * @param joinCode company join code
+	 */
+	private void joinCompany(String accessToken, String joinCode) throws Exception {
+		mockMvc.perform(post(JOIN_COMPANY_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "joinCode": "%s"
+								}
+								""".formatted(joinCode)))
+				.andExpect(status().isOk());
 	}
 
 	/**
