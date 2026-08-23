@@ -2,12 +2,19 @@ export type UserRole = "WORKER" | "FOREMAN" | "ADMIN";
 
 export type MobileRegistrationRole = Extract<UserRole, "WORKER" | "FOREMAN">;
 
+export interface Company {
+  id: number;
+  name: string;
+  joinCode?: string;
+}
+
 export interface User {
   id: number;
   email: string;
   firstName: string;
   lastName: string;
   role: UserRole;
+  company: Company | null;
 }
 
 export interface RegisterRequest {

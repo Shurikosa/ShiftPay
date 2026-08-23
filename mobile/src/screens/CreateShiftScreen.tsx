@@ -11,7 +11,6 @@ import { useAuth } from "../context/AuthContext";
 import { useForemanManagedShifts } from "../hooks/useForemanManagedShifts";
 import type { ForemanStackParamList } from "../types/navigation";
 import { colors, spacing, typography } from "../utils/theme";
-import { isBlank } from "../utils/validation";
 
 type CreateShiftScreenProps = NativeStackScreenProps<
   ForemanStackParamList,
@@ -19,12 +18,9 @@ type CreateShiftScreenProps = NativeStackScreenProps<
 >;
 
 type CreateShiftErrors = {
-  title?: string;
-  location?: string;
-  plannedStartTime?: string;
-  plannedEndTime?: string;
   defaultBreakMinutes?: string;
   defaultHourlyRate?: string;
+  foremanHourlyRate?: string;
 };
 
 function parseNumber(value: string): number | null {
@@ -49,69 +45,61 @@ function parseInteger(value: string): number | null {
 }
 
 export function CreateShiftScreen({ navigation }: CreateShiftScreenProps) {
-  const { authenticatedRequest } = useAuth();
+  const { authenticatedRequest, user } = useAuth();
   const { refresh } = useForemanManagedShifts({ loadOnFocus: false });
-  const [title, setTitle] = useState("");
   const [location, setLocation] = useState("");
-  const [plannedStartTime, setPlannedStartTime] = useState("");
-  const [plannedEndTime, setPlannedEndTime] = useState("");
-  const [defaultBreakMinutes, setDefaultBreakMinutes] = useState("60");
+  const [defaultBreakMinutes, setDefaultBreakMinutes] = useState("");
   const [defaultHourlyRate, setDefaultHourlyRate] = useState("");
+  const [foremanHourlyRate, setForemanHourlyRate] = useState("");
   const [errors, setErrors] = useState<CreateShiftErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const validate = (): {
     valid: boolean;
-    breakMinutes: number;
-    hourlyRate: number;
+    breakMinutes?: number;
+    defaultRate: number;
+    foremanRate: number;
   } => {
     const nextErrors: CreateShiftErrors = {};
-    const start = new Date(plannedStartTime);
-    const end = new Date(plannedEndTime);
-    const breakMinutes = parseInteger(defaultBreakMinutes);
-    const hourlyRate = parseNumber(defaultHourlyRate);
+    const trimmedBreakMinutes = defaultBreakMinutes.trim();
+    const breakMinutes =
+      trimmedBreakMinutes.length === 0 ? undefined : parseInteger(defaultBreakMinutes);
+    const defaultRate = parseNumber(defaultHourlyRate);
+    const foremanRate = parseNumber(foremanHourlyRate);
 
-    if (isBlank(title)) {
-      nextErrors.title = "Enter a shift title.";
-    }
-
-    if (isBlank(location)) {
-      nextErrors.location = "Enter a location.";
-    }
-
-    if (isBlank(plannedStartTime) || Number.isNaN(start.getTime())) {
-      nextErrors.plannedStartTime = "Use a valid date and time.";
-    }
-
-    if (isBlank(plannedEndTime) || Number.isNaN(end.getTime())) {
-      nextErrors.plannedEndTime = "Use a valid date and time.";
-    }
-
-    if (!nextErrors.plannedStartTime && !nextErrors.plannedEndTime && end <= start) {
-      nextErrors.plannedEndTime = "End time must be after start time.";
-    }
-
-    if (breakMinutes === null || breakMinutes < 0) {
+    if (breakMinutes === null || (breakMinutes !== undefined && breakMinutes < 0)) {
       nextErrors.defaultBreakMinutes = "Enter a whole number 0 or greater.";
     }
 
-    if (hourlyRate === null || hourlyRate < 0) {
+    if (defaultRate === null || defaultRate < 0) {
       nextErrors.defaultHourlyRate = "Enter a rate 0 or greater.";
     } else if (!/^\d+([.,]\d{1,2})?$/.test(defaultHourlyRate.trim())) {
       nextErrors.defaultHourlyRate = "Use up to two decimal places.";
+    }
+
+    if (foremanRate === null || foremanRate < 0) {
+      nextErrors.foremanHourlyRate = "Enter a rate 0 or greater.";
+    } else if (!/^\d+([.,]\d{1,2})?$/.test(foremanHourlyRate.trim())) {
+      nextErrors.foremanHourlyRate = "Use up to two decimal places.";
     }
 
     setErrors(nextErrors);
 
     return {
       valid: Object.keys(nextErrors).length === 0,
-      breakMinutes: breakMinutes ?? 0,
-      hourlyRate: hourlyRate ?? 0
+      breakMinutes: breakMinutes ?? undefined,
+      defaultRate: defaultRate ?? 0,
+      foremanRate: foremanRate ?? 0
     };
   };
 
   const handleSubmit = () => {
+    if (!user?.company) {
+      setError("Create your company before creating shifts.");
+      return;
+    }
+
     const result = validate();
 
     if (!result.valid) {
@@ -121,15 +109,17 @@ export function CreateShiftScreen({ navigation }: CreateShiftScreenProps) {
     setSubmitting(true);
     setError(null);
 
+    const payload = {
+      location: location.trim(),
+      ...(result.breakMinutes === undefined
+        ? {}
+        : { defaultBreakMinutes: result.breakMinutes }),
+      defaultHourlyRate: result.defaultRate,
+      foremanHourlyRate: result.foremanRate
+    };
+
     void authenticatedRequest((token) =>
-      createShift(token, {
-        title: title.trim(),
-        location: location.trim(),
-        plannedStartTime: plannedStartTime.trim(),
-        plannedEndTime: plannedEndTime.trim(),
-        defaultBreakMinutes: result.breakMinutes,
-        defaultHourlyRate: result.hourlyRate
-      })
+      createShift(token, payload)
     )
       .then((response) => {
         void refresh().catch(() => undefined);
@@ -145,47 +135,52 @@ export function CreateShiftScreen({ navigation }: CreateShiftScreenProps) {
       });
   };
 
+  if (!user?.company) {
+    return (
+      <Screen>
+        <View style={styles.container}>
+          <View style={styles.header}>
+            <Text style={styles.kicker}>Foreman</Text>
+            <Text style={styles.title}>Create shift</Text>
+            <Text style={styles.subtitle}>A company is required before shifts can be created.</Text>
+          </View>
+
+          <StateMessage
+            title="Company required"
+            message="Create your company first, then come back to create shifts."
+            tone="error"
+          />
+
+          <Button
+            label="Back to dashboard"
+            onPress={() => {
+              navigation.goBack();
+            }}
+            variant="ghost"
+          />
+        </View>
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.kicker}>Foreman</Text>
           <Text style={styles.title}>Create shift</Text>
-          <Text style={styles.subtitle}>Set the plan workers will join by code.</Text>
+          <Text style={styles.subtitle}>Set worker and foreman rates for this shift.</Text>
         </View>
 
         {error ? <StateMessage title="Could not create shift" message={error} tone="error" /> : null}
 
         <View style={styles.form}>
           <FormField
-            autoCapitalize="sentences"
-            error={errors.title}
-            label="Title"
-            onChangeText={setTitle}
-            placeholder="Monday construction shift"
-            value={title}
-          />
-          <FormField
             autoCapitalize="words"
-            error={errors.location}
             label="Location"
             onChangeText={setLocation}
-            placeholder="Cologne"
+            placeholder="Optional location"
             value={location}
-          />
-          <FormField
-            error={errors.plannedStartTime}
-            label="Planned start"
-            onChangeText={setPlannedStartTime}
-            placeholder="2026-07-01T08:00:00"
-            value={plannedStartTime}
-          />
-          <FormField
-            error={errors.plannedEndTime}
-            label="Planned end"
-            onChangeText={setPlannedEndTime}
-            placeholder="2026-07-01T17:00:00"
-            value={plannedEndTime}
           />
           <FormField
             error={errors.defaultBreakMinutes}
@@ -193,7 +188,7 @@ export function CreateShiftScreen({ navigation }: CreateShiftScreenProps) {
             keyboardType="number-pad"
             label="Default break minutes"
             onChangeText={setDefaultBreakMinutes}
-            placeholder="60"
+            placeholder="Backend default: 0"
             value={defaultBreakMinutes}
           />
           <FormField
@@ -204,6 +199,15 @@ export function CreateShiftScreen({ navigation }: CreateShiftScreenProps) {
             onChangeText={setDefaultHourlyRate}
             placeholder="15.00"
             value={defaultHourlyRate}
+          />
+          <FormField
+            error={errors.foremanHourlyRate}
+            inputMode="decimal"
+            keyboardType="decimal-pad"
+            label="Foreman hourly rate"
+            onChangeText={setForemanHourlyRate}
+            placeholder="25.00"
+            value={foremanHourlyRate}
           />
 
           <Button label="Create shift" loading={submitting} onPress={handleSubmit} />

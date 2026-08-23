@@ -82,11 +82,11 @@ export function RegisterScreen({ navigation, route }: RegisterScreenProps) {
       .then(() => {
         setSuccessMessage("Account created. You can log in now.");
         setPassword("");
+        setSubmitting(false);
+        navigation.replace("Login");
       })
       .catch((error) => {
         setLocalError(getErrorMessage(error));
-      })
-      .finally(() => {
         setSubmitting(false);
       });
   };

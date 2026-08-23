@@ -1,6 +1,11 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { WorkerShiftHistoryItem } from "../types/shifts";
-import { formatDateTime, formatMoney, formatMinutes } from "../utils/format";
+import {
+  formatDateTime,
+  formatMoney,
+  formatMinutes,
+  formatOptionalLocation
+} from "../utils/format";
 import { getAttendanceStatusTone, getShiftStatusTone } from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
 import { StatusBadge } from "./StatusBadge";
@@ -11,7 +16,7 @@ type WorkerShiftCardProps = {
 };
 
 export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
-  const startTime = shift.actualStartTime ?? shift.plannedStartTime;
+  const startTime = shift.actualStartTime ?? null;
   const salaryLabel =
     shift.calculatedSalary === null ? "Salary pending" : `Salary ${formatMoney(shift.calculatedSalary)}`;
   const workedLabel =
@@ -33,13 +38,18 @@ export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
             {shift.title}
           </Text>
           <Text numberOfLines={1} style={styles.location}>
-            {shift.location}
+            {formatOptionalLocation(shift.location)}
+          </Text>
+          <Text numberOfLines={1} style={styles.company}>
+            {shift.companyName}
           </Text>
         </View>
         <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
       </View>
 
-      <Text style={styles.time}>{formatDateTime(startTime)}</Text>
+      <Text style={styles.time}>
+        {startTime ? formatDateTime(startTime) : "Not started yet"}
+      </Text>
 
       <View style={styles.metaRow}>
         <StatusBadge
@@ -83,6 +93,10 @@ const styles = StyleSheet.create({
   location: {
     ...typography.caption,
     color: colors.textSecondary
+  },
+  company: {
+    ...typography.caption,
+    color: colors.textMuted
   },
   time: {
     ...typography.caption,

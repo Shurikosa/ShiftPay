@@ -7,7 +7,7 @@ import { WorkerShiftCard } from "../components/WorkerShiftCard";
 import { useAuth } from "../context/AuthContext";
 import { useWorkerShiftHistory } from "../hooks/useWorkerShiftHistory";
 import type { WorkerStackParamList } from "../types/navigation";
-import { colors, spacing, typography } from "../utils/theme";
+import { colors, radii, spacing, typography } from "../utils/theme";
 
 type WorkerDashboardScreenProps = NativeStackScreenProps<
   WorkerStackParamList,
@@ -19,6 +19,7 @@ const RECENT_SHIFT_LIMIT = 3;
 export function WorkerDashboardScreen({ navigation }: WorkerDashboardScreenProps) {
   const { user, signOut } = useAuth();
   const { shifts, loading, error, refresh } = useWorkerShiftHistory();
+  const company = user?.company ?? null;
   const recentShifts = shifts.slice(0, RECENT_SHIFT_LIMIT);
 
   const handleLogout = () => {
@@ -40,8 +41,22 @@ export function WorkerDashboardScreen({ navigation }: WorkerDashboardScreenProps
           <Text style={styles.subtitle}>Join shifts and review your attendance history.</Text>
         </View>
 
+        {company ? (
+          <View style={styles.companyPanel}>
+            <Text style={styles.companyLabel}>Company</Text>
+            <Text style={styles.companyName}>{company.name}</Text>
+          </View>
+        ) : (
+          <StateMessage
+            title="Company required"
+            message="Join your company before joining shifts."
+            tone="error"
+          />
+        )}
+
         <View style={styles.actions}>
           <Button
+            disabled={!company}
             label="Join shift"
             onPress={() => {
               navigation.navigate("JoinShift");
@@ -84,6 +99,7 @@ export function WorkerDashboardScreen({ navigation }: WorkerDashboardScreenProps
                 message="Join a shift with the code from your foreman."
               />
               <Button
+                disabled={!company}
                 label="Join shift"
                 onPress={() => {
                   navigation.navigate("JoinShift");
@@ -134,6 +150,22 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: spacing.md
+  },
+  companyPanel: {
+    gap: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+    padding: spacing.md,
+    borderRadius: radii.card
+  },
+  companyLabel: {
+    ...typography.caption,
+    color: colors.textMuted
+  },
+  companyName: {
+    ...typography.label,
+    color: colors.text
   },
   section: {
     gap: spacing.md

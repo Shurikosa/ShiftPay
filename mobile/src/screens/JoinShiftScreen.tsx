@@ -16,7 +16,7 @@ import { isBlank } from "../utils/validation";
 type JoinShiftScreenProps = NativeStackScreenProps<WorkerStackParamList, "JoinShift">;
 
 export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
-  const { authenticatedRequest } = useAuth();
+  const { authenticatedRequest, user } = useAuth();
   const { refresh } = useWorkerShiftHistory({ loadOnFocus: false });
   const [joinCode, setJoinCode] = useState("");
   const [joinCodeError, setJoinCodeError] = useState<string | undefined>();
@@ -34,6 +34,11 @@ export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
   };
 
   const handleSubmit = () => {
+    if (!user?.company) {
+      setError("Join your company before joining shifts.");
+      return;
+    }
+
     if (isBlank(normalizedJoinCode)) {
       setJoinCodeError("Enter a join code.");
       return;
@@ -53,6 +58,7 @@ export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
         setSuccessMessage(`Joined shift ${response.shiftId}. Waiting for foreman approval.`);
         setJoinCode("");
         void refresh().catch(() => undefined);
+        navigation.replace("WorkerDashboard");
       })
       .catch((caughtError) => {
         setError(getErrorMessage(caughtError));
@@ -61,6 +67,34 @@ export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
         setSubmitting(false);
       });
   };
+
+  if (!user?.company) {
+    return (
+      <Screen>
+        <View style={styles.container}>
+          <View style={styles.header}>
+            <Text style={styles.kicker}>Worker</Text>
+            <Text style={styles.title}>Join shift</Text>
+            <Text style={styles.subtitle}>A company is required before shifts can be joined.</Text>
+          </View>
+
+          <StateMessage
+            title="Company required"
+            message="Join your company first, then enter the shift join code from your foreman."
+            tone="error"
+          />
+
+          <Button
+            label="Back to dashboard"
+            onPress={() => {
+              navigation.goBack();
+            }}
+            variant="ghost"
+          />
+        </View>
+      </Screen>
+    );
+  }
 
   return (
     <Screen>

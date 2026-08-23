@@ -1,13 +1,14 @@
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { StyleSheet, Text, View } from "react-native";
 import { Button } from "../components/Button";
+import { DetailRow } from "../components/DetailRow";
 import { ManagedShiftCard } from "../components/ManagedShiftCard";
 import { Screen } from "../components/Screen";
 import { StateMessage } from "../components/StateMessage";
 import { useAuth } from "../context/AuthContext";
 import { useForemanManagedShifts } from "../hooks/useForemanManagedShifts";
 import type { ForemanStackParamList } from "../types/navigation";
-import { colors, spacing, typography } from "../utils/theme";
+import { colors, radii, spacing, typography } from "../utils/theme";
 
 type ForemanDashboardScreenProps = NativeStackScreenProps<
   ForemanStackParamList,
@@ -17,6 +18,7 @@ type ForemanDashboardScreenProps = NativeStackScreenProps<
 export function ForemanDashboardScreen({ navigation }: ForemanDashboardScreenProps) {
   const { user, signOut } = useAuth();
   const { shifts, loading, error, refresh } = useForemanManagedShifts();
+  const company = user?.company ?? null;
 
   const handleLogout = () => {
     void signOut();
@@ -37,7 +39,21 @@ export function ForemanDashboardScreen({ navigation }: ForemanDashboardScreenPro
           <Text style={styles.subtitle}>Create shifts and manage crew attendance.</Text>
         </View>
 
+        {company ? (
+          <View style={styles.companyPanel}>
+            <DetailRow label="Company" value={company.name} />
+            <DetailRow label="Worker join code" value={company.joinCode ?? "Not available"} />
+          </View>
+        ) : (
+          <StateMessage
+            title="Company required"
+            message="Create your company before creating shifts."
+            tone="error"
+          />
+        )}
+
         <Button
+          disabled={!company}
           label="Create shift"
           onPress={() => {
             navigation.navigate("CreateShift");
@@ -66,6 +82,7 @@ export function ForemanDashboardScreen({ navigation }: ForemanDashboardScreenPro
                 message="Create a shift to get a join code for workers."
               />
               <Button
+                disabled={!company}
                 label="Create shift"
                 onPress={() => {
                   navigation.navigate("CreateShift");
@@ -116,6 +133,13 @@ const styles = StyleSheet.create({
   subtitle: {
     ...typography.body,
     color: colors.textSecondary
+  },
+  companyPanel: {
+    borderRadius: radii.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+    paddingHorizontal: spacing.md
   },
   section: {
     gap: spacing.md

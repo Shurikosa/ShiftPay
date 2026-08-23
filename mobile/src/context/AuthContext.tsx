@@ -15,6 +15,7 @@ import {
   saveSession as persistSession
 } from "../storage/sessionStorage";
 import type {
+  Company,
   LoginRequest,
   RegisterRequest,
   Session,
@@ -32,6 +33,8 @@ type AuthContextValue = {
   authenticatedRequest: <TResponse>(
     request: AuthenticatedRequest<TResponse>
   ) => Promise<TResponse>;
+  refreshCurrentUser: () => Promise<User>;
+  applyCompany: (company: Company) => Promise<User>;
   signIn: (payload: LoginRequest) => Promise<void>;
   register: (payload: RegisterRequest) => Promise<User>;
   signOut: () => Promise<void>;
@@ -129,6 +132,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [session?.accessToken]
   );
 
+  const refreshCurrentUser = useCallback(async (): Promise<User> => {
+    const token = session?.accessToken;
+    const tokenType = session?.tokenType;
+
+    if (!token || !tokenType) {
+      throw new ApiError("Sign in required.", 401);
+    }
+
+    const user = await getCurrentUser(token);
+    const nextSession: Session = {
+      accessToken: token,
+      tokenType,
+      user
+    };
+
+    await persistSession(nextSession);
+    setSession(nextSession);
+    setStatus("authenticated");
+
+    return user;
+  }, [session?.accessToken, session?.tokenType]);
+
+  const applyCompany = useCallback(async (company: Company): Promise<User> => {
+    const currentSession = session;
+
+    if (!currentSession) {
+      throw new ApiError("Sign in required.", 401);
+    }
+
+    const nextUser: User = {
+      ...currentSession.user,
+      company
+    };
+    const nextSession: Session = {
+      ...currentSession,
+      user: nextUser
+    };
+
+    try {
+      await persistSession(nextSession);
+    } catch (error) {
+      console.warn("Failed to persist updated company on auth session.", error);
+    }
+
+    setSession(nextSession);
+    setStatus("authenticated");
+
+    return nextUser;
+  }, [session]);
+
   const register = useCallback(async (payload: RegisterRequest) => {
     setError(null);
 
@@ -162,6 +215,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user: session?.user ?? null,
       error,
       authenticatedRequest,
+      refreshCurrentUser,
+      applyCompany,
       signIn,
       register,
       signOut,
@@ -169,9 +224,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }),
     [
       authenticatedRequest,
+      applyCompany,
       clearErrorValue,
       error,
       register,
+      refreshCurrentUser,
       session?.user,
       signIn,
       signOut,

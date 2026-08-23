@@ -5,7 +5,13 @@ import { DetailRow } from "../components/DetailRow";
 import { Screen } from "../components/Screen";
 import { StatusBadge } from "../components/StatusBadge";
 import type { WorkerStackParamList } from "../types/navigation";
-import { formatDateTime, formatMoney, formatMinutes, formatRate } from "../utils/format";
+import {
+  formatDateTime,
+  formatMoney,
+  formatMinutes,
+  formatOptionalLocation,
+  formatRate
+} from "../utils/format";
 import { getAttendanceStatusTone, getShiftStatusTone } from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
 
@@ -26,7 +32,7 @@ export function WorkerShiftDetailsScreen({
         <View style={styles.header}>
           <Text style={styles.kicker}>Shift details</Text>
           <Text style={styles.title}>{shift.title}</Text>
-          <Text style={styles.subtitle}>{shift.location}</Text>
+          <Text style={styles.subtitle}>{formatOptionalLocation(shift.location)}</Text>
         </View>
 
         <View style={styles.badges}>
@@ -38,13 +44,9 @@ export function WorkerShiftDetailsScreen({
         </View>
 
         <View style={styles.panel}>
-          <DetailRow label="Planned start" value={formatDateTime(shift.plannedStartTime)} />
-          <DetailRow label="Planned end" value={formatDateTime(shift.plannedEndTime)} />
+          <DetailRow label="Company" value={shift.companyName} />
           <DetailRow label="Actual start" value={formatDateTime(shift.actualStartTime)} />
           <DetailRow label="Actual end" value={formatDateTime(shift.actualEndTime)} />
-        </View>
-
-        <View style={styles.panel}>
           <DetailRow label="Hourly rate" value={formatRate(shift.hourlyRate)} />
           <DetailRow label="Break" value={`${shift.breakMinutes} min`} />
           <DetailRow label="Worked time" value={formatMinutes(shift.workedMinutes)} />

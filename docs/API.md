@@ -68,7 +68,8 @@ Status: 201 Created
   "email": "worker@example.com",
   "firstName": "John",
   "lastName": "Worker",
-  "role": "WORKER"
+  "role": "WORKER",
+  "company": null
 }
 
 Validation error:
@@ -111,6 +112,10 @@ POST /api/v1/auth/login
 
 No authentication required.
 
+JWT access tokens keep an expiration. For the MVP, the default JWT/session lifetime should be 8 hours. The mobile app should persist the session token and restore the session by calling `GET /api/v1/users/me` on app start.
+
+Future biometric unlock or refresh-token/long-lived session support can be added later.
+
 Request:
 
 {
@@ -130,7 +135,8 @@ Status: 200 OK
     "email": "worker@example.com",
     "firstName": "John",
     "lastName": "Worker",
-    "role": "WORKER"
+    "role": "WORKER",
+    "company": null
   }
 }
 
@@ -166,7 +172,7 @@ Headers:
 
 Authorization: Bearer <token>
 
-Response:
+Response for a new user without a company:
 
 Status: 200 OK
 
@@ -175,8 +181,44 @@ Status: 200 OK
   "email": "worker@example.com",
   "firstName": "John",
   "lastName": "Worker",
-  "role": "WORKER"
+  "role": "WORKER",
+  "company": null
 }
+
+Response after company assignment:
+
+Status: 200 OK
+
+{
+  "id": 1,
+  "email": "worker@example.com",
+  "firstName": "John",
+  "lastName": "Worker",
+  "role": "WORKER",
+  "company": {
+    "id": 10,
+    "name": "Acme Construction"
+  }
+}
+
+company is null when the authenticated user has not created or joined a company yet.
+
+For the owner FOREMAN, company may also include joinCode so it can be shared with workers:
+
+{
+  "id": 5,
+  "email": "foreman@example.com",
+  "firstName": "Frank",
+  "lastName": "Foreman",
+  "role": "FOREMAN",
+  "company": {
+    "id": 10,
+    "name": "Acme Construction",
+    "joinCode": "CMP123"
+  }
+}
+
+The mobile app uses this endpoint during session restore and can display company.name in the main menu or dashboard when present.
 
 Missing, invalid, or expired token:
 
@@ -190,10 +232,161 @@ Status: 401 Unauthorized
   "path": "/api/v1/users/me"
 }
 
-3. Shift Sessions
+3. Companies
+Create company
+
+Only FOREMAN.
+
+POST /api/v1/companies
+
+Headers:
+
+Authorization: Bearer <token>
+
+Rules:
+
+- FOREMAN creates a company after registration if they do not already have one.
+- FOREMAN can own only one company for the mobile MVP.
+- The backend generates a company join code.
+- Company name is shown in the mobile main menu or dashboard.
+- ADMIN company management is deferred to Vaadin after the mobile MVP.
+
+Request:
+
+{
+  "name": "Acme Construction"
+}
+
+Response:
+
+Status: 201 Created
+
+{
+  "id": 10,
+  "name": "Acme Construction",
+  "joinCode": "CMP123"
+}
+
+Validation error:
+
+Status: 400 Bad Request
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "name: must not be blank",
+  "path": "/api/v1/companies"
+}
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/companies"
+}
+
+Forbidden role:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/companies"
+}
+
+FOREMAN already has a company:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Foreman already has a company",
+  "path": "/api/v1/companies"
+}
+
+Join company by code
+
+Only WORKER.
+
+POST /api/v1/companies/join
+
+Headers:
+
+Authorization: Bearer <token>
+
+Rules:
+
+- joinCode is normalized with trim and uppercase.
+- WORKER can join a company by company join code.
+- WORKER can join shifts only inside their company.
+- WORKER can belong to only one company for the mobile MVP.
+
+Request:
+
+{
+  "joinCode": "CMP123"
+}
+
+Response:
+
+Status: 200 OK
+
+{
+  "id": 10,
+  "name": "Acme Construction"
+}
+
+Validation error:
+
+Status: 400 Bad Request
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "joinCode: must not be blank",
+  "path": "/api/v1/companies/join"
+}
+
+Unknown company join code:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Company not found",
+  "path": "/api/v1/companies/join"
+}
+
+WORKER already has a company:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Worker already belongs to a company",
+  "path": "/api/v1/companies/join"
+}
+
+4. Shift Sessions
 Create shift session
 
-Only FOREMAN or ADMIN.
+Only FOREMAN.
 
 POST /api/v1/shifts
 
@@ -204,12 +397,9 @@ Authorization: Bearer <token>
 Request:
 
 {
-  "title": "Monday construction shift",
   "location": "Cologne",
-  "plannedStartTime": "2026-07-01T08:00:00",
-  "plannedEndTime": "2026-07-01T17:00:00",
-  "defaultBreakMinutes": 60,
-  "defaultHourlyRate": 15.00
+  "defaultHourlyRate": 15.00,
+  "foremanHourlyRate": 25.00
 }
 
 Response:
@@ -218,14 +408,31 @@ Status: 201 Created
 
 {
   "id": 100,
-  "title": "Monday construction shift",
+  "companyId": 10,
+  "companyName": "Acme Construction",
+  "title": "Tuesday 10:00 - Acme Construction",
+  "location": "Cologne",
   "joinCode": "ABCD12",
   "status": "OPEN",
+  "actualStartTime": null,
+  "actualEndTime": null,
+  "defaultBreakMinutes": 0,
   "defaultHourlyRate": 15.00,
+  "foremanHourlyRate": 25.00,
   "createdBy": 5
 }
 
-defaultHourlyRate is required, must be greater than or equal to 0, and supports up to two decimal places. It is set by the FOREMAN creating the shift or by an ADMIN.
+FOREMAN must have a company before creating a shift. The backend attaches the shift to the foreman's company. Real MVP shifts must not use Default Company.
+
+The mobile MVP create-shift contract does not accept title, plannedStartTime, or plannedEndTime. The backend generates a default title automatically from date/time and company name. Example format: `Tuesday 10:00 - Acme Construction`. Exact locale and format can be refined during implementation.
+
+location is optional.
+
+defaultBreakMinutes is optional, must be greater than or equal to 0 when provided, and defaults to 0 when omitted. Pause tracking is planned separately and is not part of the current implemented DTOs.
+
+defaultHourlyRate is required, must be greater than or equal to 0, and supports up to two decimal places. It is used only as the worker attendance rate snapshot when workers join.
+
+foremanHourlyRate is required, must be greater than or equal to 0, supports up to two decimal places, and is stored on ShiftSession for the foreman's private salary calculation. The owner FOREMAN can see foremanHourlyRate. WORKER never receives it. For the MVP REST/mobile API, ADMIN does not create shifts and does not receive foremanHourlyRate or foreman salary fields in read responses.
 
 Validation error:
 
@@ -235,7 +442,19 @@ Status: 400 Bad Request
   "timestamp": "2026-07-01T10:00:00Z",
   "status": 400,
   "error": "Bad Request",
-  "message": "plannedEndTime must be after plannedStartTime",
+  "message": "foremanHourlyRate: must be greater than or equal to 0.00",
+  "path": "/api/v1/shifts"
+}
+
+FOREMAN has no company:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Foreman must create a company before creating shifts",
   "path": "/api/v1/shifts"
 }
 
@@ -276,21 +495,43 @@ Access rules:
 - ADMIN can get any shift.
 - WORKER is not allowed until worker attendance access is implemented.
 
-Response:
+Response for owner FOREMAN:
 
 Status: 200 OK
 
 {
   "id": 100,
-  "title": "Monday construction shift",
+  "companyId": 10,
+  "companyName": "Acme Construction",
+  "title": "Tuesday 10:00 - Acme Construction",
   "location": "Cologne",
   "status": "OPEN",
   "joinCode": "ABCD12",
-  "plannedStartTime": "2026-07-01T08:00:00Z",
-  "plannedEndTime": "2026-07-01T17:00:00Z",
   "actualStartTime": null,
   "actualEndTime": null,
-  "defaultBreakMinutes": 60,
+  "defaultBreakMinutes": 0,
+  "defaultHourlyRate": 15.00,
+  "foremanHourlyRate": 25.00,
+  "createdBy": 5
+}
+
+foremanHourlyRate is included only when the current user is the owner FOREMAN of the shift. WORKER never receives it. For the MVP REST/mobile API, ADMIN does not receive foremanHourlyRate.
+
+Response for ADMIN:
+
+Status: 200 OK
+
+{
+  "id": 100,
+  "companyId": 10,
+  "companyName": "Acme Construction",
+  "title": "Tuesday 10:00 - Acme Construction",
+  "location": "Cologne",
+  "status": "OPEN",
+  "joinCode": "ABCD12",
+  "actualStartTime": null,
+  "actualEndTime": null,
+  "defaultBreakMinutes": 0,
   "defaultHourlyRate": 15.00,
   "createdBy": 5
 }
@@ -341,9 +582,11 @@ Authorization: Bearer <token>
 Access and state rules:
 
 - FOREMAN can start only a shift created by that FOREMAN.
-- ADMIN can start any shift.
+- ADMIN is not allowed to start shifts through the REST/mobile API.
 - WORKER is not allowed.
 - Only a shift with status OPEN can be started.
+- FOREMAN must still have the company that owns the shift.
+- The backend sets actualStartTime to the current server time in UTC.
 
 Response:
 
@@ -402,6 +645,14 @@ Status: 409 Conflict
   "message": "Shift can only be started when status is OPEN",
   "path": "/api/v1/shifts/100/start"
 }
+
+Cancel shift planned
+
+POST /api/v1/shifts/{shiftId}/cancel
+
+Planned, not implemented yet.
+
+The current backend has no implemented cancel endpoint. Planned rules remain: owner FOREMAN cancels only their own OPEN shift before start; cancelled shifts do not calculate salary. Backend and mobile cancel tasks remain unchecked until implemented with tests and docs.
 Close shift
 
 POST /api/v1/shifts/{shiftId}/close
@@ -415,7 +666,7 @@ This endpoint does not accept a request body. The backend sets actualEndTime to 
 Access and state rules:
 
 - FOREMAN can close only a shift created by that FOREMAN.
-- ADMIN can close any shift.
+- ADMIN is not allowed to close shifts through the REST/mobile API.
 - WORKER is not allowed.
 - Only a shift with status ACTIVE can be closed.
 - actualStartTime must exist.
@@ -424,7 +675,14 @@ Access and state rules:
 - calculatedSalary = workedMinutes / 60 * attendance.hourlyRate, rounded to 2 decimal places with HALF_UP.
 - Salary uses the attendance hourlyRate snapshot or attendance-specific override, not shift.defaultHourlyRate.
 - JOINED, REJECTED, and CANCELLED attendance keep workedMinutes and calculatedSalary as null.
+- The backend calculates foremanWorkedMinutes and foremanSalary separately from worker attendance.
+- foremanWorkedMinutes = minutes_between(actualStartTime, actualEndTime) - shift.defaultBreakMinutes.
+- foremanSalary = foremanWorkedMinutes / 60 * shift.foremanHourlyRate, rounded to 2 decimal places with HALF_UP.
+- Foreman salary uses ShiftSession.foremanHourlyRate.
+- The backend must not create a ShiftAttendance row for foreman salary.
+- Cancelled shifts are planned and not currently produced by an implemented REST endpoint.
 - If breakMinutes is greater than the shift duration, close returns 409 and the shift remains ACTIVE.
+- If defaultBreakMinutes is greater than the shift duration, close returns 409 and the shift remains ACTIVE.
 
 Response:
 
@@ -508,7 +766,7 @@ Status: 409 Conflict
   "path": "/api/v1/shifts/100/close"
 }
 
-4. Shift Join
+5. Shift Join
 Join shift by code
 
 Only WORKER.
@@ -523,11 +781,12 @@ Rules:
 
 - joinCode is normalized with trim and uppercase.
 - The shift must have status OPEN.
+- The worker must already be a member of the company that owns the shift.
 - A worker can join the same shift only once.
 - A worker never sets hourlyRate.
 - The backend copies shift.defaultHourlyRate into shift_attendance.hourly_rate as a rate snapshot.
 - If a client includes hourlyRate in the JSON, it is ignored and cannot change the assigned rate.
-- breakMinutes is copied from the shift defaultBreakMinutes.
+- breakMinutes is copied from the shift defaultBreakMinutes, which defaults to 0 if omitted during shift creation.
 - joinedAt is set by the backend to the current server time in UTC.
 
 Request:
@@ -620,6 +879,18 @@ Status: 409 Conflict
   "path": "/api/v1/shifts/join"
 }
 
+Worker is not a company member:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-01T07:55:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Worker must join the company before joining this shift",
+  "path": "/api/v1/shifts/join"
+}
+
 List shift attendance
 
 Only FOREMAN or ADMIN.
@@ -651,7 +922,7 @@ Status: 200 OK
     "lastName": "Worker",
     "status": "JOINED",
     "hourlyRate": 15.00,
-    "breakMinutes": 60,
+    "breakMinutes": 0,
     "workedMinutes": null,
     "calculatedSalary": null,
     "joinedAt": "2026-07-06T18:00:00Z",
@@ -828,7 +1099,35 @@ Status: 409 Conflict
   "path": "/api/v1/shifts/100/attendance/500/approve"
 }
 
-5. Salary Calculation
+6. Salary Calculation
+
+Pause system planning
+
+Pause is separate from static defaultBreakMinutes. Planned, not implemented yet.
+
+The exact pause endpoints can be refined during a separate backend/mobile task, but the API should eventually support these use cases:
+
+- WORKER starts/stops pause only for their own approved attendance on an ACTIVE shift.
+- FOREMAN starts/stops a self pause on their own ACTIVE shift.
+- FOREMAN starts/stops a global pause for everyone on their own ACTIVE shift.
+- Pause status is visible in future shift detail, attendance list, worker history/detail, and foreman managed shift/detail responses where relevant.
+- Salary calculation will subtract accumulated pause minutes after pause is implemented.
+- The backend persists pause intervals or an equivalent auditable model.
+- The backend avoids double-counting overlapping pause intervals, such as a worker self pause during a global pause.
+- No client-side salary calculation is allowed.
+
+Planned pause endpoints can use this shape:
+
+POST /api/v1/shifts/{shiftId}/pauses/self/start
+
+POST /api/v1/shifts/{shiftId}/pauses/self/stop
+
+POST /api/v1/shifts/{shiftId}/pauses/global/start
+
+POST /api/v1/shifts/{shiftId}/pauses/global/stop
+
+Pause implementation should be a separate backend/mobile task.
+
 Get shift summary
 
 Only FOREMAN or ADMIN.
@@ -842,7 +1141,7 @@ Authorization: Bearer <token>
 Rules:
 
 - FOREMAN can get summary only for a shift they created.
-- ADMIN can get summary for any shift.
+- ADMIN can get worker summary for any shift.
 - WORKER is not allowed.
 - Summary is available only for CLOSED shifts.
 - The endpoint uses stored workedMinutes and calculatedSalary from shift_attendance.
@@ -850,11 +1149,45 @@ Rules:
 - Only APPROVED attendance is included in workers.
 - JOINED, REJECTED, and CANCELLED attendance is excluded.
 - totalWorkers is the number of included APPROVED attendance records.
-- totalSalary is the sum of included calculatedSalary values with scale 2.
+- totalSalary is the sum of included worker calculatedSalary values with scale 2.
+- Worker summary remains limited to APPROVED worker attendance.
+- Salary results currently subtract static break minutes. Pause-minute subtraction is planned with the pause system.
+- CANCELLED shifts do not return summary because salary is not calculated.
 - Workers are sorted by lastName ascending, firstName ascending, then workerId ascending.
 - If an APPROVED attendance has null workedMinutes or calculatedSalary, the endpoint returns 409.
+- The owner FOREMAN receives private foreman salary fields separately from workers: foremanWorkedMinutes, foremanHourlyRate, and foremanSalary.
+- foremanWorkedMinutes uses actualEndTime - actualStartTime - ShiftSession.defaultBreakMinutes.
+- foremanSalary uses ShiftSession.foremanHourlyRate.
+- WORKER never receives foreman salary fields.
+- For the MVP REST/mobile API, ADMIN does not receive foreman salary fields.
+- Future ADMIN/Vaadin visibility for foreman salary can be decided later.
 
-Response:
+Response for owner FOREMAN:
+
+Status: 200 OK
+
+{
+  "shiftId": 100,
+  "status": "CLOSED",
+  "totalWorkers": 2,
+  "totalSalary": 240.00,
+  "foremanWorkedMinutes": 480,
+  "foremanHourlyRate": 25.00,
+  "foremanSalary": 200.00,
+  "workers": [
+    {
+      "attendanceId": 500,
+      "workerId": 1,
+      "firstName": "John",
+      "lastName": "Worker",
+      "workedMinutes": 480,
+      "hourlyRate": 15.00,
+      "salary": 120.00
+    }
+  ]
+}
+
+Response for ADMIN:
 
 Status: 200 OK
 
@@ -946,9 +1279,9 @@ Rules:
 
 - WORKER sees only attendance records where the current user is the worker.
 - FOREMAN and ADMIN also see only their own worker-attendance records for this endpoint, not shifts they manage.
-- OPEN, ACTIVE, and CLOSED shifts are included.
+- OPEN, ACTIVE, CLOSED, and CANCELLED shifts are included.
 - CLOSED shifts return workedMinutes and calculatedSalary when those values were already calculated and stored.
-- OPEN, ACTIVE, and unapproved attendance may return null workedMinutes and calculatedSalary.
+- OPEN, ACTIVE, CANCELLED, and unapproved attendance may return null workedMinutes and calculatedSalary.
 - This endpoint reads stored attendance salary fields and does not recalculate salary.
 - Results are sorted by joinedAt descending, then attendanceId descending.
 - The response does not expose User entities, worker records, email, or passwordHash.
@@ -960,20 +1293,22 @@ Response:
   {
     "shiftId": 100,
     "attendanceId": 500,
-    "title": "Monday construction shift",
+    "companyId": 10,
+    "companyName": "Acme Construction",
+    "title": "Tuesday 10:00 - Acme Construction",
     "location": "Cologne",
     "status": "CLOSED",
-    "plannedStartTime": "2026-07-01T08:00:00Z",
-    "plannedEndTime": "2026-07-01T17:00:00Z",
     "actualStartTime": "2026-07-01T08:05:00Z",
     "actualEndTime": "2026-07-01T17:00:00Z",
     "attendanceStatus": "APPROVED",
     "hourlyRate": 15.00,
-    "breakMinutes": 60,
+    "breakMinutes": 0,
     "workedMinutes": 480,
     "calculatedSalary": 120.00
   }
 ]
+
+Worker history never returns foremanHourlyRate, foremanWorkedMinutes, or foremanSalary.
 
 Missing, invalid, or expired token:
 
@@ -1000,33 +1335,42 @@ Purpose:
 Access rules:
 
 - FOREMAN can list shifts where `createdBy` is the current user.
-- ADMIN also receives shifts where `createdBy` is the current user for the MVP. Full admin listing is deferred to the Vaadin admin UI.
+- ADMIN can call this endpoint and receives shifts where `createdBy` is the current user. Because ADMIN cannot create shifts through the REST/mobile API, this is normally empty for admins. Full admin listing is deferred to the Vaadin admin UI.
 - WORKER is not allowed.
 - Missing, invalid, or expired JWT returns 401.
 - The endpoint does not include attendance data and does not recalculate salary.
 - Results are sorted by createdAt descending, then shift id descending.
 - The response uses shift DTO fields and does not expose User entities, passwordHash, company entity, createdAt, or updatedAt.
 
-Response:
+Response for owner FOREMAN:
 
 Status: 200 OK
 
 [
   {
     "id": 100,
-    "title": "Monday construction shift",
+    "companyId": 10,
+    "companyName": "Acme Construction",
+    "title": "Tuesday 10:00 - Acme Construction",
     "location": "Cologne",
     "status": "OPEN",
     "joinCode": "ABCD12",
-    "plannedStartTime": "2026-07-01T08:00:00Z",
-    "plannedEndTime": "2026-07-01T17:00:00Z",
     "actualStartTime": null,
     "actualEndTime": null,
-    "defaultBreakMinutes": 60,
+    "defaultBreakMinutes": 0,
     "defaultHourlyRate": 15.00,
+    "foremanHourlyRate": 25.00,
     "createdBy": 5
   }
 ]
+
+foremanHourlyRate is included only for FOREMAN users who own the managed shift. WORKER cannot call this endpoint. For the MVP REST/mobile API, ADMIN does not receive foremanHourlyRate.
+
+Response for ADMIN:
+
+Status: 200 OK
+
+[]
 
 Missing, invalid, or expired token:
 
@@ -1052,7 +1396,7 @@ Status: 403 Forbidden
   "path": "/api/v1/me/managed-shifts"
 }
 
-6. Error Response Format
+7. Error Response Format
 
 All API errors should use this format:
 
@@ -1064,21 +1408,29 @@ All API errors should use this format:
   "path": "/api/v1/shifts/100/summary"
 }
 
-7. Authorization Rules
+8. Authorization Rules
 WORKER:
 - can see own profile
+- can join company by company join code
 - can join shift
 - can see own shift history
+- pause/resume self is planned, not implemented yet
 
 FOREMAN:
+- can create own company
 - can create shift
 - can start shift
 - can close shift
+- cancel own OPEN shift before start is planned, not implemented yet
 - can approve attendance
 - can see own managed shifts
 - can see shift summary
+- pause/resume self and global pause are planned, not implemented yet
 
 ADMIN:
-- can do everything supported by the current backend
-- can see own created managed shifts through `GET /api/v1/me/managed-shifts`
+- can read shift detail, list attendance, approve attendance, and see worker-only shift summary through current REST endpoints
+- cannot create, start, close, or cancel shifts through the REST/mobile API
+- can call `GET /api/v1/me/managed-shifts`, normally returning an empty list because ADMIN REST shift creation is disabled
+- does not receive foremanHourlyRate, foremanWorkedMinutes, or foremanSalary through the MVP REST/mobile API
 - full user management is deferred until after the mobile MVP and should be implemented through the Vaadin admin dashboard
+- mobile MVP has no ADMIN flow

@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { ManagedShift } from "../types/shifts";
-import { formatDateTime, formatRate } from "../utils/format";
+import { formatDateTime, formatOptionalLocation, formatRate } from "../utils/format";
 import { getShiftStatusTone } from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
 import { StatusBadge } from "./StatusBadge";
@@ -27,17 +27,28 @@ export function ManagedShiftCard({ shift, onPress }: ManagedShiftCardProps) {
             {shift.title}
           </Text>
           <Text numberOfLines={1} style={styles.location}>
-            {shift.location}
+            {formatOptionalLocation(shift.location)}
+          </Text>
+          <Text numberOfLines={1} style={styles.company}>
+            {shift.companyName}
           </Text>
         </View>
         <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
       </View>
 
       <View style={styles.metaGrid}>
-        <View style={styles.metaItem}>
-          <Text style={styles.metaLabel}>Planned start</Text>
-          <Text style={styles.metaValue}>{formatDateTime(shift.plannedStartTime)}</Text>
-        </View>
+        {shift.actualStartTime ? (
+          <View style={styles.metaItem}>
+            <Text style={styles.metaLabel}>Actual start</Text>
+            <Text style={styles.metaValue}>{formatDateTime(shift.actualStartTime)}</Text>
+          </View>
+        ) : null}
+        {shift.actualEndTime ? (
+          <View style={styles.metaItem}>
+            <Text style={styles.metaLabel}>Actual end</Text>
+            <Text style={styles.metaValue}>{formatDateTime(shift.actualEndTime)}</Text>
+          </View>
+        ) : null}
         <View style={styles.metaItem}>
           <Text style={styles.metaLabel}>Join code</Text>
           <Text style={styles.metaValue}>{shift.joinCode}</Text>
@@ -46,6 +57,12 @@ export function ManagedShiftCard({ shift, onPress }: ManagedShiftCardProps) {
           <Text style={styles.metaLabel}>Default rate</Text>
           <Text style={styles.metaValue}>{formatRate(shift.defaultHourlyRate)}</Text>
         </View>
+        {shift.foremanHourlyRate !== undefined ? (
+          <View style={styles.metaItem}>
+            <Text style={styles.metaLabel}>Foreman rate</Text>
+            <Text style={styles.metaValue}>{formatRate(shift.foremanHourlyRate)}</Text>
+          </View>
+        ) : null}
       </View>
     </Pressable>
   );
@@ -79,6 +96,10 @@ const styles = StyleSheet.create({
   location: {
     ...typography.caption,
     color: colors.textSecondary
+  },
+  company: {
+    ...typography.caption,
+    color: colors.textMuted
   },
   metaGrid: {
     gap: spacing.sm

@@ -23,6 +23,7 @@ import {
   formatDateTime,
   formatMoney,
   formatMinutes,
+  formatOptionalLocation,
   formatRate
 } from "../utils/format";
 import { getAttendanceStatusTone, getShiftStatusTone } from "../utils/status";
@@ -151,7 +152,9 @@ export function ForemanShiftDetailsScreen({
         <View style={styles.header}>
           <Text style={styles.kicker}>Foreman shift</Text>
           <Text style={styles.title}>{shift?.title ?? "Shift details"}</Text>
-          {shift?.location ? <Text style={styles.subtitle}>{shift.location}</Text> : null}
+          {shift ? (
+            <Text style={styles.subtitle}>{formatOptionalLocation(shift.location)}</Text>
+          ) : null}
         </View>
 
         {successMessage ? (
@@ -168,13 +171,18 @@ export function ForemanShiftDetailsScreen({
             </View>
 
             <View style={styles.panel}>
+              <DetailRow label="Company" value={shift.companyName} />
               <DetailRow label="Join code" value={shift.joinCode} />
-              <DetailRow label="Planned start" value={formatDateTime(shift.plannedStartTime)} />
-              <DetailRow label="Planned end" value={formatDateTime(shift.plannedEndTime)} />
               <DetailRow label="Actual start" value={formatDateTime(shift.actualStartTime)} />
               <DetailRow label="Actual end" value={formatDateTime(shift.actualEndTime)} />
               <DetailRow label="Default break" value={`${shift.defaultBreakMinutes} min`} />
-              <DetailRow label="Default hourly rate" value={formatRate(shift.defaultHourlyRate)} />
+              <DetailRow label="Worker hourly rate" value={formatRate(shift.defaultHourlyRate)} />
+              {shift.foremanHourlyRate !== undefined ? (
+                <DetailRow
+                  label="Foreman hourly rate"
+                  value={formatRate(shift.foremanHourlyRate)}
+                />
+              ) : null}
             </View>
 
             <View style={styles.actions}>

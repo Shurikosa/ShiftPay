@@ -3,9 +3,11 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { useAuth } from "../context/AuthContext";
 import { ForemanManagedShiftsProvider } from "../context/ForemanManagedShiftsContext";
 import { WorkerShiftHistoryProvider } from "../context/WorkerShiftHistoryContext";
+import { CreateCompanyScreen } from "../screens/CreateCompanyScreen";
 import { CreateShiftScreen } from "../screens/CreateShiftScreen";
 import { ForemanDashboardScreen } from "../screens/ForemanDashboardScreen";
 import { ForemanShiftDetailsScreen } from "../screens/ForemanShiftDetailsScreen";
+import { JoinCompanyScreen } from "../screens/JoinCompanyScreen";
 import { JoinShiftScreen } from "../screens/JoinShiftScreen";
 import { LoginScreen } from "../screens/LoginScreen";
 import { MyShiftHistoryScreen } from "../screens/MyShiftHistoryScreen";
@@ -67,10 +69,18 @@ function RoleNavigator() {
   const { user } = useAuth();
 
   if (user?.role === "WORKER") {
+    if (!user.company) {
+      return <JoinCompanyScreen />;
+    }
+
     return <WorkerNavigator />;
   }
 
   if (user?.role === "FOREMAN") {
+    if (!user.company) {
+      return <CreateCompanyScreen />;
+    }
+
     return <ForemanNavigator />;
   }
 

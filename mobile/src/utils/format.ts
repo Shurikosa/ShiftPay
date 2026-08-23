@@ -29,3 +29,7 @@ export function formatMinutes(value: number | null): string {
 export function formatRate(value: number): string {
   return value.toFixed(2);
 }
+
+export function formatOptionalLocation(value: string | null | undefined): string {
+  return value && value.trim().length > 0 ? value : "No location set";
+}

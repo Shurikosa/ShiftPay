@@ -51,6 +51,11 @@ export function ShiftSummaryScreen({ navigation, route }: ShiftSummaryScreenProp
     }, [loadSummary])
   );
 
+  const hasForemanSummary =
+    summary?.foremanWorkedMinutes !== undefined ||
+    summary?.foremanHourlyRate !== undefined ||
+    summary?.foremanSalary !== undefined;
+
   return (
     <Screen>
       <View style={styles.container}>
@@ -85,8 +90,31 @@ export function ShiftSummaryScreen({ navigation, route }: ShiftSummaryScreenProp
 
             <View style={styles.panel}>
               <DetailRow label="Total workers" value={String(summary.totalWorkers)} />
-              <DetailRow label="Total salary" value={formatMoney(summary.totalSalary)} />
+              <DetailRow label="Total worker salary" value={formatMoney(summary.totalSalary)} />
             </View>
+
+            {hasForemanSummary ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Foreman salary</Text>
+                <View style={styles.panel}>
+                  {summary.foremanWorkedMinutes !== undefined ? (
+                    <DetailRow
+                      label="Worked time"
+                      value={formatMinutes(summary.foremanWorkedMinutes)}
+                    />
+                  ) : null}
+                  {summary.foremanHourlyRate !== undefined ? (
+                    <DetailRow
+                      label="Hourly rate"
+                      value={formatRate(summary.foremanHourlyRate)}
+                    />
+                  ) : null}
+                  {summary.foremanSalary !== undefined ? (
+                    <DetailRow label="Salary" value={formatMoney(summary.foremanSalary)} />
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Workers</Text>
