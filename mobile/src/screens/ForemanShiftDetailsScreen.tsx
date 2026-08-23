@@ -1,15 +1,16 @@
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useFocusEffect } from "@react-navigation/native";
-import { useCallback, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { useCallback, useRef, useState } from "react";
+import { Alert, StyleSheet, Text, View } from "react-native";
 import {
   approveAttendance,
+  cancelShift,
   closeShift,
   getShiftAttendance,
   getShiftById,
   startShift
 } from "../api/shifts";
-import { getErrorMessage } from "../api/errors";
+import { ApiError, getErrorMessage } from "../api/errors";
 import { Button } from "../components/Button";
 import { DetailRow } from "../components/DetailRow";
 import { Screen } from "../components/Screen";
@@ -34,14 +35,28 @@ type ForemanShiftDetailsScreenProps = NativeStackScreenProps<
   "ForemanShiftDetails"
 >;
 
-type MutationName = "approve" | "start" | "close";
+type MutationName = "approve" | "start" | "cancel" | "close";
+
+function getShiftActionErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 409) {
+      return "Shift can only be cancelled before it starts.";
+    }
+
+    if (error.status === 403) {
+      return "You are not authorized to cancel this shift.";
+    }
+  }
+
+  return getErrorMessage(error);
+}
 
 export function ForemanShiftDetailsScreen({
   navigation,
   route
 }: ForemanShiftDetailsScreenProps) {
   const { shiftId, initialShift } = route.params;
-  const { authenticatedRequest } = useAuth();
+  const { authenticatedRequest, user } = useAuth();
   const { refresh: refreshManagedShifts } = useForemanManagedShifts({ loadOnFocus: false });
   const [shift, setShift] = useState<ManagedShift | null>(initialShift ?? null);
   const [attendance, setAttendance] = useState<ShiftAttendance[]>([]);
@@ -52,6 +67,25 @@ export function ForemanShiftDetailsScreen({
     type: MutationName;
     attendanceId?: number;
   } | null>(null);
+  const mutationInFlightRef = useRef(false);
+
+  const beginMutation = (nextMutation: {
+    type: MutationName;
+    attendanceId?: number;
+  }): boolean => {
+    if (mutationInFlightRef.current) {
+      return false;
+    }
+
+    mutationInFlightRef.current = true;
+    setMutation(nextMutation);
+    return true;
+  };
+
+  const finishMutation = () => {
+    mutationInFlightRef.current = false;
+    setMutation(null);
+  };
 
   const loadDetails = useCallback(async () => {
     setLoading(true);
@@ -86,7 +120,10 @@ export function ForemanShiftDetailsScreen({
   };
 
   const handleApprove = (attendanceId: number) => {
-    setMutation({ type: "approve", attendanceId });
+    if (!beginMutation({ type: "approve", attendanceId })) {
+      return;
+    }
+
     setError(null);
     setSuccessMessage(null);
 
@@ -101,12 +138,15 @@ export function ForemanShiftDetailsScreen({
         setError(getErrorMessage(caughtError));
       })
       .finally(() => {
-        setMutation(null);
+        finishMutation();
       });
   };
 
   const handleStart = () => {
-    setMutation({ type: "start" });
+    if (!beginMutation({ type: "start" })) {
+      return;
+    }
+
     setError(null);
     setSuccessMessage(null);
 
@@ -119,12 +159,15 @@ export function ForemanShiftDetailsScreen({
         setError(getErrorMessage(caughtError));
       })
       .finally(() => {
-        setMutation(null);
+        finishMutation();
       });
   };
 
   const handleClose = () => {
-    setMutation({ type: "close" });
+    if (!beginMutation({ type: "close" })) {
+      return;
+    }
+
     setError(null);
     setSuccessMessage(null);
 
@@ -137,10 +180,67 @@ export function ForemanShiftDetailsScreen({
         setError(getErrorMessage(caughtError));
       })
       .finally(() => {
-        setMutation(null);
+        finishMutation();
       });
   };
 
+  const handleCancel = () => {
+    if (!beginMutation({ type: "cancel" })) {
+      return;
+    }
+
+    setError(null);
+    setSuccessMessage(null);
+
+    void authenticatedRequest((token) => cancelShift(token, shiftId))
+      .then((cancelledShift) => {
+        setShift(cancelledShift);
+        setSuccessMessage("Shift cancelled.");
+        return refreshAfterMutation();
+      })
+      .catch((caughtError) => {
+        setError(getShiftActionErrorMessage(caughtError));
+      })
+      .finally(() => {
+        finishMutation();
+      });
+  };
+
+  const handleConfirmCancel = () => {
+    if (mutationInFlightRef.current) {
+      return;
+    }
+
+    Alert.alert(
+      "Cancel shift?",
+      "This can only be done before the shift starts. Workers will no longer be able to join.",
+      [
+        {
+          text: "Keep shift",
+          style: "cancel"
+        },
+        {
+          text: "Cancel shift",
+          style: "destructive",
+          onPress: handleCancel
+        }
+      ]
+    );
+  };
+
+  const handleOpenSummary = () => {
+    if (mutationInFlightRef.current || !shift) {
+      return;
+    }
+
+    navigation.navigate("ShiftSummary", {
+      shiftId,
+      shiftTitle: shift.title
+    });
+  };
+
+  const isMutating = mutation !== null;
+  const canCancel = user?.role === "FOREMAN" && shift?.status === "OPEN";
   const canStart = shift?.status === "OPEN";
   const canClose = shift?.status === "ACTIVE";
   const canShowSummary = shift?.status === "CLOSED";
@@ -188,13 +288,24 @@ export function ForemanShiftDetailsScreen({
             <View style={styles.actions}>
               {canStart ? (
                 <Button
+                  disabled={isMutating}
                   label="Start shift"
                   loading={mutation?.type === "start"}
                   onPress={handleStart}
                 />
               ) : null}
+              {canCancel ? (
+                <Button
+                  disabled={isMutating}
+                  label="Cancel shift"
+                  loading={mutation?.type === "cancel"}
+                  onPress={handleConfirmCancel}
+                  variant="secondary"
+                />
+              ) : null}
               {canClose ? (
                 <Button
+                  disabled={isMutating}
                   label="Close shift"
                   loading={mutation?.type === "close"}
                   onPress={handleClose}
@@ -202,13 +313,9 @@ export function ForemanShiftDetailsScreen({
               ) : null}
               {canShowSummary ? (
                 <Button
+                  disabled={isMutating}
                   label="Open summary"
-                  onPress={() => {
-                    navigation.navigate("ShiftSummary", {
-                      shiftId,
-                      shiftTitle: shift.title
-                    });
-                  }}
+                  onPress={handleOpenSummary}
                   variant="secondary"
                 />
               ) : null}
@@ -266,6 +373,7 @@ export function ForemanShiftDetailsScreen({
 
                         {canApprove ? (
                           <Button
+                            disabled={isMutating}
                             label="Approve"
                             loading={
                               mutation?.type === "approve" &&

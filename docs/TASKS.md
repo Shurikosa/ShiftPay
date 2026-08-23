@@ -109,7 +109,7 @@ Follow-up backend tasks:
 - [ ] Add `foremanHourlyRate` to shift creation and ShiftSession
 - [ ] Calculate private foreman salary on close and summary
 - [ ] Keep foreman salary separate from worker attendance; do not create ShiftAttendance for foreman salary
-- [ ] Implement shift cancel endpoint and lifecycle rules
+- [x] Implement shift cancel endpoint and lifecycle rules
 - [ ] Make `defaultBreakMinutes` optional and default it to 0
 - [ ] Implement pause system in a separate task
 - [ ] Set default JWT expiration to 8 hours
@@ -122,7 +122,7 @@ Follow-up mobile tasks:
 - [x] Update `CreateShiftScreen` after backend create-shift contract changes
 - [x] Update shift details to show generated title, backend actual times, and owner-foreman rate visibility
 - [x] Update summary screen to show worker summary plus private owner-foreman salary fields
-- [ ] Implement shift cancel UI after backend endpoint is ready
+- [x] Implement shift cancel UI after backend endpoint is ready
 - [x] Make `defaultBreakMinutes` optional and default it to 0 in mobile forms
 - [ ] Implement pause system in a separate backend/mobile task
 

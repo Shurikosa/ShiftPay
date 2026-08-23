@@ -18,7 +18,7 @@ The app should prioritize:
 - company onboarding for foremen and workers
 - fast shift joining for workers
 - clear managed-shift visibility for foremen
-- clear pause and cancellation status
+- clear cancellation status
 - readable shift status and salary information
 - simple forms with obvious success and error states
 
@@ -38,7 +38,7 @@ Worker tasks:
 - join a shift with a join code
 - see current and past joined shifts
 - see company name in the dashboard or main menu
-- see shift status, attendance status, pause status, worked minutes, and calculated salary
+- see shift status, attendance status, worked minutes, and calculated salary
 
 ### Foreman
 
@@ -55,7 +55,6 @@ Foreman tasks:
 - share the join code with workers
 - approve joined workers
 - start, cancel, and close shifts
-- pause themselves or pause everyone during an active shift
 - see closed-shift summary
 
 Admin users are not a mobile MVP target. Admin user management is deferred to
@@ -251,8 +250,6 @@ Content:
 - primary action to join a shift
 - shortcut to shift history
 - recent joined shifts if available
-- pause status if the worker has an active joined shift:
-  worker paused, global pause active, or not paused
 
 API calls:
 
@@ -305,7 +302,6 @@ Content:
 - company name
 - shift status
 - attendance status
-- pause status when active
 - actual date/time when available
 - salary when calculated
 
@@ -330,11 +326,9 @@ Content:
 - company name
 - shift status
 - attendance status
-- whether worker is paused or global pause is active
 - actual start/end times when available
 - hourly rate snapshot
 - break minutes
-- pause minutes when available
 - worked minutes
 - calculated salary
 
@@ -355,8 +349,7 @@ Content:
 - company name
 - primary action to create a shift
 - managed shift list
-- status labels for `OPEN`, `ACTIVE`, and `CLOSED`
-- global pause and foreman self pause status for active shifts
+- status labels for `OPEN`, `ACTIVE`, `CLOSED`, and `CANCELLED`
 
 API calls:
 
@@ -402,8 +395,8 @@ Rules:
 - default hourly rate is required
 - foreman hourly rate is required
 - default break minutes is optional and defaults to 0 in the backend
-- dynamic pauses are the primary MVP break-tracking mechanism
 - default break minutes cannot be negative when entered
+- dynamic pause tracking is planned after the MVP and is not part of this create-shift contract
 
 ### ForemanShiftDetailsScreen
 
@@ -421,9 +414,6 @@ Content:
 - default hourly rate for workers
 - foreman hourly rate, visible only to the owner foreman
 - actual start/end times when available
-- global pause status
-- foreman self pause status
-- worker pause status in attendance rows
 - attendance list
 - lifecycle actions
 
@@ -433,8 +423,6 @@ Actions:
 - start shift
 - cancel shift before start
 - close shift
-- start/stop foreman self pause
-- start/stop global pause for everyone
 - open summary for closed shifts
 
 API calls:
@@ -445,7 +433,6 @@ API calls:
 - `POST /api/v1/shifts/{shiftId}/start`
 - `POST /api/v1/shifts/{shiftId}/cancel`
 - `POST /api/v1/shifts/{shiftId}/close`
-- planned pause endpoints under `POST /api/v1/shifts/{shiftId}/pauses/...`
 
 Rules:
 
@@ -457,8 +444,7 @@ Rules:
 - actualStartTime and actualEndTime are set by the backend
 - do not calculate worker or foreman salary on the client
 - cancelled shifts should show CANCELLED status and no salary summary action
-- pause controls are available only while the shift is `ACTIVE`
-- do not calculate pause-adjusted salary on the client
+- pause controls are planned, not implemented yet, and should not appear in the mobile MVP
 
 ### ShiftSummaryScreen
 
@@ -471,7 +457,6 @@ Content:
 - total workers
 - total worker salary
 - worker rows with worked minutes and calculated salary
-- worker pause minutes when available
 - private foreman salary fields for the owner foreman:
   foremanWorkedMinutes, foremanHourlyRate, foremanSalary
 
@@ -484,7 +469,7 @@ Rules:
 - show a clear message if the shift is not closed yet
 - do not recalculate worker or foreman salary on the client
 - worker rows are based only on approved worker attendance
-- backend salary already subtracts static break minutes and accumulated pause minutes
+- backend salary currently subtracts static break minutes only
 - do not show foreman salary fields to workers
 - ADMIN users are not a mobile MVP target and should not receive foreman salary fields through REST/mobile API
 
@@ -499,7 +484,7 @@ Use loading states when:
 - loading dashboards
 - creating or joining a company
 - joining a shift
-- creating, starting, cancelling, closing, pausing, resuming, or approving a shift
+- creating, starting, cancelling, closing, or approving a shift
 
 ### Empty
 
@@ -535,7 +520,6 @@ Show success feedback for:
 - shift start
 - shift cancel
 - shift close
-- pause start/stop
 
 ## 7. Basic Visual Direction
 
@@ -560,8 +544,21 @@ Show success feedback for:
 - admin screens
 - payroll/tax calculations
 - chat or messaging
+- pause tracking and pause controls
 
-## 9. Implementation Notes
+## 9. Future Pause Follow-Up
+
+Pause is planned, not implemented yet. It should be designed and documented in a separate backend/mobile task before mobile adds pause UI or API calls.
+
+Future pause work may include:
+
+- worker self pause during an active shift
+- foreman self pause during an active shift
+- foreman global pause for everyone during an active shift
+- backend-provided pause status and pause minutes in relevant DTOs
+- salary calculation that subtracts backend-tracked pause minutes
+
+## 10. Implementation Notes
 
 - Use React Native, Expo, and TypeScript.
 - Keep API calls in `src/api/`.
@@ -574,7 +571,6 @@ Show success feedback for:
 - Do not calculate salary on the client.
 - The mobile app should consume persisted `workedMinutes` and
   `calculatedSalary` values returned by the backend.
-- The mobile app should show pause status and pause minutes from the backend,
-  but should not calculate pause-adjusted salary.
+- Do not add pause UI, pause DTO assumptions, or pause API calls until the planned pause backend/mobile task is implemented.
 - If an API endpoint is missing or unclear, update `docs/API.md` before building
   against assumptions.

@@ -93,6 +93,13 @@ export function closeShift(token: string, shiftId: number): Promise<ShiftCloseRe
   });
 }
 
+export function cancelShift(token: string, shiftId: number): Promise<ManagedShift> {
+  return apiRequest<ManagedShift>(`/api/v1/shifts/${shiftId}/cancel`, {
+    method: "POST",
+    token
+  });
+}
+
 export function getShiftSummary(token: string, shiftId: number): Promise<ShiftSummary> {
   return apiRequest<ShiftSummary>(`/api/v1/shifts/${shiftId}/summary`, {
     token

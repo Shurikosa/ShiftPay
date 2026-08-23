@@ -646,13 +646,94 @@ Status: 409 Conflict
   "path": "/api/v1/shifts/100/start"
 }
 
-Cancel shift planned
+Cancel shift
 
 POST /api/v1/shifts/{shiftId}/cancel
 
-Planned, not implemented yet.
+Headers:
 
-The current backend has no implemented cancel endpoint. Planned rules remain: owner FOREMAN cancels only their own OPEN shift before start; cancelled shifts do not calculate salary. Backend and mobile cancel tasks remain unchecked until implemented with tests and docs.
+Authorization: Bearer <token>
+
+This endpoint does not accept a request body.
+
+Access and state rules:
+
+- FOREMAN can cancel only a shift created by that FOREMAN.
+- ADMIN is not allowed to cancel shifts through the REST/mobile API.
+- WORKER is not allowed.
+- Only a shift with status OPEN can be cancelled.
+- The backend sets status to CANCELLED.
+- The backend does not set actualStartTime or actualEndTime.
+- The backend does not calculate worker salary or private foreman salary.
+- CANCELLED shifts cannot be started, closed, joined by workers, or summarized.
+
+Response for owner FOREMAN:
+
+Status: 200 OK
+
+{
+  "id": 100,
+  "companyId": 10,
+  "companyName": "Acme Construction",
+  "title": "Tuesday 10:00 - Acme Construction",
+  "location": "Cologne",
+  "status": "CANCELLED",
+  "joinCode": "ABCD12",
+  "actualStartTime": null,
+  "actualEndTime": null,
+  "defaultBreakMinutes": 0,
+  "defaultHourlyRate": 15.00,
+  "foremanHourlyRate": 25.00,
+  "createdBy": 5
+}
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-01T08:10:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/shifts/100/cancel"
+}
+
+Forbidden role or non-owner FOREMAN:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-01T08:10:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/shifts/100/cancel"
+}
+
+Shift not found:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-01T08:10:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Shift not found",
+  "path": "/api/v1/shifts/100/cancel"
+}
+
+Shift is not OPEN:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T08:10:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Shift can only be cancelled before it starts",
+  "path": "/api/v1/shifts/100/cancel"
+}
 Close shift
 
 POST /api/v1/shifts/{shiftId}/close
@@ -680,7 +761,7 @@ Access and state rules:
 - foremanSalary = foremanWorkedMinutes / 60 * shift.foremanHourlyRate, rounded to 2 decimal places with HALF_UP.
 - Foreman salary uses ShiftSession.foremanHourlyRate.
 - The backend must not create a ShiftAttendance row for foreman salary.
-- Cancelled shifts are planned and not currently produced by an implemented REST endpoint.
+- CANCELLED shifts cannot be closed and do not calculate salary.
 - If breakMinutes is greater than the shift duration, close returns 409 and the shift remains ACTIVE.
 - If defaultBreakMinutes is greater than the shift duration, close returns 409 and the shift remains ACTIVE.
 
@@ -906,7 +987,7 @@ Rules:
 - FOREMAN can list attendance only for a shift they created.
 - ADMIN can list attendance for any shift.
 - WORKER is not allowed.
-- The endpoint is available while the shift is OPEN, ACTIVE, or CLOSED.
+- The endpoint is available while the shift is OPEN, ACTIVE, CLOSED, or CANCELLED.
 - Results are sorted by joinedAt ascending, then attendanceId ascending.
 - Worker data is returned through the attendance DTO; passwordHash and the User entity are never exposed.
 
@@ -1421,7 +1502,7 @@ FOREMAN:
 - can create shift
 - can start shift
 - can close shift
-- cancel own OPEN shift before start is planned, not implemented yet
+- can cancel own OPEN shift before start
 - can approve attendance
 - can see own managed shifts
 - can see shift summary

@@ -86,6 +86,7 @@ A foreman can:
 - set break duration
 - set the default hourly rate for a shift
 - set their own hourly rate for a shift
+- cancel an OPEN shift before it starts
 - view shifts they created and manage
 - view shift summary
 - view worker salary summary
@@ -94,7 +95,6 @@ A foreman can:
 
 Planned later:
 
-- cancel an OPEN shift before it starts
 - pause themselves
 - pause everyone on an active shift
 
@@ -131,20 +131,20 @@ Basic flow:
 12. System copies the shift default hourly rate into the worker attendance record as a snapshot.
 13. While the shift is OPEN, the foreman approves joined workers and may override the rate for an individual attendance.
 14. If no rate override is provided, the attendance keeps its join-time rate snapshot.
-15. Foreman starts the shift.
-16. System records shift start time as actualStartTime.
-17. Foreman closes the shift.
-18. System records shift end time as actualEndTime.
-19. System calculates worked time for approved worker attendance, subtracting static break minutes.
-20. System calculates salary for approved worker attendance.
-21. System calculates the foreman's private salary from ShiftSession.foremanHourlyRate without creating ShiftAttendance for the foreman.
-22. Worker can view their own worker result.
-23. Foreman can view shift summary, including worker salary summary and their own private foreman salary.
-24. Foreman can view the list of shifts they created and manage.
+15. If the shift should not happen, Foreman cancels the OPEN shift before it starts.
+16. Otherwise, Foreman starts the shift.
+17. System records shift start time as actualStartTime.
+18. Foreman closes the shift.
+19. System records shift end time as actualEndTime.
+20. System calculates worked time for approved worker attendance, subtracting static break minutes.
+21. System calculates salary for approved worker attendance.
+22. System calculates the foreman's private salary from ShiftSession.foremanHourlyRate without creating ShiftAttendance for the foreman.
+23. Worker can view their own worker result.
+24. Foreman can view shift summary, including worker salary summary and their own private foreman salary.
+25. Foreman can view the list of shifts they created and manage.
 
 Planned later:
 
-- Foreman can cancel the OPEN shift before it starts.
 - During an ACTIVE shift, workers can pause and resume themselves.
 - During an ACTIVE shift, foreman can pause and resume themselves or everyone.
 - Salary calculation subtracts accumulated pause minutes after pause tracking is implemented.
@@ -211,19 +211,21 @@ The mobile MVP should not use or show Default Company for real shifts.
 
 ## 9. Shift Cancellation Rules
 
-Planned, not implemented yet.
+Implemented for the mobile MVP.
 
-MVP rule:
+Endpoint:
+
+POST /api/v1/shifts/{shiftId}/cancel
+
+Rules:
 
 - owner FOREMAN can cancel only their own OPEN shift before it starts
 - cancelled shift has status CANCELLED
+- cancelled shift does not set actualStartTime or actualEndTime
 - cancelled shift does not calculate salary
+- cancelled shift cannot be started, closed, joined by workers, or summarized
 - worker history can show CANCELLED shift/status
-- ADMIN is not planned for the mobile cancel flow
-
-Planned endpoint:
-
-POST /api/v1/shifts/{shiftId}/cancel
+- ADMIN is not allowed to cancel through the REST/mobile API
 
 ## 10. Pause Rules
 
@@ -284,7 +286,7 @@ foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
 -Salary must not be negative.
 -Break time cannot be greater than total shift time.
 -If shift is not closed, final salary should not be calculated.
--Cancelled shifts are planned and will not calculate final salary after implementation.
+-Cancelled shifts do not calculate final salary.
 -Hourly rate should be stored for the attendance record, because rates can change later.
 -WORKER never sets an hourly rate.
 -FOREMAN sets one default hourly rate for a shift that they own.
@@ -398,10 +400,10 @@ calculate worker salary
 calculate private foreman salary
 worker shift history
 foreman shift summary
+cancel shift
 
 Planned follow-up:
 
-cancel shift
 dynamic pause tracking
 
 Optional:

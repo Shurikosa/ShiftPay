@@ -162,11 +162,12 @@ Shift Creation
 
 Shift Cancellation
 
-- Planned, not implemented yet.
-- ShiftSession status includes CANCELLED for later lifecycle support.
+- ShiftSession status includes CANCELLED for shifts cancelled before start.
 - Owner FOREMAN can cancel only their own OPEN shift before it starts.
-- ADMIN is not planned for the mobile cancel flow.
+- ADMIN cannot cancel shifts through the REST/mobile API.
 - CANCELLED shifts do not calculate salary.
+- CANCELLED shifts cannot be started, closed, joined by workers, or summarized.
+- Cancel does not write actualStartTime, actualEndTime, foremanWorkedMinutes, or foremanCalculatedSalary.
 - Worker history can include CANCELLED shifts/status.
 
 Hourly Rate Ownership
@@ -278,7 +279,7 @@ Salary Calculation
 - foremanSalary is stored or returned with scale 2 and RoundingMode.HALF_UP.
 - Static defaultBreakMinutes is optional and defaults to 0.
 - Dynamic pauses are separate from defaultBreakMinutes and planned separately.
-- CANCELLED shifts are planned and will not calculate salary after implementation.
+- CANCELLED shifts do not calculate salary.
 - No client should calculate worker or foreman salary.
 - Close fails with 409 if actualStartTime is missing, an attendance breakMinutes is greater than shift duration, or ShiftSession.defaultBreakMinutes is greater than shift duration.
 - Close is transactional: when salary validation fails, the shift remains ACTIVE and attendance salary fields are not written.
@@ -323,15 +324,15 @@ Shift Summary
 
 Concurrency Control
 
-- Company creation, company join, shift join, start, close, and approval run inside transactions with pessimistic write locks where state can change concurrently.
-- ShiftSession is locked by id for start, close, and approval.
+- Company creation, company join, shift join, start, cancel, close, and approval run inside transactions with pessimistic write locks where state can change concurrently.
+- ShiftSession is locked by id for start, cancel, close, and approval.
 - ShiftSession is locked by joinCode for worker join.
 - ShiftAttendance is locked by attendance id and shift id for approval.
 - ShiftAttendance is locked by shift id during close before salary fields are updated.
 - Operations that require both rows always lock ShiftSession first and ShiftAttendance second.
 - Concurrent approvals serialize so only the first JOINED -> APPROVED transition succeeds.
 - Start serializes with join and approval, preventing either operation from succeeding after the shift becomes ACTIVE.
-- Cancel serialization is planned with the cancel endpoint.
+- Cancel serializes with join, approval, start, and close, preventing worker joins and lifecycle transitions after the shift becomes CANCELLED.
 - Close serializes concurrent lifecycle transitions and prevents duplicate successful close operations.
 - Pause interval start/stop serialization is planned with the pause system.
 
@@ -394,7 +395,7 @@ FOREMAN:
 - create shift
 - manage own shifts
 - approve attendance
-- cancel own OPEN shifts before start planned separately
+- cancel own OPEN shifts before start
 - pause/resume self and global pause planned separately
 - see shift summaries
 
