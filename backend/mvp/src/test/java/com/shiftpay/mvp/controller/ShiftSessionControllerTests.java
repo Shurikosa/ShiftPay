@@ -49,7 +49,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Controller integration tests for shift session endpoints.
  *
- * <p>The class covers create, get, start, close, and summary APIs with MockMvc. It verifies role access,
+ * <p>The class covers create, get, start, cancel, close, and summary APIs with MockMvc. It verifies role access,
  * foreman ownership, shift lifecycle conflicts, salary persistence on close, summary response rules, and DTO fields
  * that must not expose entities or internal timestamps.</p>
  */
@@ -321,10 +321,12 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.defaultBreakMinutes").value(60))
 				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25))
 				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
+				.andExpect(jsonPath("$.pauseState.allPaused").value(false))
+				.andExpect(jsonPath("$.pauseState.personallyPaused").value(false))
 				.andExpect(jsonPath("$.createdBy").isNumber())
 				.andExpect(jsonPath("$.plannedStartTime").doesNotExist())
 				.andExpect(jsonPath("$.plannedEndTime").doesNotExist())
-				.andExpect(jsonPath("$.*", hasSize(13)))
+				.andExpect(jsonPath("$.*", hasSize(14)))
 				.andExpect(jsonPath("$.company").doesNotExist())
 				.andExpect(jsonPath("$.createdAt").doesNotExist())
 				.andExpect(jsonPath("$.updatedAt").doesNotExist());
@@ -364,7 +366,8 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.companyName").value("Acme Construction"))
 				.andExpect(jsonPath("$.title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$.foremanHourlyRate").doesNotExist())
-				.andExpect(jsonPath("$.*", hasSize(12)));
+				.andExpect(jsonPath("$.pauseState.allPaused").value(false))
+				.andExpect(jsonPath("$.*", hasSize(13)));
 	}
 
 	/**
@@ -577,6 +580,202 @@ class ShiftSessionControllerTests {
 				.isNotNull()
 				.isAfterOrEqualTo(beforeStart)
 				.isBeforeOrEqualTo(OffsetDateTime.now(ZoneOffset.UTC));
+	}
+
+	/**
+	 * Cancels an OPEN shift as owner FOREMAN and expects a CANCELLED shift without actual times.
+	 */
+	@Test
+	void ownerForemanCanCancelOpenShift() throws Exception {
+		String accessToken = registerAndLogin("owner@example.com", "FOREMAN");
+		long shiftId = createShift(accessToken, "Owner shift");
+
+		cancelShift(accessToken, shiftId)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.id").value(shiftId))
+				.andExpect(jsonPath("$.companyId").isNumber())
+				.andExpect(jsonPath("$.companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$.status").value("CANCELLED"))
+				.andExpect(jsonPath("$.actualStartTime").value(nullValue()))
+				.andExpect(jsonPath("$.actualEndTime").value(nullValue()))
+				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
+				.andExpect(jsonPath("$.pauseState.allPaused").value(false))
+				.andExpect(jsonPath("$.*", hasSize(14)));
+
+		ShiftSession persistedShift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		assertThat(persistedShift.getStatus()).isEqualTo(ShiftStatus.CANCELLED);
+		assertThat(persistedShift.getActualStartTime()).isNull();
+		assertThat(persistedShift.getActualEndTime()).isNull();
+		assertThat(persistedShift.getForemanWorkedMinutes()).isNull();
+		assertThat(persistedShift.getForemanCalculatedSalary()).isNull();
+	}
+
+	/**
+	 * Attempts to cancel a shift as WORKER and expects role-based authorization to reject the request.
+	 */
+	@Test
+	void workerCannotCancelShift() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Foreman shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+
+		cancelShift(workerToken, shiftId)
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(cancelShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Attempts to cancel a shift as ADMIN and expects the mobile MVP REST contract to reject lifecycle writes.
+	 */
+	@Test
+	void adminCannotCancelShift() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Foreman shift");
+		String adminToken = createAdminAndLogin();
+
+		cancelShift(adminToken, shiftId)
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(cancelShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Attempts to cancel another foreman's shift and expects ownership checks to return 403.
+	 */
+	@Test
+	void anotherForemanCannotCancelShift() throws Exception {
+		String ownerToken = registerAndLogin("owner@example.com", "FOREMAN");
+		long shiftId = createShift(ownerToken, "Owner shift");
+		String anotherForemanToken = registerAndLogin("another@example.com", "FOREMAN");
+
+		cancelShift(anotherForemanToken, shiftId)
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(cancelShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Attempts to cancel an ACTIVE shift and expects a lifecycle conflict.
+	 */
+	@Test
+	void cannotCancelStartedShift() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createActiveShift(accessToken, "Active shift");
+
+		cancelShift(accessToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift can only be cancelled before it starts"))
+				.andExpect(jsonPath("$.path").value(cancelShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Attempts to cancel a CLOSED shift and expects a lifecycle conflict.
+	 */
+	@Test
+	void cannotCancelClosedShift() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createActiveShift(accessToken, "Closed shift");
+		closeShift(accessToken, shiftId).andExpect(status().isOk());
+
+		cancelShift(accessToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift can only be cancelled before it starts"))
+				.andExpect(jsonPath("$.path").value(cancelShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Cancels the same shift twice and expects the second call to fail because cancel is not idempotent.
+	 */
+	@Test
+	void repeatedCancelReturnsConflict() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(accessToken, "Cancelled shift");
+
+		cancelShift(accessToken, shiftId).andExpect(status().isOk());
+
+		cancelShift(accessToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift can only be cancelled before it starts"))
+				.andExpect(jsonPath("$.path").value(cancelShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Cancels an OPEN shift, then expects start to reject the terminal CANCELLED state.
+	 */
+	@Test
+	void cannotStartCancelledShift() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(accessToken, "Cancelled shift");
+
+		cancelShift(accessToken, shiftId).andExpect(status().isOk());
+
+		startShift(accessToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift can only be started when status is OPEN"))
+				.andExpect(jsonPath("$.path").value(startShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Cancels an OPEN shift, then expects close to reject the terminal CANCELLED state.
+	 */
+	@Test
+	void cannotCloseCancelledShift() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(accessToken, "Cancelled shift");
+
+		cancelShift(accessToken, shiftId).andExpect(status().isOk());
+
+		closeShift(accessToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift can only be closed when status is ACTIVE"))
+				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Cancels a shift with approved attendance and expects no salary persistence and no summary availability.
+	 */
+	@Test
+	void cancelledShiftDoesNotCalculateSalaryAndSummaryIsUnavailable() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Cancelled summary shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
+		approveAttendance(foremanToken, shiftId, attendanceId, "{}").andExpect(status().isOk());
+
+		cancelShift(foremanToken, shiftId).andExpect(status().isOk());
+
+		ShiftSession persistedShift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		assertThat(persistedShift.getStatus()).isEqualTo(ShiftStatus.CANCELLED);
+		assertThat(persistedShift.getForemanWorkedMinutes()).isNull();
+		assertThat(persistedShift.getForemanCalculatedSalary()).isNull();
+		assertThat(attendance.getStatus()).isEqualTo(AttendanceStatus.APPROVED);
+		assertThat(attendance.getWorkedMinutes()).isNull();
+		assertThat(attendance.getCalculatedSalary()).isNull();
+
+		getSummary(foremanToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift summary is available only for CLOSED shifts"))
+				.andExpect(jsonPath("$.path").value(summaryUrl(shiftId)));
 	}
 
 	/**
@@ -942,6 +1141,7 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.totalWorkers").value(2))
 				.andExpect(jsonPath("$.totalSalary").value(totalSalary.doubleValue()))
 				.andExpect(jsonPath("$.foremanWorkedMinutes").value(shift.getForemanWorkedMinutes()))
+				.andExpect(jsonPath("$.foremanPauseMinutes").value(shift.getForemanPauseMinutes()))
 				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
 				.andExpect(jsonPath("$.foremanSalary").value(shift.getForemanCalculatedSalary().doubleValue()))
 				.andExpect(jsonPath("$.workers", hasSize(2)))
@@ -950,20 +1150,22 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.workers[0].firstName").value("Bob"))
 				.andExpect(jsonPath("$.workers[0].lastName").value("Alpha"))
 				.andExpect(jsonPath("$.workers[0].workedMinutes").value(firstAttendance.getWorkedMinutes()))
+				.andExpect(jsonPath("$.workers[0].pauseMinutes").value(firstAttendance.getPauseMinutes()))
 				.andExpect(jsonPath("$.workers[0].hourlyRate").value(15.25))
 				.andExpect(jsonPath("$.workers[0].salary")
 						.value(firstAttendance.getCalculatedSalary().doubleValue()))
-				.andExpect(jsonPath("$.workers[0].*", hasSize(7)))
+				.andExpect(jsonPath("$.workers[0].*", hasSize(8)))
 				.andExpect(jsonPath("$.workers[0].passwordHash").doesNotExist())
 				.andExpect(jsonPath("$.workers[0].user").doesNotExist())
 				.andExpect(jsonPath("$.workers[0].email").doesNotExist())
 				.andExpect(jsonPath("$.workers[1].attendanceId").value(secondAttendanceId))
 				.andExpect(jsonPath("$.workers[1].firstName").value("Anna"))
 				.andExpect(jsonPath("$.workers[1].lastName").value("Zulu"))
+				.andExpect(jsonPath("$.workers[1].pauseMinutes").value(secondAttendance.getPauseMinutes()))
 				.andExpect(jsonPath("$.workers[1].hourlyRate").value(18.50))
 				.andExpect(jsonPath("$.workers[1].salary")
 						.value(secondAttendance.getCalculatedSalary().doubleValue()))
-				.andExpect(jsonPath("$.*", hasSize(8)))
+				.andExpect(jsonPath("$.*", hasSize(9)))
 				.andExpect(jsonPath("$.workers[?(@.attendanceId == %d)]".formatted(joinedAttendanceId))
 						.isEmpty());
 		assertThat(joinedAttendance.getCalculatedSalary()).isNull();
@@ -984,6 +1186,7 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.status").value("CLOSED"))
 				.andExpect(jsonPath("$.totalWorkers").value(1))
 				.andExpect(jsonPath("$.foremanWorkedMinutes").doesNotExist())
+				.andExpect(jsonPath("$.foremanPauseMinutes").doesNotExist())
 				.andExpect(jsonPath("$.foremanHourlyRate").doesNotExist())
 				.andExpect(jsonPath("$.foremanSalary").doesNotExist())
 				.andExpect(jsonPath("$.*", hasSize(5)));
@@ -1475,6 +1678,28 @@ class ShiftSessionControllerTests {
 	 */
 	private ResultActions startShift(String accessToken, long shiftId) throws Exception {
 		return mockMvc.perform(post(startShiftUrl(shiftId))
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken));
+	}
+
+	/**
+	 * Builds the cancel endpoint URL for a shift.
+	 *
+	 * @param shiftId shift id
+	 * @return endpoint path
+	 */
+	private String cancelShiftUrl(long shiftId) {
+		return shiftUrl(shiftId) + "/cancel";
+	}
+
+	/**
+	 * Sends a cancel request for a shift as the given caller.
+	 *
+	 * @param accessToken JWT for the caller
+	 * @param shiftId target shift id
+	 * @return MockMvc result actions for assertions
+	 */
+	private ResultActions cancelShift(String accessToken, long shiftId) throws Exception {
+		return mockMvc.perform(post(cancelShiftUrl(shiftId))
 				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken));
 	}
 

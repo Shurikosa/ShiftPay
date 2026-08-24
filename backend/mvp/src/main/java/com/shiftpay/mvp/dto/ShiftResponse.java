@@ -23,6 +23,7 @@ import java.time.OffsetDateTime;
  * @param defaultBreakMinutes default break minutes copied to attendance
  * @param defaultHourlyRate default hourly rate copied to attendance
  * @param foremanHourlyRate private owner-foreman rate, omitted for admins
+ * @param pauseState pause state for the current user's shift-detail perspective
  * @param createdBy user id of the creator
  */
 public record ShiftResponse(
@@ -39,6 +40,7 @@ public record ShiftResponse(
 		BigDecimal defaultHourlyRate,
 		@JsonInclude(JsonInclude.Include.NON_NULL)
 		BigDecimal foremanHourlyRate,
+		PauseStateResponse pauseState,
 		Long createdBy
 ) {
 
@@ -50,6 +52,22 @@ public record ShiftResponse(
 	 * @return shift details response DTO
 	 */
 	public static ShiftResponse from(ShiftSession shiftSession, boolean includePrivateForemanFields) {
+		return from(shiftSession, includePrivateForemanFields, PauseStateResponse.none());
+	}
+
+	/**
+	 * Maps a shift entity and pause state to the shift details response.
+	 *
+	 * @param shiftSession shift session entity
+	 * @param includePrivateForemanFields whether owner-foreman private fields should be returned
+	 * @param pauseState pause state for the current response perspective
+	 * @return shift details response DTO
+	 */
+	public static ShiftResponse from(
+			ShiftSession shiftSession,
+			boolean includePrivateForemanFields,
+			PauseStateResponse pauseState
+	) {
 		return new ShiftResponse(
 				shiftSession.getId(),
 				shiftSession.getCompany().getId(),
@@ -63,6 +81,7 @@ public record ShiftResponse(
 				shiftSession.getDefaultBreakMinutes(),
 				shiftSession.getDefaultHourlyRate(),
 				includePrivateForemanFields ? shiftSession.getForemanHourlyRate() : null,
+				pauseState,
 				shiftSession.getCreatedBy().getId()
 		);
 	}

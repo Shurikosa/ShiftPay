@@ -23,6 +23,7 @@ public final class TestDataCleaner {
 	 * @param jdbcTemplate JDBC helper connected to the test database
 	 */
 	public static void clean(JdbcTemplate jdbcTemplate) {
+		jdbcTemplate.update("delete from shift_pause_intervals");
 		jdbcTemplate.update("delete from shift_attendance");
 		jdbcTemplate.update("delete from shift_sessions");
 		jdbcTemplate.update("delete from users");

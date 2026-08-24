@@ -90,6 +90,10 @@ public class ShiftSession {
 	private Integer foremanWorkedMinutes;
 
 	@Setter
+	@Column(name = "foreman_pause_minutes")
+	private Integer foremanPauseMinutes;
+
+	@Setter
 	@Column(name = "foreman_calculated_salary", precision = 12, scale = 2)
 	private BigDecimal foremanCalculatedSalary;
 

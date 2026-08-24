@@ -16,20 +16,19 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 
 /**
- * Attendance entity connecting a worker to one shift session.
+ * Auditable pause interval for a shift.
  *
- * <p>It stores the worker's status, hourly-rate snapshot or override, break minutes, and close-time salary results.
- * Only approved attendance receives worked minutes and calculated salary when a shift is closed.</p>
+ * <p>PERSONAL intervals target one user. ALL intervals target everyone on the active shift and keep {@code user}
+ * empty.</p>
  */
 @Getter
 @Entity
-@Table(name = "shift_attendance")
-public class ShiftAttendance {
+@Table(name = "shift_pause_intervals")
+public class ShiftPauseInterval {
 
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -41,42 +40,22 @@ public class ShiftAttendance {
 	private ShiftSession shiftSession;
 
 	@Setter
-	@ManyToOne(fetch = FetchType.LAZY, optional = false)
-	@JoinColumn(name = "worker_id", nullable = false)
-	private User worker;
-
-	@Setter
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false, length = 32)
-	private AttendanceStatus status;
+	private PauseScope scope;
 
 	@Setter
-	@Column(name = "hourly_rate", nullable = false, precision = 12, scale = 2)
-	private BigDecimal hourlyRate;
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "user_id")
+	private User user;
 
 	@Setter
-	@Column(name = "break_minutes", nullable = false)
-	private Integer breakMinutes;
+	@Column(name = "started_at", nullable = false)
+	private OffsetDateTime startedAt;
 
 	@Setter
-	@Column(name = "worked_minutes")
-	private Integer workedMinutes;
-
-	@Setter
-	@Column(name = "pause_minutes")
-	private Integer pauseMinutes;
-
-	@Setter
-	@Column(name = "calculated_salary", precision = 12, scale = 2)
-	private BigDecimal calculatedSalary;
-
-	@Setter
-	@Column(name = "joined_at", nullable = false)
-	private OffsetDateTime joinedAt;
-
-	@Setter
-	@Column(name = "approved_at")
-	private OffsetDateTime approvedAt;
+	@Column(name = "ended_at")
+	private OffsetDateTime endedAt;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
@@ -85,7 +64,7 @@ public class ShiftAttendance {
 	private Instant updatedAt;
 
 	/**
-	 * Sets creation and update timestamps before the attendance row is first persisted.
+	 * Sets creation and update timestamps before the interval is first persisted.
 	 */
 	@PrePersist
 	void prePersist() {
@@ -95,7 +74,7 @@ public class ShiftAttendance {
 	}
 
 	/**
-	 * Refreshes the update timestamp before an existing attendance row is stored.
+	 * Refreshes the update timestamp before an existing interval is stored.
 	 */
 	@PreUpdate
 	void preUpdate() {

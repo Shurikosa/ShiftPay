@@ -28,6 +28,26 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 	boolean existsByShiftSessionIdAndWorkerId(Long shiftSessionId, Long workerId);
 
 	/**
+	 * Loads one worker attendance row for participation checks.
+	 *
+	 * @param shiftSessionId shift session id
+	 * @param workerId worker user id
+	 * @return attendance row when the worker joined the shift
+	 */
+	@Query("""
+			select attendance
+			from ShiftAttendance attendance
+			join fetch attendance.shiftSession shiftSession
+			join fetch shiftSession.company
+			where attendance.shiftSession.id = :shiftSessionId
+			  and attendance.worker.id = :workerId
+			""")
+	Optional<ShiftAttendance> findByShiftSessionIdAndWorkerId(
+			@Param("shiftSessionId") Long shiftSessionId,
+			@Param("workerId") Long workerId
+	);
+
+	/**
 	 * Loads one attendance row by attendance id and shift id with a pessimistic write lock.
 	 *
 	 * <p>Approval uses this to serialize concurrent approval attempts and to return not found when the URL shift id
@@ -85,7 +105,7 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 	 * Lists the current user's worker-attendance history and fetches shift details in the same query.
 	 *
 	 * @param workerId current authenticated user id
-	 * @return attendance history for OPEN, ACTIVE, and CLOSED shifts, newest joins first
+	 * @return attendance history for OPEN, ACTIVE, CLOSED, and CANCELLED shifts, newest joins first
 	 */
 	@Query("""
 			select attendance
@@ -96,7 +116,8 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 			  and shiftSession.status in (
 				com.shiftpay.mvp.entity.ShiftStatus.OPEN,
 				com.shiftpay.mvp.entity.ShiftStatus.ACTIVE,
-				com.shiftpay.mvp.entity.ShiftStatus.CLOSED
+				com.shiftpay.mvp.entity.ShiftStatus.CLOSED,
+				com.shiftpay.mvp.entity.ShiftStatus.CANCELLED
 			  )
 			order by attendance.joinedAt desc, attendance.id desc
 			""")

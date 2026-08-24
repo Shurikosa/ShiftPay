@@ -84,6 +84,22 @@ class SalaryCalculationServiceTests {
 	}
 
 	/**
+	 * Deducts both static break and dynamic pause minutes from the shift duration.
+	 */
+	@Test
+	void pauseMinutesAreDeductedWithBreakMinutes() {
+		SalaryCalculationService.SalaryCalculationResult result = salaryCalculationService.calculate(
+				180,
+				30,
+				45,
+				new BigDecimal("20.00")
+		);
+
+		assertThat(result.workedMinutes()).isEqualTo(105);
+		assertThat(result.calculatedSalary()).isEqualByComparingTo("35.00");
+	}
+
+	/**
 	 * Rejects break minutes greater than total duration because that would create negative worked time.
 	 */
 	@Test

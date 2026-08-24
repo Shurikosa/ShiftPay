@@ -17,6 +17,7 @@ import java.util.List;
  * @param totalWorkers number of approved attendance rows included in the summary
  * @param totalSalary sum of included worker salaries with scale two
  * @param foremanWorkedMinutes private owner-foreman worked minutes, omitted for admins
+ * @param foremanPauseMinutes private owner-foreman pause minutes, omitted for admins
  * @param foremanHourlyRate private owner-foreman rate, omitted for admins
  * @param foremanSalary private owner-foreman salary, omitted for admins
  * @param workers worker-level salary rows ordered by worker name and id
@@ -28,6 +29,8 @@ public record ShiftSummaryResponse(
 		BigDecimal totalSalary,
 		@JsonInclude(JsonInclude.Include.NON_NULL)
 		Integer foremanWorkedMinutes,
+		@JsonInclude(JsonInclude.Include.NON_NULL)
+		Integer foremanPauseMinutes,
 		@JsonInclude(JsonInclude.Include.NON_NULL)
 		BigDecimal foremanHourlyRate,
 		@JsonInclude(JsonInclude.Include.NON_NULL)

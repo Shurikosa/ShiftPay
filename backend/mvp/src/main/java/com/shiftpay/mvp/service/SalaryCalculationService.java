@@ -12,8 +12,8 @@ import java.time.OffsetDateTime;
  * Performs salary and worked-minute calculations for closed shifts.
  *
  * <p>Money is calculated with {@link BigDecimal}. The service rejects missing timestamps, negative durations,
- * negative breaks, breaks longer than the shift, missing rates, and negative rates. Salary is rounded to scale two
- * with {@link RoundingMode#HALF_UP}.</p>
+ * negative breaks or pauses, deductions longer than the shift, missing rates, and negative rates. Salary is rounded to
+ * scale two with {@link RoundingMode#HALF_UP}.</p>
  */
 @Service
 public class SalaryCalculationService {
@@ -57,7 +57,7 @@ public class SalaryCalculationService {
 			Integer breakMinutes,
 			BigDecimal hourlyRate
 	) {
-		return calculate(calculateDurationMinutes(actualStartTime, actualEndTime), breakMinutes, hourlyRate);
+		return calculate(calculateDurationMinutes(actualStartTime, actualEndTime), breakMinutes, 0, hourlyRate);
 	}
 
 	/**
@@ -73,7 +73,25 @@ public class SalaryCalculationService {
 			Integer breakMinutes,
 			BigDecimal hourlyRate
 	) {
-		return calculate(durationMinutes, breakMinutes, hourlyRate, "Attendance hourlyRate");
+		return calculate(durationMinutes, breakMinutes, 0, hourlyRate, "Attendance hourlyRate");
+	}
+
+	/**
+	 * Calculates worked minutes and salary from an already known shift duration and dynamic pause minutes.
+	 *
+	 * @param durationMinutes non-negative shift duration in minutes
+	 * @param breakMinutes static break minutes to deduct, null treated as zero
+	 * @param pauseMinutes dynamic pause minutes to deduct, null treated as zero
+	 * @param hourlyRate attendance hourly rate snapshot or override
+	 * @return calculated worked minutes and salary
+	 */
+	public SalaryCalculationResult calculate(
+			long durationMinutes,
+			Integer breakMinutes,
+			Integer pauseMinutes,
+			BigDecimal hourlyRate
+	) {
+		return calculate(durationMinutes, breakMinutes, pauseMinutes, hourlyRate, "Attendance hourlyRate");
 	}
 
 	/**
@@ -91,12 +109,42 @@ public class SalaryCalculationService {
 			BigDecimal hourlyRate,
 			String hourlyRateLabel
 	) {
+		return calculate(durationMinutes, breakMinutes, 0, hourlyRate, hourlyRateLabel);
+	}
+
+	/**
+	 * Calculates worked minutes and salary from an already known shift duration with static and dynamic deductions.
+	 *
+	 * @param durationMinutes non-negative shift duration in minutes
+	 * @param breakMinutes static break minutes to deduct, null treated as zero
+	 * @param pauseMinutes dynamic pause minutes to deduct, null treated as zero
+	 * @param hourlyRate hourly rate used for the calculation
+	 * @param hourlyRateLabel label used in validation messages for the supplied rate
+	 * @return calculated worked minutes and salary
+	 */
+	public SalaryCalculationResult calculate(
+			long durationMinutes,
+			Integer breakMinutes,
+			Integer pauseMinutes,
+			BigDecimal hourlyRate,
+			String hourlyRateLabel
+	) {
 		int safeBreakMinutes = breakMinutes == null ? 0 : breakMinutes;
+		int safePauseMinutes = pauseMinutes == null ? 0 : pauseMinutes;
 		if (safeBreakMinutes < 0) {
 			throw new ShiftStateConflictException("Break minutes cannot be negative");
 		}
+		if (safePauseMinutes < 0) {
+			throw new ShiftStateConflictException("Pause minutes cannot be negative");
+		}
 		if (safeBreakMinutes > durationMinutes) {
 			throw new ShiftStateConflictException("Break minutes cannot be greater than shift duration");
+		}
+		if (safePauseMinutes > durationMinutes) {
+			throw new ShiftStateConflictException("Pause minutes cannot be greater than shift duration");
+		}
+		if (safeBreakMinutes + safePauseMinutes > durationMinutes) {
+			throw new ShiftStateConflictException("Break and pause minutes cannot be greater than shift duration");
 		}
 		if (hourlyRate == null) {
 			throw new ShiftStateConflictException(hourlyRateLabel + " is required for salary calculation");
@@ -105,7 +153,7 @@ public class SalaryCalculationService {
 			throw new ShiftStateConflictException(hourlyRateLabel + " cannot be negative");
 		}
 
-		long workedMinutes = durationMinutes - safeBreakMinutes;
+		long workedMinutes = durationMinutes - safeBreakMinutes - safePauseMinutes;
 		BigDecimal calculatedSalary = hourlyRate
 				.multiply(BigDecimal.valueOf(workedMinutes))
 				.divide(MINUTES_PER_HOUR, 2, RoundingMode.HALF_UP);

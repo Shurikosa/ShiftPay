@@ -1,6 +1,7 @@
 package com.shiftpay.mvp.service;
 
 import com.shiftpay.mvp.dto.CreateShiftRequest;
+import com.shiftpay.mvp.dto.PauseStateResponse;
 import com.shiftpay.mvp.dto.ShiftCloseResponse;
 import com.shiftpay.mvp.dto.ShiftCreateResponse;
 import com.shiftpay.mvp.dto.ShiftResponse;
@@ -11,6 +12,7 @@ import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.Company;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftAttendance;
+import com.shiftpay.mvp.entity.ShiftPauseInterval;
 import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.ShiftStatus;
 import com.shiftpay.mvp.entity.User;
@@ -19,6 +21,7 @@ import com.shiftpay.mvp.exception.ForbiddenException;
 import com.shiftpay.mvp.exception.ShiftNotFoundException;
 import com.shiftpay.mvp.exception.ShiftStateConflictException;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
+import com.shiftpay.mvp.repository.ShiftPauseIntervalRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
 import com.shiftpay.mvp.security.AuthenticatedUserPrincipal;
@@ -40,7 +43,7 @@ import java.util.Objects;
 /**
  * Business service for shift lifecycle and closed-shift salary summaries.
  *
- * <p>It creates shifts, starts and closes them with pessimistic locks, calculates salary for approved attendance on
+ * <p>It creates shifts, starts, cancels, and closes them with pessimistic locks, calculates salary for approved attendance on
  * close, reads managed-shift lists for the current creator, and reads persisted summary data without recalculating
  * salary. Foreman ownership and admin read access are enforced here in addition to route-level role checks.</p>
  */
@@ -57,8 +60,11 @@ public class ShiftSessionService {
 	private static final int JOIN_CODE_MAX_ATTEMPTS = 20;
 
 	private final ShiftAttendanceRepository shiftAttendanceRepository;
+	private final ShiftPauseIntervalRepository shiftPauseIntervalRepository;
 	private final ShiftSessionRepository shiftSessionRepository;
 	private final UserRepository userRepository;
+	private final PauseCalculationService pauseCalculationService;
+	private final PauseViewFactory pauseViewFactory;
 	private final SalaryCalculationService salaryCalculationService;
 	private final SecureRandom secureRandom;
 
@@ -66,19 +72,28 @@ public class ShiftSessionService {
 	 * Creates the service with repositories, salary service, and secure join code generation.
 	 *
 	 * @param shiftAttendanceRepository attendance repository used for close and summary data
+	 * @param shiftPauseIntervalRepository pause repository used for pause state and salary deductions
 	 * @param shiftSessionRepository shift repository used for lifecycle persistence and locks
 	 * @param userRepository user repository used to resolve the authenticated creator
+	 * @param pauseCalculationService service used to calculate union pause minutes
+	 * @param pauseViewFactory factory used to build mobile pause state fragments
 	 * @param salaryCalculationService salary calculation service used on close
 	 */
 	public ShiftSessionService(
 			ShiftAttendanceRepository shiftAttendanceRepository,
+			ShiftPauseIntervalRepository shiftPauseIntervalRepository,
 			ShiftSessionRepository shiftSessionRepository,
 			UserRepository userRepository,
+			PauseCalculationService pauseCalculationService,
+			PauseViewFactory pauseViewFactory,
 			SalaryCalculationService salaryCalculationService
 	) {
 		this.shiftAttendanceRepository = shiftAttendanceRepository;
+		this.shiftPauseIntervalRepository = shiftPauseIntervalRepository;
 		this.shiftSessionRepository = shiftSessionRepository;
 		this.userRepository = userRepository;
+		this.pauseCalculationService = pauseCalculationService;
+		this.pauseViewFactory = pauseViewFactory;
 		this.salaryCalculationService = salaryCalculationService;
 		this.secureRandom = new SecureRandom();
 	}
@@ -133,7 +148,18 @@ public class ShiftSessionService {
 				.orElseThrow(ShiftNotFoundException::new);
 
 		validateShiftAccess(shiftSession, principal);
-		return ShiftResponse.from(shiftSession, shouldIncludePrivateForemanFields(shiftSession, principal));
+		boolean includePrivateForemanFields = shouldIncludePrivateForemanFields(shiftSession, principal);
+		PauseStateResponse pauseState = pauseViewFactory.forUser(
+				shiftSession,
+				shiftPauseIntervalRepository.findAllByShiftSessionId(shiftId),
+				includePrivateForemanFields ? principal.id() : null,
+				includePrivateForemanFields ? shiftSession.getForemanPauseMinutes() : null
+		);
+		return ShiftResponse.from(
+				shiftSession,
+				includePrivateForemanFields,
+				pauseState
+		);
 	}
 
 	/**
@@ -147,11 +173,31 @@ public class ShiftSessionService {
 	 */
 	@Transactional(readOnly = true)
 	public List<ShiftResponse> getMyManagedShifts(AuthenticatedUserPrincipal principal) {
-		return shiftSessionRepository.findManagedShiftsByCreatedById(principal.id()).stream()
-				.map((shiftSession) -> ShiftResponse.from(
-						shiftSession,
-						shouldIncludePrivateForemanFields(shiftSession, principal)
-				))
+		List<ShiftSession> shiftSessions = shiftSessionRepository.findManagedShiftsByCreatedById(principal.id());
+		List<Long> shiftIds = shiftSessions.stream().map(ShiftSession::getId).toList();
+		List<ShiftPauseInterval> pauseIntervals = shiftIds.isEmpty()
+				? List.of()
+				: shiftPauseIntervalRepository.findAllByShiftSessionIdIn(shiftIds);
+		return shiftSessions.stream()
+				.map((shiftSession) -> {
+					boolean includePrivateForemanFields = shouldIncludePrivateForemanFields(shiftSession, principal);
+					List<ShiftPauseInterval> intervals = pauseIntervals.stream()
+							.filter((pauseInterval) -> Objects.equals(
+									pauseInterval.getShiftSession().getId(),
+									shiftSession.getId()
+							))
+							.toList();
+					return ShiftResponse.from(
+							shiftSession,
+							includePrivateForemanFields,
+							pauseViewFactory.forUser(
+									shiftSession,
+									intervals,
+									includePrivateForemanFields ? principal.id() : null,
+									includePrivateForemanFields ? shiftSession.getForemanPauseMinutes() : null
+							)
+					);
+				})
 				.toList();
 	}
 
@@ -178,6 +224,31 @@ public class ShiftSessionService {
 		shiftSession.setStatus(ShiftStatus.ACTIVE);
 		shiftSession.setActualStartTime(OffsetDateTime.now(ZoneOffset.UTC));
 		return ShiftStartResponse.from(shiftSession);
+	}
+
+	/**
+	 * Cancels an OPEN shift before it starts.
+	 *
+	 * <p>The shift row is locked so cancel serializes with start, close, join, and approval. Cancelling never writes
+	 * actual times or salary fields.</p>
+	 *
+	 * @param shiftId shift session id
+	 * @param principal authenticated owner foreman principal
+	 * @return cancelled shift response
+	 */
+	@Transactional
+	public ShiftResponse cancelShift(Long shiftId, AuthenticatedUserPrincipal principal) {
+		ShiftSession shiftSession = shiftSessionRepository.findByIdForUpdate(shiftId)
+				.orElseThrow(ShiftNotFoundException::new);
+
+		validateOwnerForemanAccess(shiftSession, principal);
+		validateForemanCompanyConsistency(shiftSession, principal);
+		if (shiftSession.getStatus() != ShiftStatus.OPEN) {
+			throw new ShiftStateConflictException("Shift can only be cancelled before it starts");
+		}
+
+		shiftSession.setStatus(ShiftStatus.CANCELLED);
+		return ShiftResponse.from(shiftSession, shouldIncludePrivateForemanFields(shiftSession, principal));
 	}
 
 	/**
@@ -208,30 +279,53 @@ public class ShiftSessionService {
 				actualEndTime
 		);
 		List<ShiftAttendance> attendanceRows = shiftAttendanceRepository.findAllByShiftSessionIdForUpdate(shiftId);
+		List<ShiftPauseInterval> pauseIntervals = shiftPauseIntervalRepository.findAllByShiftSessionIdForUpdate(shiftId);
+		for (ShiftPauseInterval pauseInterval : pauseIntervals) {
+			if (pauseInterval.getEndedAt() == null) {
+				pauseInterval.setEndedAt(actualEndTime);
+			}
+		}
+		int foremanPauseMinutes = pauseCalculationService.calculateEffectivePauseMinutes(
+				pauseIntervals,
+				shiftSession.getCreatedBy().getId(),
+				shiftSession.getActualStartTime(),
+				actualEndTime
+		);
 		SalaryCalculationService.SalaryCalculationResult foremanSalary = salaryCalculationService.calculate(
 				durationMinutes,
 				shiftSession.getDefaultBreakMinutes(),
+				foremanPauseMinutes,
 				shiftSession.getForemanHourlyRate(),
 				"foremanHourlyRate"
 		);
 
 		for (ShiftAttendance attendance : attendanceRows) {
 			if (attendance.getStatus() == AttendanceStatus.APPROVED) {
+				int pauseMinutes = pauseCalculationService.calculateEffectivePauseMinutes(
+						pauseIntervals,
+						attendance.getWorker().getId(),
+						shiftSession.getActualStartTime(),
+						actualEndTime
+				);
 				SalaryCalculationService.SalaryCalculationResult salary = salaryCalculationService.calculate(
 						durationMinutes,
 						attendance.getBreakMinutes(),
+						pauseMinutes,
 						attendance.getHourlyRate()
 				);
+				attendance.setPauseMinutes(pauseMinutes);
 				attendance.setWorkedMinutes(salary.workedMinutes());
 				attendance.setCalculatedSalary(salary.calculatedSalary());
 			}
 			else {
+				attendance.setPauseMinutes(null);
 				attendance.setWorkedMinutes(null);
 				attendance.setCalculatedSalary(null);
 			}
 		}
 
 		shiftSession.setForemanWorkedMinutes(foremanSalary.workedMinutes());
+		shiftSession.setForemanPauseMinutes(foremanPauseMinutes);
 		shiftSession.setForemanCalculatedSalary(foremanSalary.calculatedSalary());
 		shiftSession.setStatus(ShiftStatus.CLOSED);
 		shiftSession.setActualEndTime(actualEndTime);
@@ -276,6 +370,7 @@ public class ShiftSessionService {
 				workers.size(),
 				totalSalary,
 				includePrivateForemanFields ? shiftSession.getForemanWorkedMinutes() : null,
+				includePrivateForemanFields ? shiftSession.getForemanPauseMinutes() : null,
 				includePrivateForemanFields ? shiftSession.getForemanHourlyRate() : null,
 				includePrivateForemanFields ? privateForemanSalary(shiftSession) : null,
 				workers
@@ -299,6 +394,7 @@ public class ShiftSessionService {
 				attendance.getWorker().getFirstName(),
 				attendance.getWorker().getLastName(),
 				attendance.getWorkedMinutes(),
+				attendance.getPauseMinutes(),
 				attendance.getHourlyRate(),
 				attendance.getCalculatedSalary().setScale(2, RoundingMode.HALF_UP)
 		);
@@ -314,6 +410,20 @@ public class ShiftSessionService {
 		if (principal.role() == Role.ADMIN) {
 			return;
 		}
+		if (principal.role() == Role.FOREMAN
+				&& Objects.equals(shiftSession.getCreatedBy().getId(), principal.id())) {
+			return;
+		}
+		throw new ForbiddenException();
+	}
+
+	/**
+	 * Verifies that the principal is the foreman who owns the shift.
+	 *
+	 * @param shiftSession shift being changed
+	 * @param principal authenticated foreman principal
+	 */
+	private void validateOwnerForemanAccess(ShiftSession shiftSession, AuthenticatedUserPrincipal principal) {
 		if (principal.role() == Role.FOREMAN
 				&& Objects.equals(shiftSession.getCreatedBy().getId(), principal.id())) {
 			return;

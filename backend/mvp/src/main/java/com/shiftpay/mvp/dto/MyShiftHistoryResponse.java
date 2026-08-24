@@ -26,8 +26,10 @@ import java.time.OffsetDateTime;
  * @param attendanceStatus current attendance status for the user
  * @param hourlyRate attendance rate snapshot or override
  * @param breakMinutes break minutes stored on attendance
+ * @param pauseMinutes persisted pause minutes deducted after close, or null before salary calculation
  * @param workedMinutes persisted worked minutes after close, or null
  * @param calculatedSalary persisted salary after close, or null
+ * @param pauseState pause state for the current user's attendance
  */
 public record MyShiftHistoryResponse(
 		Long shiftId,
@@ -42,8 +44,10 @@ public record MyShiftHistoryResponse(
 		AttendanceStatus attendanceStatus,
 		BigDecimal hourlyRate,
 		Integer breakMinutes,
+		Integer pauseMinutes,
 		Integer workedMinutes,
-		BigDecimal calculatedSalary
+		BigDecimal calculatedSalary,
+		PauseStateResponse pauseState
 ) {
 
 	/**
@@ -53,6 +57,17 @@ public record MyShiftHistoryResponse(
 	 * @return personal shift history response DTO
 	 */
 	public static MyShiftHistoryResponse from(ShiftAttendance attendance) {
+		return from(attendance, PauseStateResponse.none());
+	}
+
+	/**
+	 * Maps attendance with its shift and pause state to the personal history response.
+	 *
+	 * @param attendance attendance entity for the current user
+	 * @param pauseState pause state for the current user's attendance
+	 * @return personal shift history response DTO
+	 */
+	public static MyShiftHistoryResponse from(ShiftAttendance attendance, PauseStateResponse pauseState) {
 		ShiftSession shiftSession = attendance.getShiftSession();
 		return new MyShiftHistoryResponse(
 				shiftSession.getId(),
@@ -67,8 +82,10 @@ public record MyShiftHistoryResponse(
 				attendance.getStatus(),
 				attendance.getHourlyRate(),
 				attendance.getBreakMinutes(),
+				attendance.getPauseMinutes(),
 				attendance.getWorkedMinutes(),
-				attendance.getCalculatedSalary()
+				attendance.getCalculatedSalary(),
+				pauseState
 		);
 	}
 }

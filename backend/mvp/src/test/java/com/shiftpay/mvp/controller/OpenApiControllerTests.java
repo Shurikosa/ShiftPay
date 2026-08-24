@@ -36,12 +36,35 @@ class OpenApiControllerTests {
 				.andExpect(jsonPath("$.info.title").value("ShiftPay API"))
 				.andExpect(jsonPath("$.info.version").value("v1"))
 				.andExpect(jsonPath("$.info.description").value("OpenAPI documentation for the ShiftPay backend MVP: "
-						+ "authentication, current user, shift sessions, attendance, salary summary, "
-						+ "and personal shift history."))
+						+ "authentication, current user, shift sessions, shift cancellation, active-shift pause tracking, "
+						+ "attendance, salary summary, and personal shift history."))
 				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.type").value("http"))
 				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
 				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.bearerFormat").value("JWT"))
 				.andExpect(jsonPath("$.security[0].bearerAuth").isArray());
+	}
+
+	/**
+	 * Reads generated docs and expects cancel to be exposed as an implemented POST endpoint.
+	 */
+	@Test
+	void apiDocsExposeImplementedShiftCancelEndpoint() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.paths['/api/v1/shifts/{shiftId}/cancel'].post").exists());
+	}
+
+	/**
+	 * Reads generated docs and expects pause to be exposed as implemented POST endpoints.
+	 */
+	@Test
+	void apiDocsExposeImplementedShiftPauseEndpoints() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.paths['/api/v1/shifts/{shiftId}/pauses/me/start'].post").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/shifts/{shiftId}/pauses/me/end'].post").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/shifts/{shiftId}/pauses/all/start'].post").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/shifts/{shiftId}/pauses/all/end'].post").exists());
 	}
 
 	/**
