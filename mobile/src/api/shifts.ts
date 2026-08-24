@@ -8,6 +8,7 @@ import type {
   ManagedShift,
   ShiftAttendance,
   ShiftCloseResponse,
+  ShiftPauseResponse,
   ShiftStartResponse,
   ShiftSummary,
   WorkerShiftHistoryItem
@@ -95,6 +96,40 @@ export function closeShift(token: string, shiftId: number): Promise<ShiftCloseRe
 
 export function cancelShift(token: string, shiftId: number): Promise<ManagedShift> {
   return apiRequest<ManagedShift>(`/api/v1/shifts/${shiftId}/cancel`, {
+    method: "POST",
+    token
+  });
+}
+
+export function startMyPause(
+  token: string,
+  shiftId: number
+): Promise<ShiftPauseResponse> {
+  return apiRequest<ShiftPauseResponse>(`/api/v1/shifts/${shiftId}/pauses/me/start`, {
+    method: "POST",
+    token
+  });
+}
+
+export function endMyPause(token: string, shiftId: number): Promise<ShiftPauseResponse> {
+  return apiRequest<ShiftPauseResponse>(`/api/v1/shifts/${shiftId}/pauses/me/end`, {
+    method: "POST",
+    token
+  });
+}
+
+export function startAllPause(
+  token: string,
+  shiftId: number
+): Promise<ShiftPauseResponse> {
+  return apiRequest<ShiftPauseResponse>(`/api/v1/shifts/${shiftId}/pauses/all/start`, {
+    method: "POST",
+    token
+  });
+}
+
+export function endAllPause(token: string, shiftId: number): Promise<ShiftPauseResponse> {
+  return apiRequest<ShiftPauseResponse>(`/api/v1/shifts/${shiftId}/pauses/all/end`, {
     method: "POST",
     token
   });

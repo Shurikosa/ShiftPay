@@ -428,7 +428,7 @@ The mobile MVP create-shift contract does not accept title, plannedStartTime, or
 
 location is optional.
 
-defaultBreakMinutes is optional, must be greater than or equal to 0 when provided, and defaults to 0 when omitted. Pause tracking is planned separately and is not part of the current implemented DTOs.
+defaultBreakMinutes is optional, must be greater than or equal to 0 when provided, and defaults to 0 when omitted. Dynamic pauses are separate from defaultBreakMinutes and are tracked through pause endpoints while the shift is ACTIVE.
 
 defaultHourlyRate is required, must be greater than or equal to 0, and supports up to two decimal places. It is used only as the worker attendance rate snapshot when workers join.
 
@@ -512,10 +512,19 @@ Status: 200 OK
   "defaultBreakMinutes": 0,
   "defaultHourlyRate": 15.00,
   "foremanHourlyRate": 25.00,
+  "pauseState": {
+    "allPaused": false,
+    "allPauseStartedAt": null,
+    "personallyPaused": false,
+    "personalPauseStartedAt": null,
+    "effectivePauseMinutes": null
+  },
   "createdBy": 5
 }
 
 foremanHourlyRate is included only when the current user is the owner FOREMAN of the shift. WORKER never receives it. For the MVP REST/mobile API, ADMIN does not receive foremanHourlyRate.
+
+pauseState is included for shift detail and managed-shift DTOs. For the owner FOREMAN it represents the foreman's own personal pause plus any all-participant pause.
 
 Response for ADMIN:
 
@@ -533,6 +542,13 @@ Status: 200 OK
   "actualEndTime": null,
   "defaultBreakMinutes": 0,
   "defaultHourlyRate": 15.00,
+  "pauseState": {
+    "allPaused": false,
+    "allPauseStartedAt": null,
+    "personallyPaused": false,
+    "personalPauseStartedAt": null,
+    "effectivePauseMinutes": null
+  },
   "createdBy": 5
 }
 
@@ -684,6 +700,13 @@ Status: 200 OK
   "defaultBreakMinutes": 0,
   "defaultHourlyRate": 15.00,
   "foremanHourlyRate": 25.00,
+  "pauseState": {
+    "allPaused": false,
+    "allPauseStartedAt": null,
+    "personallyPaused": false,
+    "personalPauseStartedAt": null,
+    "effectivePauseMinutes": null
+  },
   "createdBy": 5
 }
 
@@ -752,18 +775,23 @@ Access and state rules:
 - Only a shift with status ACTIVE can be closed.
 - actualStartTime must exist.
 - For each APPROVED attendance, the backend calculates and stores workedMinutes and calculatedSalary.
-- workedMinutes = minutes_between(actualStartTime, actualEndTime) - attendance.breakMinutes.
+- Close auto-ends any active personal or all-participant pause intervals at actualEndTime.
+- workedMinutes = minutes_between(actualStartTime, actualEndTime) - attendance.breakMinutes - effective pause minutes.
 - calculatedSalary = workedMinutes / 60 * attendance.hourlyRate, rounded to 2 decimal places with HALF_UP.
+- Effective pause minutes are the union of all-pause intervals and that user's personal pause intervals; overlapping intervals are not double-counted.
+- The backend persists each approved attendance pauseMinutes.
 - Salary uses the attendance hourlyRate snapshot or attendance-specific override, not shift.defaultHourlyRate.
 - JOINED, REJECTED, and CANCELLED attendance keep workedMinutes and calculatedSalary as null.
 - The backend calculates foremanWorkedMinutes and foremanSalary separately from worker attendance.
-- foremanWorkedMinutes = minutes_between(actualStartTime, actualEndTime) - shift.defaultBreakMinutes.
+- foremanWorkedMinutes = minutes_between(actualStartTime, actualEndTime) - shift.defaultBreakMinutes - foreman effective pause minutes.
+- The backend persists foremanPauseMinutes.
 - foremanSalary = foremanWorkedMinutes / 60 * shift.foremanHourlyRate, rounded to 2 decimal places with HALF_UP.
 - Foreman salary uses ShiftSession.foremanHourlyRate.
 - The backend must not create a ShiftAttendance row for foreman salary.
 - CANCELLED shifts cannot be closed and do not calculate salary.
 - If breakMinutes is greater than the shift duration, close returns 409 and the shift remains ACTIVE.
 - If defaultBreakMinutes is greater than the shift duration, close returns 409 and the shift remains ACTIVE.
+- If break plus effective pause minutes are greater than the shift duration, close returns 409 and the shift remains ACTIVE.
 
 Response:
 
@@ -844,6 +872,18 @@ Status: 409 Conflict
   "status": 409,
   "error": "Conflict",
   "message": "Break minutes cannot be greater than shift duration",
+  "path": "/api/v1/shifts/100/close"
+}
+
+Break plus pause is greater than shift duration:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T17:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Break and pause minutes cannot be greater than shift duration",
   "path": "/api/v1/shifts/100/close"
 }
 
@@ -1004,15 +1044,24 @@ Status: 200 OK
     "status": "JOINED",
     "hourlyRate": 15.00,
     "breakMinutes": 0,
+    "pauseMinutes": null,
     "workedMinutes": null,
     "calculatedSalary": null,
+    "pauseState": {
+      "allPaused": false,
+      "allPauseStartedAt": null,
+      "personallyPaused": false,
+      "personalPauseStartedAt": null,
+      "effectivePauseMinutes": null
+    },
     "joinedAt": "2026-07-06T18:00:00Z",
     "approvedAt": null
   }
 ]
 
-For APPROVED attendance after the shift is closed, workedMinutes and calculatedSalary contain the close-time calculation.
-For JOINED, REJECTED, and CANCELLED attendance, workedMinutes and calculatedSalary remain null.
+For APPROVED attendance after the shift is closed, pauseMinutes, workedMinutes, and calculatedSalary contain the close-time calculation.
+For JOINED, REJECTED, and CANCELLED attendance, pauseMinutes, workedMinutes, and calculatedSalary remain null.
+pauseState shows the all-pause state plus the listed worker's personal pause state. It does not expose foreman salary or rate fields.
 
 Missing, invalid, or expired token:
 
@@ -1180,34 +1229,159 @@ Status: 409 Conflict
   "path": "/api/v1/shifts/100/attendance/500/approve"
 }
 
-6. Salary Calculation
+6. Shift Pauses
 
-Pause system planning
+Pause is implemented for ACTIVE shifts. Pause is separate from static defaultBreakMinutes; close-time salary calculation subtracts both static break minutes and backend-tracked dynamic pause minutes.
 
-Pause is separate from static defaultBreakMinutes. Planned, not implemented yet.
+Pause endpoints do not accept a request body.
 
-The exact pause endpoints can be refined during a separate backend/mobile task, but the API should eventually support these use cases:
+Start my pause
 
-- WORKER starts/stops pause only for their own approved attendance on an ACTIVE shift.
-- FOREMAN starts/stops a self pause on their own ACTIVE shift.
-- FOREMAN starts/stops a global pause for everyone on their own ACTIVE shift.
-- Pause status is visible in future shift detail, attendance list, worker history/detail, and foreman managed shift/detail responses where relevant.
-- Salary calculation will subtract accumulated pause minutes after pause is implemented.
-- The backend persists pause intervals or an equivalent auditable model.
-- The backend avoids double-counting overlapping pause intervals, such as a worker self pause during a global pause.
+POST /api/v1/shifts/{shiftId}/pauses/me/start
+
+End my pause
+
+POST /api/v1/shifts/{shiftId}/pauses/me/end
+
+Start pause for all
+
+POST /api/v1/shifts/{shiftId}/pauses/all/start
+
+End pause for all
+
+POST /api/v1/shifts/{shiftId}/pauses/all/end
+
+Access and state rules:
+
+- `/pauses/me/*` is available to WORKER and FOREMAN.
+- WORKER can start/end only their own personal pause after joining the ACTIVE shift in their company.
+- FOREMAN can start/end only their own personal pause on a shift they created.
+- `/pauses/all/*` is available only to the owner FOREMAN.
+- ADMIN is not allowed to pause through the REST/mobile API.
+- Pause start/end is allowed only while shift status is ACTIVE.
+- OPEN, CLOSED, and CANCELLED shifts return 409 for pause start/end.
+- Duplicate start for the same active scope/target returns 409.
+- Ending when there is no active pause for that scope/target returns 409.
+- All-pause applies to the foreman and all workers on the shift.
+- Personal pause applies only to the targeted current user.
+- If personal and all-pause intervals overlap, close-time salary calculation subtracts the union of intervals without double-counting.
+- Close auto-ends active pause intervals at actualEndTime before calculating salary.
 - No client-side salary calculation is allowed.
 
-Planned pause endpoints can use this shape:
+Response:
 
-POST /api/v1/shifts/{shiftId}/pauses/self/start
+Status: 200 OK
 
-POST /api/v1/shifts/{shiftId}/pauses/self/stop
+{
+  "shiftId": 100,
+  "pauseId": 700,
+  "scope": "PERSONAL",
+  "userId": 10,
+  "active": true,
+  "startedAt": "2026-07-01T09:15:00Z",
+  "endedAt": null
+}
 
-POST /api/v1/shifts/{shiftId}/pauses/global/start
+All-pause responses omit userId:
 
-POST /api/v1/shifts/{shiftId}/pauses/global/stop
+{
+  "shiftId": 100,
+  "pauseId": 701,
+  "scope": "ALL",
+  "active": false,
+  "startedAt": "2026-07-01T10:00:00Z",
+  "endedAt": "2026-07-01T10:15:00Z"
+}
 
-Pause implementation should be a separate backend/mobile task.
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-01T09:15:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/shifts/100/pauses/me/start"
+}
+
+Forbidden role, non-owner FOREMAN, or worker who did not join the shift:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-01T09:15:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Worker must join this shift before pausing",
+  "path": "/api/v1/shifts/100/pauses/me/start"
+}
+
+Shift not found:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-01T09:15:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Shift not found",
+  "path": "/api/v1/shifts/100/pauses/me/start"
+}
+
+Shift is not ACTIVE:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T09:15:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Pause is available only while shift status is ACTIVE",
+  "path": "/api/v1/shifts/100/pauses/me/start"
+}
+
+Duplicate start:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T09:15:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Personal pause is already active",
+  "path": "/api/v1/shifts/100/pauses/me/start"
+}
+
+End without an active pause:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T09:15:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "No active personal pause to end",
+  "path": "/api/v1/shifts/100/pauses/me/end"
+}
+
+7. Salary Calculation
+
+The backend is the source of truth for salary. Mobile clients must display server fields and must not calculate worker or foreman salary locally.
+
+Static break minutes and dynamic pause minutes are both unpaid deductions. Dynamic pause minutes are calculated from persisted pause intervals and merged as a union for each participant so overlapping personal and all-participant pauses are not double-counted.
+
+Worker salary formula after close:
+
+worker_worked_minutes = actualEndTime - actualStartTime - attendance.breakMinutes - attendance.pauseMinutes
+worker_salary = worker_worked_minutes / 60 * attendance.hourlyRate
+
+Foreman salary formula after close:
+
+foreman_worked_minutes = actualEndTime - actualStartTime - shift.defaultBreakMinutes - shift.foremanPauseMinutes
+foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
+
+Salary is rounded to 2 decimal places with HALF_UP. Salary is calculated only when close succeeds.
 
 Get shift summary
 
@@ -1232,12 +1406,12 @@ Rules:
 - totalWorkers is the number of included APPROVED attendance records.
 - totalSalary is the sum of included worker calculatedSalary values with scale 2.
 - Worker summary remains limited to APPROVED worker attendance.
-- Salary results currently subtract static break minutes. Pause-minute subtraction is planned with the pause system.
+- Salary results subtract static break minutes and effective pause minutes.
 - CANCELLED shifts do not return summary because salary is not calculated.
 - Workers are sorted by lastName ascending, firstName ascending, then workerId ascending.
 - If an APPROVED attendance has null workedMinutes or calculatedSalary, the endpoint returns 409.
-- The owner FOREMAN receives private foreman salary fields separately from workers: foremanWorkedMinutes, foremanHourlyRate, and foremanSalary.
-- foremanWorkedMinutes uses actualEndTime - actualStartTime - ShiftSession.defaultBreakMinutes.
+- The owner FOREMAN receives private foreman salary fields separately from workers: foremanWorkedMinutes, foremanPauseMinutes, foremanHourlyRate, and foremanSalary.
+- foremanWorkedMinutes uses actualEndTime - actualStartTime - ShiftSession.defaultBreakMinutes - foremanPauseMinutes.
 - foremanSalary uses ShiftSession.foremanHourlyRate.
 - WORKER never receives foreman salary fields.
 - For the MVP REST/mobile API, ADMIN does not receive foreman salary fields.
@@ -1253,6 +1427,7 @@ Status: 200 OK
   "totalWorkers": 2,
   "totalSalary": 240.00,
   "foremanWorkedMinutes": 480,
+  "foremanPauseMinutes": 0,
   "foremanHourlyRate": 25.00,
   "foremanSalary": 200.00,
   "workers": [
@@ -1262,6 +1437,7 @@ Status: 200 OK
       "firstName": "John",
       "lastName": "Worker",
       "workedMinutes": 480,
+      "pauseMinutes": 0,
       "hourlyRate": 15.00,
       "salary": 120.00
     }
@@ -1284,6 +1460,7 @@ Status: 200 OK
       "firstName": "John",
       "lastName": "Worker",
       "workedMinutes": 480,
+      "pauseMinutes": 0,
       "hourlyRate": 15.00,
       "salary": 120.00
     }
@@ -1364,6 +1541,7 @@ Rules:
 - CLOSED shifts return workedMinutes and calculatedSalary when those values were already calculated and stored.
 - OPEN, ACTIVE, CANCELLED, and unapproved attendance may return null workedMinutes and calculatedSalary.
 - This endpoint reads stored attendance salary fields and does not recalculate salary.
+- The response includes pauseState for active shift display and pauseMinutes after close-time salary calculation.
 - Results are sorted by joinedAt descending, then attendanceId descending.
 - The response does not expose User entities, worker records, email, or passwordHash.
 - The repository fetches attendance with shift in one query to avoid N+1 loading.
@@ -1384,12 +1562,20 @@ Response:
     "attendanceStatus": "APPROVED",
     "hourlyRate": 15.00,
     "breakMinutes": 0,
+    "pauseMinutes": 0,
     "workedMinutes": 480,
-    "calculatedSalary": 120.00
+    "calculatedSalary": 120.00,
+    "pauseState": {
+      "allPaused": false,
+      "allPauseStartedAt": null,
+      "personallyPaused": false,
+      "personalPauseStartedAt": null,
+      "effectivePauseMinutes": 0
+    }
   }
 ]
 
-Worker history never returns foremanHourlyRate, foremanWorkedMinutes, or foremanSalary.
+Worker history never returns foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary.
 
 Missing, invalid, or expired token:
 
@@ -1441,6 +1627,13 @@ Status: 200 OK
     "defaultBreakMinutes": 0,
     "defaultHourlyRate": 15.00,
     "foremanHourlyRate": 25.00,
+    "pauseState": {
+      "allPaused": false,
+      "allPauseStartedAt": null,
+      "personallyPaused": false,
+      "personalPauseStartedAt": null,
+      "effectivePauseMinutes": null
+    },
     "createdBy": 5
   }
 ]
@@ -1477,7 +1670,7 @@ Status: 403 Forbidden
   "path": "/api/v1/me/managed-shifts"
 }
 
-7. Error Response Format
+8. Error Response Format
 
 All API errors should use this format:
 
@@ -1489,13 +1682,13 @@ All API errors should use this format:
   "path": "/api/v1/shifts/100/summary"
 }
 
-8. Authorization Rules
+9. Authorization Rules
 WORKER:
 - can see own profile
 - can join company by company join code
 - can join shift
 - can see own shift history
-- pause/resume self is planned, not implemented yet
+- can pause/resume self on ACTIVE shifts they joined in their company
 
 FOREMAN:
 - can create own company
@@ -1506,12 +1699,13 @@ FOREMAN:
 - can approve attendance
 - can see own managed shifts
 - can see shift summary
-- pause/resume self and global pause are planned, not implemented yet
+- can pause/resume self on own ACTIVE shifts
+- can pause/resume all participants on own ACTIVE shifts
 
 ADMIN:
 - can read shift detail, list attendance, approve attendance, and see worker-only shift summary through current REST endpoints
-- cannot create, start, close, or cancel shifts through the REST/mobile API
+- cannot create, start, close, cancel, or pause shifts through the REST/mobile API
 - can call `GET /api/v1/me/managed-shifts`, normally returning an empty list because ADMIN REST shift creation is disabled
-- does not receive foremanHourlyRate, foremanWorkedMinutes, or foremanSalary through the MVP REST/mobile API
+- does not receive foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary through the MVP REST/mobile API
 - full user management is deferred until after the mobile MVP and should be implemented through the Vaadin admin dashboard
 - mobile MVP has no ADMIN flow

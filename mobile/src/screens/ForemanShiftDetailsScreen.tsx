@@ -6,8 +6,12 @@ import {
   approveAttendance,
   cancelShift,
   closeShift,
+  endAllPause,
+  endMyPause,
   getShiftAttendance,
   getShiftById,
+  startAllPause,
+  startMyPause,
   startShift
 } from "../api/shifts";
 import { ApiError, getErrorMessage } from "../api/errors";
@@ -27,6 +31,12 @@ import {
   formatOptionalLocation,
   formatRate
 } from "../utils/format";
+import {
+  formatPauseMinutes,
+  getPauseActionErrorMessage,
+  isPaused,
+  missingPauseStateMessage
+} from "../utils/pauseDisplay";
 import { getAttendanceStatusTone, getShiftStatusTone } from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
 
@@ -35,7 +45,13 @@ type ForemanShiftDetailsScreenProps = NativeStackScreenProps<
   "ForemanShiftDetails"
 >;
 
-type MutationName = "approve" | "start" | "cancel" | "close";
+type MutationName =
+  | "approve"
+  | "start"
+  | "cancel"
+  | "close"
+  | "pause-self"
+  | "pause-all";
 
 function getShiftActionErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -206,6 +222,76 @@ export function ForemanShiftDetailsScreen({
       });
   };
 
+  const handleToggleSelfPause = () => {
+    if (!shift) {
+      return;
+    }
+
+    if (!shift.pauseState) {
+      setSuccessMessage(null);
+      setError(missingPauseStateMessage);
+      return;
+    }
+
+    if (!beginMutation({ type: "pause-self" })) {
+      return;
+    }
+
+    const wasPaused = shift.pauseState.personallyPaused;
+    const nextAction = wasPaused ? endMyPause : startMyPause;
+
+    setError(null);
+    setSuccessMessage(null);
+
+    void authenticatedRequest((token) => nextAction(token, shiftId))
+      .then(() => {
+        setSuccessMessage(wasPaused ? "Your pause ended." : "Your pause started.");
+        return refreshAfterMutation();
+      })
+      .catch((caughtError) => {
+        setError(getPauseActionErrorMessage(caughtError));
+      })
+      .finally(() => {
+        finishMutation();
+      });
+  };
+
+  const handleToggleAllPause = () => {
+    if (!shift) {
+      return;
+    }
+
+    if (!shift.pauseState) {
+      setSuccessMessage(null);
+      setError(missingPauseStateMessage);
+      return;
+    }
+
+    if (!beginMutation({ type: "pause-all" })) {
+      return;
+    }
+
+    const wasPaused = shift.pauseState.allPaused;
+    const nextAction = wasPaused ? endAllPause : startAllPause;
+
+    setError(null);
+    setSuccessMessage(null);
+
+    void authenticatedRequest((token) => nextAction(token, shiftId))
+      .then(() => {
+        setSuccessMessage(
+          wasPaused ? "Pause for everyone ended." : "Pause for everyone started."
+        );
+        return refreshAfterMutation();
+      })
+      .catch((caughtError) => {
+        setError(getPauseActionErrorMessage(caughtError));
+      })
+      .finally(() => {
+        finishMutation();
+      });
+  };
+
   const handleConfirmCancel = () => {
     if (mutationInFlightRef.current) {
       return;
@@ -243,6 +329,9 @@ export function ForemanShiftDetailsScreen({
   const canCancel = user?.role === "FOREMAN" && shift?.status === "OPEN";
   const canStart = shift?.status === "OPEN";
   const canClose = shift?.status === "ACTIVE";
+  const isActiveForemanShift = user?.role === "FOREMAN" && shift?.status === "ACTIVE";
+  const canPause = isActiveForemanShift && Boolean(shift?.pauseState);
+  const needsPauseStateRefresh = isActiveForemanShift && !shift?.pauseState;
   const canShowSummary = shift?.status === "CLOSED";
   const hasJoinedAttendance = attendance.some((item) => item.status === "JOINED");
 
@@ -268,6 +357,9 @@ export function ForemanShiftDetailsScreen({
           <>
             <View style={styles.badges}>
               <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
+              {isPaused(shift.pauseState) ? (
+                <StatusBadge label="PAUSED" tone="warning" />
+              ) : null}
             </View>
 
             <View style={styles.panel}>
@@ -301,6 +393,38 @@ export function ForemanShiftDetailsScreen({
                   loading={mutation?.type === "cancel"}
                   onPress={handleConfirmCancel}
                   variant="secondary"
+                />
+              ) : null}
+              {canPause ? (
+                <>
+                  <Button
+                    disabled={isMutating}
+                    label={
+                      shift.pauseState?.personallyPaused
+                        ? "Resume myself"
+                        : "Pause myself"
+                    }
+                    loading={mutation?.type === "pause-self"}
+                    onPress={handleToggleSelfPause}
+                    variant="secondary"
+                  />
+                  <Button
+                    disabled={isMutating}
+                    label={
+                      shift.pauseState?.allPaused
+                        ? "Resume everyone"
+                        : "Pause everyone"
+                    }
+                    loading={mutation?.type === "pause-all"}
+                    onPress={handleToggleAllPause}
+                    variant="secondary"
+                  />
+                </>
+              ) : null}
+              {needsPauseStateRefresh ? (
+                <StateMessage
+                  title="Pause state unavailable"
+                  message={missingPauseStateMessage}
                 />
               ) : null}
               {canClose ? (
@@ -353,10 +477,15 @@ export function ForemanShiftDetailsScreen({
                             </Text>
                             <Text style={styles.workerMeta}>Worker #{item.workerId}</Text>
                           </View>
-                          <StatusBadge
-                            label={item.status}
-                            tone={getAttendanceStatusTone(item.status)}
-                          />
+                          <View style={styles.attendanceBadges}>
+                            <StatusBadge
+                              label={item.status}
+                              tone={getAttendanceStatusTone(item.status)}
+                            />
+                            {isPaused(item.pauseState) ? (
+                              <StatusBadge label="PAUSED" tone="warning" />
+                            ) : null}
+                          </View>
                         </View>
 
                         <View style={styles.compactRows}>
@@ -364,6 +493,10 @@ export function ForemanShiftDetailsScreen({
                           <DetailRow label="Approved" value={formatDateTime(item.approvedAt)} />
                           <DetailRow label="Hourly rate" value={formatRate(item.hourlyRate)} />
                           <DetailRow label="Break" value={`${item.breakMinutes} min`} />
+                          <DetailRow
+                            label="Pause time"
+                            value={formatPauseMinutes(item.pauseMinutes)}
+                          />
                           <DetailRow label="Worked time" value={formatMinutes(item.workedMinutes)} />
                           <DetailRow
                             label="Calculated salary"
@@ -472,6 +605,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-start",
     gap: spacing.md
+  },
+  attendanceBadges: {
+    alignItems: "flex-end",
+    gap: spacing.xs
   },
   workerNameBlock: {
     flex: 1,

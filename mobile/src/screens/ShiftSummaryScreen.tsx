@@ -13,6 +13,7 @@ import { useAuth } from "../context/AuthContext";
 import type { ForemanStackParamList } from "../types/navigation";
 import type { ShiftSummary } from "../types/shifts";
 import { formatMoney, formatMinutes, formatRate } from "../utils/format";
+import { formatPauseMinutes } from "../utils/pauseDisplay";
 import { getShiftStatusTone } from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
 
@@ -103,6 +104,12 @@ export function ShiftSummaryScreen({ navigation, route }: ShiftSummaryScreenProp
                       value={formatMinutes(summary.foremanWorkedMinutes)}
                     />
                   ) : null}
+                  {summary.foremanPauseMinutes !== undefined ? (
+                    <DetailRow
+                      label="Pause time"
+                      value={formatPauseMinutes(summary.foremanPauseMinutes)}
+                    />
+                  ) : null}
                   {summary.foremanHourlyRate !== undefined ? (
                     <DetailRow
                       label="Hourly rate"
@@ -132,6 +139,10 @@ export function ShiftSummaryScreen({ navigation, route }: ShiftSummaryScreenProp
                       </Text>
                       <View style={styles.compactRows}>
                         <DetailRow label="Worked time" value={formatMinutes(worker.workedMinutes)} />
+                        <DetailRow
+                          label="Pause time"
+                          value={formatPauseMinutes(worker.pauseMinutes)}
+                        />
                         <DetailRow label="Hourly rate" value={formatRate(worker.hourlyRate)} />
                         <DetailRow label="Salary" value={formatMoney(worker.salary)} />
                       </View>

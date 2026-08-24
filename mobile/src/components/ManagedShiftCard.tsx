@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { ManagedShift } from "../types/shifts";
 import { formatDateTime, formatOptionalLocation, formatRate } from "../utils/format";
+import { isPaused } from "../utils/pauseDisplay";
 import { getShiftStatusTone } from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
 import { StatusBadge } from "./StatusBadge";
@@ -33,7 +34,12 @@ export function ManagedShiftCard({ shift, onPress }: ManagedShiftCardProps) {
             {shift.companyName}
           </Text>
         </View>
-        <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
+        <View style={styles.badges}>
+          <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
+          {isPaused(shift.pauseState) ? (
+            <StatusBadge label="PAUSED" tone="warning" />
+          ) : null}
+        </View>
       </View>
 
       <View style={styles.metaGrid}>
@@ -87,6 +93,10 @@ const styles = StyleSheet.create({
   },
   titleBlock: {
     flex: 1,
+    gap: spacing.xs
+  },
+  badges: {
+    alignItems: "flex-end",
     gap: spacing.xs
   },
   title: {

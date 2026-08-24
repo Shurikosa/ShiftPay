@@ -106,12 +106,12 @@ Follow-up backend tasks:
 - [x] Remove Default Company fallback for real MVP shifts
 - [ ] Remove planned time inputs from create shift API/mobile contract
 - [x] Generate shift title automatically from date/time and company name
-- [ ] Add `foremanHourlyRate` to shift creation and ShiftSession
-- [ ] Calculate private foreman salary on close and summary
-- [ ] Keep foreman salary separate from worker attendance; do not create ShiftAttendance for foreman salary
+- [x] Add `foremanHourlyRate` to shift creation and ShiftSession
+- [x] Calculate private foreman salary on close and summary
+- [x] Keep foreman salary separate from worker attendance; do not create ShiftAttendance for foreman salary
 - [x] Implement shift cancel endpoint and lifecycle rules
-- [ ] Make `defaultBreakMinutes` optional and default it to 0
-- [ ] Implement pause system in a separate task
+- [x] Make `defaultBreakMinutes` optional and default it to 0
+- [x] Implement pause system for active shifts
 - [ ] Set default JWT expiration to 8 hours
 
 Follow-up mobile tasks:
@@ -124,7 +124,7 @@ Follow-up mobile tasks:
 - [x] Update summary screen to show worker summary plus private owner-foreman salary fields
 - [x] Implement shift cancel UI after backend endpoint is ready
 - [x] Make `defaultBreakMinutes` optional and default it to 0 in mobile forms
-- [ ] Implement pause system in a separate backend/mobile task
+- [x] Implement pause UI and API client calls using backend pause endpoints
 
 ## Milestone 7: Mobile Foundation
 

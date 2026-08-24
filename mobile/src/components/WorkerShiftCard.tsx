@@ -6,6 +6,7 @@ import {
   formatMinutes,
   formatOptionalLocation
 } from "../utils/format";
+import { isPaused } from "../utils/pauseDisplay";
 import { getAttendanceStatusTone, getShiftStatusTone } from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
 import { StatusBadge } from "./StatusBadge";
@@ -44,7 +45,12 @@ export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
             {shift.companyName}
           </Text>
         </View>
-        <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
+        <View style={styles.badges}>
+          <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
+          {isPaused(shift.pauseState) ? (
+            <StatusBadge label="PAUSED" tone="warning" />
+          ) : null}
+        </View>
       </View>
 
       <Text style={styles.time}>
@@ -84,6 +90,10 @@ const styles = StyleSheet.create({
   },
   titleBlock: {
     flex: 1,
+    gap: spacing.xs
+  },
+  badges: {
+    alignItems: "flex-end",
     gap: spacing.xs
   },
   title: {

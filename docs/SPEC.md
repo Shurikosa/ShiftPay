@@ -87,16 +87,13 @@ A foreman can:
 - set the default hourly rate for a shift
 - set their own hourly rate for a shift
 - cancel an OPEN shift before it starts
+- pause themselves during an ACTIVE shift
+- pause everyone during an ACTIVE shift
 - view shifts they created and manage
 - view shift summary
 - view worker salary summary
 - view their own private foreman salary summary
 - see company name in the mobile app
-
-Planned later:
-
-- pause themselves
-- pause everyone on an active shift
 
 ### 4.3 Admin
 
@@ -134,20 +131,16 @@ Basic flow:
 15. If the shift should not happen, Foreman cancels the OPEN shift before it starts.
 16. Otherwise, Foreman starts the shift.
 17. System records shift start time as actualStartTime.
-18. Foreman closes the shift.
-19. System records shift end time as actualEndTime.
-20. System calculates worked time for approved worker attendance, subtracting static break minutes.
-21. System calculates salary for approved worker attendance.
-22. System calculates the foreman's private salary from ShiftSession.foremanHourlyRate without creating ShiftAttendance for the foreman.
-23. Worker can view their own worker result.
-24. Foreman can view shift summary, including worker salary summary and their own private foreman salary.
-25. Foreman can view the list of shifts they created and manage.
-
-Planned later:
-
-- During an ACTIVE shift, workers can pause and resume themselves.
-- During an ACTIVE shift, foreman can pause and resume themselves or everyone.
-- Salary calculation subtracts accumulated pause minutes after pause tracking is implemented.
+18. During the ACTIVE shift, workers can pause and resume themselves.
+19. During the ACTIVE shift, foreman can pause and resume themselves or everyone.
+20. Foreman closes the shift.
+21. System records shift end time as actualEndTime and closes any active pause intervals at actualEndTime.
+22. System calculates worked time for approved worker attendance, subtracting static break minutes and effective pause minutes.
+23. System calculates salary for approved worker attendance.
+24. System calculates the foreman's private salary from ShiftSession.foremanHourlyRate without creating ShiftAttendance for the foreman.
+25. Worker can view their own worker result.
+26. Foreman can view shift summary, including worker salary summary and their own private foreman salary.
+27. Foreman can view the list of shifts they created and manage.
 
 ## 6. Shift Statuses
 
@@ -229,9 +222,19 @@ Rules:
 
 ## 10. Pause Rules
 
-Planned, not implemented yet.
+Implemented for the mobile MVP.
 
-Pause is separate from static defaultBreakMinutes and should be implemented in a separate backend/mobile task.
+Pause is separate from static defaultBreakMinutes.
+
+Endpoints:
+
+POST /api/v1/shifts/{shiftId}/pauses/me/start
+
+POST /api/v1/shifts/{shiftId}/pauses/me/end
+
+POST /api/v1/shifts/{shiftId}/pauses/all/start
+
+POST /api/v1/shifts/{shiftId}/pauses/all/end
 
 WORKER can start and stop pause only for themselves.
 
@@ -240,18 +243,28 @@ FOREMAN can:
 - pause themselves
 - pause everyone on the shift
 
+Rules:
+
+- Pause is available only while shift status is ACTIVE.
+- OPEN, CLOSED, and CANCELLED shifts cannot be paused or resumed.
+- WORKER must already have joined the shift in their company.
+- FOREMAN must own the shift.
+- ADMIN cannot pause through the REST/mobile API.
+- duplicate start for the same active pause target/scope returns conflict
+- ending when no pause is active for the target/scope returns conflict
+- pause for all applies to the foreman and all workers on the shift
+- personal pause applies only to the target user
+- overlapping personal and all-pause intervals are merged as a union for salary calculation, without double-counting
+- closing the shift automatically closes any active pause intervals at actualEndTime
+
 Pause status must be visible:
 
 - worker dashboard/details shows whether the worker is paused or global pause is active
 - foreman details/dashboard shows global pause status, foreman self pause status, and worker pause status
 
-Salary calculation must subtract accumulated pause minutes.
+Salary calculation subtracts accumulated effective pause minutes.
 
-The backend needs persistence for pause intervals or an equivalent auditable model.
-
-The implementation should avoid double-counting overlapping pause intervals, such as a worker self pause during a global pause.
-
-Exact pause endpoints can be refined during implementation.
+The backend persists pause intervals with start/end timestamps, scope, shift, and affected user for personal pauses.
 
 No client-side salary calculation is allowed.
 
@@ -259,7 +272,7 @@ No client-side salary calculation is allowed.
 
 Basic formula:
 
-worked_minutes = shift_end_time - shift_start_time - break_minutes
+worked_minutes = shift_end_time - shift_start_time - break_minutes - effective_pause_minutes
 salary = worked_minutes / 60 * hourly_rate
 
 Example:
@@ -274,12 +287,12 @@ salary = 8 * 15 = 120 EUR/DOL
 
 Worker salary:
 
-worker_worked_minutes = actualEndTime - actualStartTime - attendance.breakMinutes
+worker_worked_minutes = actualEndTime - actualStartTime - attendance.breakMinutes - attendance.pauseMinutes
 worker_salary = worker_worked_minutes / 60 * attendance.hourlyRate
 
 Foreman salary:
 
-foreman_worked_minutes = actualEndTime - actualStartTime - shift.defaultBreakMinutes
+foreman_worked_minutes = actualEndTime - actualStartTime - shift.defaultBreakMinutes - shift.foremanPauseMinutes
 foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
 
 ## 12. Important Salary Rules
@@ -302,9 +315,9 @@ foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
 -Only APPROVED attendance receives worked minutes and calculated salary.
 -JOINED, REJECTED, and CANCELLED attendance keep worked minutes and calculated salary empty.
 -Salary calculation uses the attendance hourly rate snapshot or override.
--Salary calculation will subtract accumulated pause minutes after the separate pause system is implemented.
+-Salary calculation subtracts accumulated effective pause minutes.
 -Static defaultBreakMinutes is optional and defaults to 0.
--Dynamic pauses are separate from defaultBreakMinutes and planned separately.
+-Dynamic pauses are separate from defaultBreakMinutes.
 -Worker salary is calculated from ShiftAttendance.hourlyRate and must not use ShiftSession.foremanHourlyRate.
 -Foreman salary is calculated separately from worker attendance using ShiftSession.foremanHourlyRate.
 -The system must not create a ShiftAttendance row for foreman salary.
@@ -312,7 +325,7 @@ foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
 -WORKER never receives foreman salary fields.
 -For the MVP REST/mobile API, ADMIN does not receive foreman salary fields.
 -Calculated salary is rounded to 2 decimal places with HALF_UP.
--Closing fails if actualStartTime is missing or break time is greater than the shift duration.
+-Closing fails if actualStartTime is missing, break time is greater than the shift duration, or break plus pause minutes are greater than the shift duration.
 
 13. Authentication
 
@@ -401,10 +414,11 @@ calculate private foreman salary
 worker shift history
 foreman shift summary
 cancel shift
+dynamic pause tracking
 
 Planned follow-up:
 
-dynamic pause tracking
+none documented for backend/mobile shift lifecycle at this point
 
 Optional:
 
