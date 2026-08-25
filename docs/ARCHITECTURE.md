@@ -50,6 +50,7 @@ AuthService
 CompanyService
 ShiftService
 AttendanceService
+PauseService
 SalaryCalculationService
 Repositories
 
@@ -307,10 +308,13 @@ Salary Calculation
 - foremanSalary is stored or returned with scale 2 and RoundingMode.HALF_UP.
 - Static defaultBreakMinutes is optional and defaults to 0.
 - Dynamic pauses are separate from defaultBreakMinutes.
-- Static break minutes, or static break plus effective pause minutes, that exceed the payable duration clamp paid minutes and salary to zero for workers and the private foreman salary.
+- Overlapping pause intervals must not be double-counted.
+- Static break minutes, or static break plus effective pause minutes, that exceed the payable duration clamp paid minutes and
+salary to zero for workers and the private foreman salary.
 - CANCELLED shifts do not calculate salary.
 - No client should calculate worker or foreman salary.
-- Close fails with 409 if actualStartTime is missing or salary inputs are negative where request validation normally prevents them.
+- Close fails with 409 if actualStartTime is missing or salary inputs are negative where request validation normally prevents
+them.
 - Close is transactional: when salary validation fails, the shift remains ACTIVE and attendance salary fields are not written.
 
 Pause System

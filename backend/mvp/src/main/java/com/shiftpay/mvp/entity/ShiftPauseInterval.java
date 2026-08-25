@@ -17,47 +17,45 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
 
 /**
- * User account entity for authentication and role-based authorization.
+ * Auditable pause interval for a shift.
  *
- * <p>Controllers never return this entity directly because it contains the password hash. Public responses use
- * {@code UserResponse} instead.</p>
+ * <p>PERSONAL intervals target one user. ALL intervals target everyone on the active shift and keep {@code user}
+ * empty.</p>
  */
 @Getter
 @Entity
-@Table(name = "users")
-public class User {
+@Table(name = "shift_pause_intervals")
+public class ShiftPauseInterval {
 
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long id;
 
 	@Setter
-	@Column(nullable = false, unique = true, length = 255)
-	private String email;
-
-	@Setter
-	@Column(name = "password_hash", nullable = false, length = 255)
-	private String passwordHash;
-
-	@Setter
-	@Column(name = "first_name", nullable = false, length = 100)
-	private String firstName;
-
-	@Setter
-	@Column(name = "last_name", nullable = false, length = 100)
-	private String lastName;
+	@ManyToOne(fetch = FetchType.LAZY, optional = false)
+	@JoinColumn(name = "shift_session_id", nullable = false)
+	private ShiftSession shiftSession;
 
 	@Setter
 	@Enumerated(EnumType.STRING)
 	@Column(nullable = false, length = 32)
-	private Role role;
+	private PauseScope scope;
 
 	@Setter
 	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "company_id")
-	private Company company;
+	@JoinColumn(name = "user_id")
+	private User user;
+
+	@Setter
+	@Column(name = "started_at", nullable = false)
+	private OffsetDateTime startedAt;
+
+	@Setter
+	@Column(name = "ended_at")
+	private OffsetDateTime endedAt;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
@@ -66,7 +64,7 @@ public class User {
 	private Instant updatedAt;
 
 	/**
-	 * Sets creation and update timestamps before the user is first persisted.
+	 * Sets creation and update timestamps before the interval is first persisted.
 	 */
 	@PrePersist
 	void prePersist() {
@@ -76,11 +74,10 @@ public class User {
 	}
 
 	/**
-	 * Refreshes the update timestamp before an existing user is stored.
+	 * Refreshes the update timestamp before an existing interval is stored.
 	 */
 	@PreUpdate
 	void preUpdate() {
 		updatedAt = Instant.now();
 	}
-
 }

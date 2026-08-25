@@ -57,8 +57,17 @@ class MvpApplicationTests {
 		assertThat(countRows("companies")).isNotNegative();
 		assertThat(countRows("shift_sessions")).isNotNegative();
 		assertThat(countRows("shift_attendance")).isNotNegative();
+		assertThat(countRows("shift_pause_intervals")).isNotNegative();
+		assertThat(countColumn("companies", "join_code")).isEqualTo(1);
+		assertThat(countColumn("users", "company_id")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "default_hourly_rate")).isEqualTo(1);
-		assertThat(latestFlywayVersion()).isEqualTo("5");
+		assertThat(countColumn("shift_sessions", "foreman_hourly_rate")).isEqualTo(1);
+		assertThat(countColumn("shift_sessions", "foreman_worked_minutes")).isEqualTo(1);
+		assertThat(countColumn("shift_sessions", "foreman_pause_minutes")).isEqualTo(1);
+		assertThat(countColumn("shift_sessions", "foreman_calculated_salary")).isEqualTo(1);
+		assertThat(countColumn("shift_attendance", "pause_minutes")).isEqualTo(1);
+		assertThat(countColumn("shift_attendance", "payable_start_time")).isEqualTo(1);
+		assertThat(latestFlywayVersion()).isEqualTo("9");
 	}
 
 	/**

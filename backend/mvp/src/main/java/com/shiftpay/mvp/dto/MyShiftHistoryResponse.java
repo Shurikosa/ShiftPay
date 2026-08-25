@@ -16,34 +16,40 @@ import java.time.OffsetDateTime;
  *
  * @param shiftId shift session id
  * @param attendanceId attendance id belonging to the current user
+ * @param companyId company assigned to the shift
+ * @param companyName company display name assigned to the shift
  * @param title shift title
  * @param location optional shift location
  * @param status current shift status
- * @param plannedStartTime planned start time in UTC, if set
- * @param plannedEndTime planned end time in UTC, if set
  * @param actualStartTime actual shift start time in UTC, if started
  * @param actualEndTime actual shift end time in UTC, if closed
  * @param attendanceStatus current attendance status for the user
  * @param hourlyRate attendance rate snapshot or override
  * @param breakMinutes break minutes stored on attendance
+ * @param payableStartTime effective worker payable start time, or null before it is known
+ * @param pauseMinutes persisted pause minutes deducted after close, or null before salary calculation
  * @param workedMinutes persisted worked minutes after close, or null
  * @param calculatedSalary persisted salary after close, or null
+ * @param pauseState pause state for the current user's attendance
  */
 public record MyShiftHistoryResponse(
 		Long shiftId,
 		Long attendanceId,
+		Long companyId,
+		String companyName,
 		String title,
 		String location,
 		ShiftStatus status,
-		OffsetDateTime plannedStartTime,
-		OffsetDateTime plannedEndTime,
 		OffsetDateTime actualStartTime,
 		OffsetDateTime actualEndTime,
 		AttendanceStatus attendanceStatus,
 		BigDecimal hourlyRate,
 		Integer breakMinutes,
+		OffsetDateTime payableStartTime,
+		Integer pauseMinutes,
 		Integer workedMinutes,
-		BigDecimal calculatedSalary
+		BigDecimal calculatedSalary,
+		PauseStateResponse pauseState
 ) {
 
 	/**
@@ -53,22 +59,52 @@ public record MyShiftHistoryResponse(
 	 * @return personal shift history response DTO
 	 */
 	public static MyShiftHistoryResponse from(ShiftAttendance attendance) {
+		return from(attendance, PauseStateResponse.none(), null);
+	}
+
+	/**
+	 * Maps attendance with its shift and pause state to the personal history response.
+	 *
+	 * @param attendance attendance entity for the current user
+	 * @param pauseState pause state for the current user's attendance
+	 * @return personal shift history response DTO
+	 */
+	public static MyShiftHistoryResponse from(ShiftAttendance attendance, PauseStateResponse pauseState) {
+		return from(attendance, pauseState, null);
+	}
+
+	/**
+	 * Maps attendance with its shift, pause state, and effective payable start to the personal history response.
+	 *
+	 * @param attendance attendance entity for the current user
+	 * @param pauseState pause state for the current user's attendance
+	 * @param payableStartTime effective worker payable start time
+	 * @return personal shift history response DTO
+	 */
+	public static MyShiftHistoryResponse from(
+			ShiftAttendance attendance,
+			PauseStateResponse pauseState,
+			OffsetDateTime payableStartTime
+	) {
 		ShiftSession shiftSession = attendance.getShiftSession();
 		return new MyShiftHistoryResponse(
 				shiftSession.getId(),
 				attendance.getId(),
+				shiftSession.getCompany().getId(),
+				shiftSession.getCompany().getName(),
 				shiftSession.getTitle(),
 				shiftSession.getLocation(),
 				shiftSession.getStatus(),
-				shiftSession.getPlannedStartTime(),
-				shiftSession.getPlannedEndTime(),
 				shiftSession.getActualStartTime(),
 				shiftSession.getActualEndTime(),
 				attendance.getStatus(),
 				attendance.getHourlyRate(),
 				attendance.getBreakMinutes(),
+				payableStartTime,
+				attendance.getPauseMinutes(),
 				attendance.getWorkedMinutes(),
-				attendance.getCalculatedSalary()
+				attendance.getCalculatedSalary(),
+				pauseState
 		);
 	}
 }

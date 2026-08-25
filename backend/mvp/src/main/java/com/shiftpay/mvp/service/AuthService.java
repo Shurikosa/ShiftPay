@@ -80,7 +80,7 @@ public class AuthService {
 	@Transactional(readOnly = true)
 	public LoginResponse login(LoginRequest request) {
 		String normalizedEmail = normalizeEmail(request.email());
-		User user = userRepository.findByEmail(normalizedEmail)
+		User user = userRepository.findWithCompanyByEmail(normalizedEmail)
 				.orElseThrow(InvalidCredentialsException::new);
 
 		if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {

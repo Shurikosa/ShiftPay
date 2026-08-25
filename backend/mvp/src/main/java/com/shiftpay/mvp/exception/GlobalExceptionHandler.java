@@ -86,6 +86,36 @@ public class GlobalExceptionHandler {
 	}
 
 	/**
+	 * Handles company onboarding conflicts such as creating or joining a second company.
+	 *
+	 * @param exception company conflict exception
+	 * @param request current HTTP request
+	 * @return 409 Conflict error response
+	 */
+	@ExceptionHandler(CompanyConflictException.class)
+	public ResponseEntity<ErrorResponse> handleCompanyConflictException(
+			CompanyConflictException exception,
+			HttpServletRequest request
+	) {
+		return buildError(HttpStatus.CONFLICT, exception.getMessage(), request);
+	}
+
+	/**
+	 * Handles missing company rows or unknown company join codes.
+	 *
+	 * @param exception company not found exception
+	 * @param request current HTTP request
+	 * @return 404 Not Found error response
+	 */
+	@ExceptionHandler(CompanyNotFoundException.class)
+	public ResponseEntity<ErrorResponse> handleCompanyNotFoundException(
+			CompanyNotFoundException exception,
+			HttpServletRequest request
+	) {
+		return buildError(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+	}
+
+	/**
 	 * Handles registration attempts with an already registered email.
 	 *
 	 * @param exception duplicate email exception
@@ -112,7 +142,7 @@ public class GlobalExceptionHandler {
 			ForbiddenException exception,
 			HttpServletRequest request
 	) {
-		return buildError(HttpStatus.FORBIDDEN, "Forbidden", request);
+		return buildError(HttpStatus.FORBIDDEN, exception.getMessage(), request);
 	}
 
 	/**

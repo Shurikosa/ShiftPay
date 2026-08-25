@@ -402,7 +402,7 @@ Request:
   "foremanHourlyRate": 25.00
 }
 
-Response:
+Response for owner FOREMAN:
 
 Status: 201 Created
 
@@ -992,6 +992,18 @@ Status: 403 Forbidden
   "path": "/api/v1/shifts/join"
 }
 
+Worker is not a company member:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-01T07:55:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Worker must join the company before joining this shift",
+  "path": "/api/v1/shifts/join"
+}
+
 List shift attendance
 
 Only FOREMAN or ADMIN.
@@ -1448,6 +1460,36 @@ Status: 200 OK
   "status": "CLOSED",
   "totalWorkers": 2,
   "totalSalary": 240.00,
+  "foremanWorkedMinutes": 480,
+  "foremanPauseMinutes": 0,
+  "foremanHourlyRate": 25.00,
+  "foremanSalary": 200.00,
+  "workers": [
+    {
+      "attendanceId": 500,
+      "workerId": 1,
+      "firstName": "John",
+      "lastName": "Worker",
+      "workedMinutes": 480,
+      "pauseMinutes": 0,
+      "hourlyRate": 15.00,
+      "salary": 120.00
+    }
+  ]
+}
+
+Response for ADMIN:
+
+Status: 200 OK
+
+{
+  "shiftId": 100,
+  "status": "CLOSED",
+  "totalWorkers": 2,
+  "totalSalary": 240.00,
+  "foremanWorkedMinutes": 480,
+  "foremanHourlyRate": 25.00,
+  "foremanSalary": 200.00,
   "workers": [
     {
       "attendanceId": 500,
@@ -1556,6 +1598,8 @@ Response:
     "actualStartTime": "2026-07-01T08:05:00Z",
     "actualEndTime": "2026-07-01T17:00:00Z",
     "attendanceStatus": "APPROVED",
+    "paused": false,
+    "globalPauseActive": false,
     "hourlyRate": 15.00,
     "breakMinutes": 0,
     "payableStartTime": "2026-07-01T08:05:00Z",
