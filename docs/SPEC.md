@@ -81,6 +81,7 @@ A foreman can:
 - create a shift session
 - start a shift
 - close a shift
+- cancel an OPEN shift before it starts
 - invite workers or share join code
 - approve joined workers
 - set break duration
@@ -425,6 +426,8 @@ create shift session
 join shift by code
 start shift
 close shift
+cancel shift
+dynamic pause tracking
 calculate worked time
 calculate worker salary
 calculate private foreman salary

@@ -55,7 +55,8 @@ Foreman tasks:
 - see company name in the dashboard or main menu
 - share the join code with workers
 - approve joined workers
-- start, pause, cancel, and close shifts
+- start, cancel, and close shifts
+- pause themselves or pause everyone during an active shift
 - see closed-shift summary
 
 Admin users are not a mobile MVP target. Admin user management is deferred to
@@ -251,6 +252,8 @@ Content:
 - primary action to join a shift
 - shortcut to shift history
 - recent joined shifts if available
+- pause status if the worker has an active joined shift:
+  worker paused, global pause active, or not paused
 
 API calls:
 
@@ -304,6 +307,7 @@ Content:
 - company name
 - shift status
 - attendance status
+- pause status when active
 - actual date/time when available
 - salary when calculated
 
