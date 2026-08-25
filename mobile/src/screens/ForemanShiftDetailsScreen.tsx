@@ -333,6 +333,7 @@ export function ForemanShiftDetailsScreen({
   const canPause = isActiveForemanShift && Boolean(shift?.pauseState);
   const needsPauseStateRefresh = isActiveForemanShift && !shift?.pauseState;
   const canShowSummary = shift?.status === "CLOSED";
+  const canApproveAttendance = shift?.status === "OPEN" || shift?.status === "ACTIVE";
   const hasJoinedAttendance = attendance.some((item) => item.status === "JOINED");
 
   return (
@@ -460,13 +461,17 @@ export function ForemanShiftDetailsScreen({
               ) : attendance.length === 0 ? (
                 <StateMessage
                   title="No workers joined"
-                  message="Share the join code with workers while the shift is open."
+                  message={
+                    canApproveAttendance
+                      ? "Share the join code with workers while the shift is open or active."
+                      : "No attendance records were created for this shift."
+                  }
                 />
               ) : (
                 <View style={styles.list}>
                   {attendance.map((item) => {
                     const canApprove =
-                      shift.status === "OPEN" && item.status === "JOINED";
+                      canApproveAttendance && item.status === "JOINED";
 
                     return (
                       <View key={item.attendanceId} style={styles.attendanceCard}>
@@ -491,6 +496,12 @@ export function ForemanShiftDetailsScreen({
                         <View style={styles.compactRows}>
                           <DetailRow label="Joined" value={formatDateTime(item.joinedAt)} />
                           <DetailRow label="Approved" value={formatDateTime(item.approvedAt)} />
+                          {item.payableStartTime !== undefined ? (
+                            <DetailRow
+                              label="Payable start"
+                              value={formatDateTime(item.payableStartTime)}
+                            />
+                          ) : null}
                           <DetailRow label="Hourly rate" value={formatRate(item.hourlyRate)} />
                           <DetailRow label="Break" value={`${item.breakMinutes} min`} />
                           <DetailRow
@@ -524,7 +535,7 @@ export function ForemanShiftDetailsScreen({
                 </View>
               )}
 
-              {!loading && shift.status === "OPEN" && attendance.length > 0 && !hasJoinedAttendance ? (
+              {!loading && canApproveAttendance && attendance.length > 0 && !hasJoinedAttendance ? (
                 <StateMessage
                   title="No pending approvals"
                   message="All joined workers have already been processed."

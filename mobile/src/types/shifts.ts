@@ -37,6 +37,7 @@ export interface WorkerShiftHistoryItem {
   attendanceStatus: AttendanceStatus;
   hourlyRate: number;
   breakMinutes: number;
+  payableStartTime?: string | null;
   pauseMinutes?: number | null;
   workedMinutes: number | null;
   calculatedSalary: number | null;
@@ -92,6 +93,7 @@ export interface ShiftAttendance {
   status: AttendanceStatus;
   hourlyRate: number;
   breakMinutes: number;
+  payableStartTime?: string | null;
   pauseMinutes?: number | null;
   workedMinutes: number | null;
   calculatedSalary: number | null;

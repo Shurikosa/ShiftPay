@@ -18,9 +18,10 @@ import {
   formatRate
 } from "../utils/format";
 import {
+  allPauseActiveMessage,
   formatPauseMinutes,
   getPauseActionErrorMessage,
-  isPaused,
+  getWorkerPauseBadgeLabel,
   missingPauseStateMessage
 } from "../utils/pauseDisplay";
 import { getAttendanceStatusTone, getShiftStatusTone } from "../utils/status";
@@ -91,9 +92,21 @@ export function WorkerShiftDetailsScreen({
   };
 
   const handleTogglePause = () => {
+    if (shift.status !== "ACTIVE" || shift.attendanceStatus !== "APPROVED") {
+      setSuccessMessage(null);
+      setError("Pause is available after foreman approval during an active shift.");
+      return;
+    }
+
     if (!shift.pauseState) {
       setSuccessMessage(null);
       setError(missingPauseStateMessage);
+      return;
+    }
+
+    if (shift.pauseState.allPaused) {
+      setSuccessMessage(null);
+      setError(allPauseActiveMessage);
       return;
     }
 
@@ -122,12 +135,18 @@ export function WorkerShiftDetailsScreen({
   };
 
   const isMutating = mutation !== null;
-  const isActiveJoinedShift =
+  const isActiveWorkerShift =
     shift.status === "ACTIVE" &&
     shift.attendanceStatus !== "REJECTED" &&
     shift.attendanceStatus !== "CANCELLED";
-  const canPause = isActiveJoinedShift && Boolean(shift.pauseState);
-  const needsPauseStateRefresh = isActiveJoinedShift && !shift.pauseState;
+  const isApprovedActiveShift =
+    isActiveWorkerShift && shift.attendanceStatus === "APPROVED";
+  const isPendingActiveJoin =
+    shift.status === "ACTIVE" && shift.attendanceStatus === "JOINED";
+  const isAllPaused = Boolean(shift.pauseState?.allPaused);
+  const pauseBadgeLabel = getWorkerPauseBadgeLabel(shift.pauseState);
+  const canPause = isApprovedActiveShift && Boolean(shift.pauseState) && !isAllPaused;
+  const needsPauseStateRefresh = isApprovedActiveShift && !shift.pauseState;
 
   return (
     <Screen>
@@ -144,8 +163,8 @@ export function WorkerShiftDetailsScreen({
             label={shift.attendanceStatus}
             tone={getAttendanceStatusTone(shift.attendanceStatus)}
           />
-          {isPaused(shift.pauseState) ? (
-            <StatusBadge label="PAUSED" tone="warning" />
+          {pauseBadgeLabel ? (
+            <StatusBadge label={pauseBadgeLabel} tone="warning" />
           ) : null}
         </View>
 
@@ -153,11 +172,29 @@ export function WorkerShiftDetailsScreen({
           <StateMessage title="Updated" message={successMessage} tone="success" />
         ) : null}
         {error ? <StateMessage title="Pause action failed" message={error} tone="error" /> : null}
+        {isPendingActiveJoin ? (
+          <StateMessage
+            title="Waiting for approval"
+            message="Your foreman must approve this shift before pause or resume is available."
+          />
+        ) : null}
+        {isApprovedActiveShift && isAllPaused ? (
+          <StateMessage
+            title="Paused by foreman"
+            message={allPauseActiveMessage}
+          />
+        ) : null}
 
         <View style={styles.panel}>
           <DetailRow label="Company" value={shift.companyName} />
           <DetailRow label="Actual start" value={formatDateTime(shift.actualStartTime)} />
           <DetailRow label="Actual end" value={formatDateTime(shift.actualEndTime)} />
+          {shift.payableStartTime !== undefined ? (
+            <DetailRow
+              label="Payable start"
+              value={formatDateTime(shift.payableStartTime)}
+            />
+          ) : null}
           <DetailRow label="Hourly rate" value={formatRate(shift.hourlyRate)} />
           <DetailRow label="Break" value={`${shift.breakMinutes} min`} />
           <DetailRow label="Pause time" value={formatPauseMinutes(shift.pauseMinutes)} />
@@ -180,7 +217,7 @@ export function WorkerShiftDetailsScreen({
             message={missingPauseStateMessage}
           />
         ) : null}
-        {isActiveJoinedShift ? (
+        {isActiveWorkerShift ? (
           <Button
             disabled={isMutating}
             label="Refresh"

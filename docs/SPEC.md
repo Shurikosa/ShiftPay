@@ -64,7 +64,7 @@ A worker can:
 - create an account
 - log in
 - join a company by company join code
-- join an open shift session
+- join an OPEN shift before it starts or join an ACTIVE shift as a late worker
 - join only shifts that belong to their company
 - join without entering or selecting an hourly rate
 - leave or finish a shift if allowed
@@ -126,21 +126,22 @@ Basic flow:
 10. Worker joins the session only if they are already a member of that shift's company.
 11. Worker joins the session without providing an hourly rate.
 12. System copies the shift default hourly rate into the worker attendance record as a snapshot.
-13. While the shift is OPEN, the foreman approves joined workers and may override the rate for an individual attendance.
+13. While the shift is OPEN or ACTIVE, the foreman approves joined workers and may override the rate for an individual attendance.
 14. If no rate override is provided, the attendance keeps its join-time rate snapshot.
 15. If the shift should not happen, Foreman cancels the OPEN shift before it starts.
-16. Otherwise, Foreman starts the shift.
+16. Foreman starts the shift.
 17. System records shift start time as actualStartTime.
-18. During the ACTIVE shift, workers can pause and resume themselves.
-19. During the ACTIVE shift, foreman can pause and resume themselves or everyone.
-20. Foreman closes the shift.
-21. System records shift end time as actualEndTime and closes any active pause intervals at actualEndTime.
-22. System calculates worked time for approved worker attendance, subtracting static break minutes and effective pause minutes.
-23. System calculates salary for approved worker attendance.
-24. System calculates the foreman's private salary from ShiftSession.foremanHourlyRate without creating ShiftAttendance for the foreman.
-25. Worker can view their own worker result.
-26. Foreman can view shift summary, including worker salary summary and their own private foreman salary.
-27. Foreman can view the list of shifts they created and manage.
+18. During the ACTIVE shift, late workers may join by shift join code and wait for approval.
+19. During the ACTIVE shift, workers with approved attendance can pause and resume themselves.
+20. During the ACTIVE shift, foreman can pause and resume themselves or everyone.
+21. Foreman closes the shift.
+22. System records shift end time as actualEndTime and closes any active pause intervals at actualEndTime.
+23. System calculates worked time for approved worker attendance, subtracting static break minutes and effective pause minutes.
+24. System calculates salary for approved worker attendance.
+25. System calculates the foreman's private salary from ShiftSession.foremanHourlyRate without creating ShiftAttendance for the foreman.
+26. Worker can view their own worker result.
+27. Foreman can view shift summary, including worker salary summary and their own private foreman salary.
+28. Foreman can view the list of shifts they created and manage.
 
 ## 6. Shift Statuses
 
@@ -198,6 +199,10 @@ WORKER joins a company by company join code.
 
 WORKER can join a shift only if they are already a member of that shift's company.
 
+WORKER can join by shift join code when the shift is OPEN or ACTIVE.
+
+WORKER cannot join CLOSED or CANCELLED shifts.
+
 Company name must be visible in the main menu or dashboard for FOREMAN and WORKER.
 
 The mobile MVP should not use or show Default Company for real shifts.
@@ -247,12 +252,13 @@ Rules:
 
 - Pause is available only while shift status is ACTIVE.
 - OPEN, CLOSED, and CANCELLED shifts cannot be paused or resumed.
-- WORKER must already have joined the shift in their company.
+- WORKER must already have approved attendance on the ACTIVE shift in their company.
 - FOREMAN must own the shift.
 - ADMIN cannot pause through the REST/mobile API.
 - duplicate start for the same active pause target/scope returns conflict
 - ending when no pause is active for the target/scope returns conflict
 - pause for all applies to the foreman and all workers on the shift
+- pause for all affects late workers only from their payable start onward
 - personal pause applies only to the target user
 - overlapping personal and all-pause intervals are merged as a union for salary calculation, without double-counting
 - closing the shift automatically closes any active pause intervals at actualEndTime
@@ -272,7 +278,9 @@ No client-side salary calculation is allowed.
 
 Basic formula:
 
-worked_minutes = shift_end_time - shift_start_time - break_minutes - effective_pause_minutes
+duration_minutes = shift_end_time - shift_start_time
+unpaid_minutes = break_minutes + effective_pause_minutes
+worked_minutes = max(0, duration_minutes - unpaid_minutes)
 salary = worked_minutes / 60 * hourly_rate
 
 Example:
@@ -287,17 +295,22 @@ salary = 8 * 15 = 120 EUR/DOL
 
 Worker salary:
 
-worker_worked_minutes = actualEndTime - actualStartTime - attendance.breakMinutes - attendance.pauseMinutes
+worker_payable_start = actualStartTime if attendance was approved before shift start, or approvedAt/payableStartTime if attendance was approved while ACTIVE
+worker_duration_minutes = actualEndTime - worker_payable_start
+worker_unpaid_minutes = attendance.breakMinutes + attendance.pauseMinutes
+worker_worked_minutes = max(0, worker_duration_minutes - worker_unpaid_minutes)
 worker_salary = worker_worked_minutes / 60 * attendance.hourlyRate
 
 Foreman salary:
 
-foreman_worked_minutes = actualEndTime - actualStartTime - shift.defaultBreakMinutes - shift.foremanPauseMinutes
+foreman_duration_minutes = actualEndTime - actualStartTime
+foreman_unpaid_minutes = shift.defaultBreakMinutes + shift.foremanPauseMinutes
+foreman_worked_minutes = max(0, foreman_duration_minutes - foreman_unpaid_minutes)
 foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
 
 ## 12. Important Salary Rules
 -Salary must not be negative.
--Break time cannot be greater than total shift time.
+-Break time and pause time cannot make paid minutes negative; paid minutes clamp to 0.
 -If shift is not closed, final salary should not be calculated.
 -Cancelled shifts do not calculate final salary.
 -Hourly rate should be stored for the attendance record, because rates can change later.
@@ -316,6 +329,10 @@ foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
 -JOINED, REJECTED, and CANCELLED attendance keep worked minutes and calculated salary empty.
 -Salary calculation uses the attendance hourly rate snapshot or override.
 -Salary calculation subtracts accumulated effective pause minutes.
+-Salary calculation for late approved workers starts from the worker payable start time, not the global shift actualStartTime.
+-Dynamic pause calculations are clipped to each worker's payable work interval.
+-Static break minutes, or static break plus pause minutes, that exceed a worker's payable duration clamp worker worked minutes and salary to 0.
+-Static break minutes, or static break plus pause minutes, that exceed the foreman's payable duration clamp foreman worked minutes and salary to 0.
 -Static defaultBreakMinutes is optional and defaults to 0.
 -Dynamic pauses are separate from defaultBreakMinutes.
 -Worker salary is calculated from ShiftAttendance.hourlyRate and must not use ShiftSession.foremanHourlyRate.
@@ -325,7 +342,7 @@ foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
 -WORKER never receives foreman salary fields.
 -For the MVP REST/mobile API, ADMIN does not receive foreman salary fields.
 -Calculated salary is rounded to 2 decimal places with HALF_UP.
--Closing fails if actualStartTime is missing, break time is greater than the shift duration, or break plus pause minutes are greater than the shift duration.
+-Closing fails if actualStartTime is missing or salary input values are negative where request validation normally prevents them.
 
 13. Authentication
 

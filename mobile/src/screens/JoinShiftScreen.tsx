@@ -1,7 +1,7 @@
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { getErrorMessage } from "../api/errors";
+import { ApiError, getErrorMessage } from "../api/errors";
 import { joinShiftByCode } from "../api/shifts";
 import { Button } from "../components/Button";
 import { FormField } from "../components/FormField";
@@ -14,6 +14,18 @@ import { colors, spacing, typography } from "../utils/theme";
 import { isBlank } from "../utils/validation";
 
 type JoinShiftScreenProps = NativeStackScreenProps<WorkerStackParamList, "JoinShift">;
+
+function getJoinShiftErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status === 409) {
+    if (error.message.toLowerCase().includes("already joined")) {
+      return error.message;
+    }
+
+    return "This shift can no longer be joined.";
+  }
+
+  return getErrorMessage(error);
+}
 
 export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
   const { authenticatedRequest, user } = useAuth();
@@ -61,7 +73,7 @@ export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
         navigation.replace("WorkerDashboard");
       })
       .catch((caughtError) => {
-        setError(getErrorMessage(caughtError));
+        setError(getJoinShiftErrorMessage(caughtError));
       })
       .finally(() => {
         setSubmitting(false);
@@ -102,7 +114,9 @@ export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
         <View style={styles.header}>
           <Text style={styles.kicker}>Worker</Text>
           <Text style={styles.title}>Join shift</Text>
-          <Text style={styles.subtitle}>Enter the code shared by your foreman.</Text>
+          <Text style={styles.subtitle}>
+            Enter the code shared by your foreman for an open or active shift.
+          </Text>
         </View>
 
         {successMessage ? (

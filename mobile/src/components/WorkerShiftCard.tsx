@@ -6,7 +6,7 @@ import {
   formatMinutes,
   formatOptionalLocation
 } from "../utils/format";
-import { isPaused } from "../utils/pauseDisplay";
+import { getWorkerPauseBadgeLabel } from "../utils/pauseDisplay";
 import { getAttendanceStatusTone, getShiftStatusTone } from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
 import { StatusBadge } from "./StatusBadge";
@@ -18,6 +18,10 @@ type WorkerShiftCardProps = {
 
 export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
   const startTime = shift.actualStartTime ?? null;
+  const payableStartTime = shift.payableStartTime ?? null;
+  const approvalLabel =
+    shift.attendanceStatus === "JOINED" ? "Waiting for foreman approval" : null;
+  const pauseBadgeLabel = getWorkerPauseBadgeLabel(shift.pauseState);
   const salaryLabel =
     shift.calculatedSalary === null ? "Salary pending" : `Salary ${formatMoney(shift.calculatedSalary)}`;
   const workedLabel =
@@ -47,8 +51,8 @@ export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
         </View>
         <View style={styles.badges}>
           <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
-          {isPaused(shift.pauseState) ? (
-            <StatusBadge label="PAUSED" tone="warning" />
+          {pauseBadgeLabel ? (
+            <StatusBadge label={pauseBadgeLabel} tone="warning" />
           ) : null}
         </View>
       </View>
@@ -63,6 +67,12 @@ export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
           tone={getAttendanceStatusTone(shift.attendanceStatus)}
         />
         <View style={styles.numbers}>
+          {approvalLabel ? <Text style={styles.metaText}>{approvalLabel}</Text> : null}
+          {payableStartTime ? (
+            <Text style={styles.metaText}>
+              Pay starts {formatDateTime(payableStartTime)}
+            </Text>
+          ) : null}
           <Text style={styles.metaText}>{workedLabel}</Text>
           <Text style={styles.metaText}>{salaryLabel}</Text>
         </View>
