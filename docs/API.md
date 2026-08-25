@@ -1461,6 +1461,33 @@ Status: 200 OK
   "totalWorkers": 2,
   "totalSalary": 240.00,
   "foremanWorkedMinutes": 480,
+  "foremanPauseMinutes": 0,
+  "foremanHourlyRate": 25.00,
+  "foremanSalary": 200.00,
+  "workers": [
+    {
+      "attendanceId": 500,
+      "workerId": 1,
+      "firstName": "John",
+      "lastName": "Worker",
+      "workedMinutes": 480,
+      "pauseMinutes": 0,
+      "hourlyRate": 15.00,
+      "salary": 120.00
+    }
+  ]
+}
+
+Response for ADMIN:
+
+Status: 200 OK
+
+{
+  "shiftId": 100,
+  "status": "CLOSED",
+  "totalWorkers": 2,
+  "totalSalary": 240.00,
+  "foremanWorkedMinutes": 480,
   "foremanHourlyRate": 25.00,
   "foremanSalary": 200.00,
   "workers": [

@@ -117,37 +117,37 @@ Follow-up backend tasks:
 
 Follow-up mobile tasks:
 
-- [ ] Add foreman company onboarding
-- [ ] Add worker company join
-- [ ] Show company name in dashboards/menu
-- [ ] Update `CreateShiftScreen` after backend create-shift contract changes
-- [ ] Update shift details to show generated title, backend actual times, and owner-foreman rate visibility
-- [ ] Update summary screen to show worker summary plus private owner-foreman salary fields
-- [ ] Implement shift cancel UI after backend endpoint is ready
-- [ ] Make `defaultBreakMinutes` optional and default it to 0 in mobile forms
-- [ ] Implement pause UI and API client calls using backend pause endpoints
-- [ ] Update join/approval UI copy for ACTIVE late joins and backend `payableStartTime`
+- [x] Add foreman company onboarding
+- [x] Add worker company join
+- [x] Show company name in dashboards/menu
+- [x] Update `CreateShiftScreen` after backend create-shift contract changes
+- [x] Update shift details to show generated title, backend actual times, and owner-foreman rate visibility
+- [x] Update summary screen to show worker summary plus private owner-foreman salary fields
+- [x] Implement shift cancel UI after backend endpoint is ready
+- [x] Make `defaultBreakMinutes` optional and default it to 0 in mobile forms
+- [x] Implement pause UI and API client calls using backend pause endpoints
+- [x] Update join/approval UI copy for ACTIVE late joins and backend `payableStartTime`
 
 ## Milestone 7: Mobile Foundation
 
 - [x] Add mobile MVP UX plan
-- [ ] Create React Native / Expo project in `mobile/`
-- [ ] Add TypeScript
-- [ ] Add navigation
-- [ ] Add API client structure
-- [ ] Add environment configuration
-- [ ] Create login screen
-- [ ] Create register screen
+- [x] Create React Native / Expo project in `mobile/`
+- [x] Add TypeScript
+- [x] Add navigation
+- [x] Add API client structure
+- [x] Add environment configuration
+- [x] Create login screen
+- [x] Create register screen
 
 ## Milestone 8: Mobile MVP Screens
 
-- [ ] Worker dashboard
-- [ ] Foreman dashboard
-- [ ] Join shift screen
-- [ ] Create shift screen
-- [ ] Shift details screen
-- [ ] Shift summary screen
-- [ ] My shift history screen
+- [x] Worker dashboard
+- [x] Foreman dashboard
+- [x] Join shift screen
+- [x] Create shift screen
+- [x] Shift details screen
+- [x] Shift summary screen
+- [x] My shift history screen
 
 ## Milestone 9: Infrastructure
 
