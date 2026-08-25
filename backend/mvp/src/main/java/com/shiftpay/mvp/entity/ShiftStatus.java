@@ -25,7 +25,7 @@ public enum ShiftStatus {
 	CLOSED,
 
 	/**
-	 * Reserved terminal state for cancelled shifts in later workflows.
+	 * Terminal state for open shifts cancelled before they start.
 	 */
 	CANCELLED
 }

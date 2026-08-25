@@ -2,11 +2,13 @@ package com.shiftpay.mvp.controller;
 
 import com.shiftpay.mvp.TestDataCleaner;
 import com.shiftpay.mvp.entity.AttendanceStatus;
+import com.shiftpay.mvp.entity.Company;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftAttendance;
 import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.ShiftStatus;
 import com.shiftpay.mvp.entity.User;
+import com.shiftpay.mvp.repository.CompanyRepository;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
@@ -34,7 +36,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.matchesPattern;
+import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -44,7 +49,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * Controller integration tests for shift session endpoints.
  *
- * <p>The class covers create, get, start, close, and summary APIs with MockMvc. It verifies role access,
+ * <p>The class covers create, get, start, cancel, close, and summary APIs with MockMvc. It verifies role access,
  * foreman ownership, shift lifecycle conflicts, salary persistence on close, summary response rules, and DTO fields
  * that must not expose entities or internal timestamps.</p>
  */
@@ -54,6 +59,8 @@ class ShiftSessionControllerTests {
 
 	private static final String REGISTER_URL = "/api/v1/auth/register";
 	private static final String LOGIN_URL = "/api/v1/auth/login";
+	private static final String CREATE_COMPANY_URL = "/api/v1/companies";
+	private static final String JOIN_COMPANY_URL = "/api/v1/companies/join";
 	private static final String CREATE_SHIFT_URL = "/api/v1/shifts";
 	private static final String JOIN_SHIFT_URL = "/api/v1/shifts/join";
 	private static final Pattern ACCESS_TOKEN_PATTERN = Pattern.compile("\"accessToken\":\"([^\"]+)\"");
@@ -66,6 +73,9 @@ class ShiftSessionControllerTests {
 
 	@Autowired
 	private JdbcTemplate jdbcTemplate;
+
+	@Autowired
+	private CompanyRepository companyRepository;
 
 	@Autowired
 	private ShiftAttendanceRepository shiftAttendanceRepository;
@@ -89,7 +99,7 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
-	 * Creates a shift as a FOREMAN and expects an OPEN shift with the requested default hourly rate persisted.
+	 * Creates a shift as a FOREMAN without title or planned times and expects generated shift metadata.
 	 */
 	@Test
 	void foremanCanCreateShift() throws Exception {
@@ -101,32 +111,61 @@ class ShiftSessionControllerTests {
 						.content(validCreateShiftPayload("Foreman shift")))
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.id").isNumber())
-				.andExpect(jsonPath("$.title").value("Foreman shift"))
+				.andExpect(jsonPath("$.companyId").isNumber())
+				.andExpect(jsonPath("$.companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$.title").value(matchesPattern("[A-Za-z]+ \\d{2}:\\d{2} - Acme Construction")))
+				.andExpect(jsonPath("$.title").value(containsString("Acme Construction")))
+				.andExpect(jsonPath("$.location").value("Cologne"))
 				.andExpect(jsonPath("$.joinCode").isString())
 				.andExpect(jsonPath("$.status").value("OPEN"))
+				.andExpect(jsonPath("$.actualStartTime").value(nullValue()))
+				.andExpect(jsonPath("$.actualEndTime").value(nullValue()))
+				.andExpect(jsonPath("$.defaultBreakMinutes").value(60))
 				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25))
-				.andExpect(jsonPath("$.createdBy").isNumber());
+				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
+				.andExpect(jsonPath("$.createdBy").isNumber())
+				.andExpect(jsonPath("$.plannedStartTime").doesNotExist())
+				.andExpect(jsonPath("$.plannedEndTime").doesNotExist())
+				.andExpect(jsonPath("$.*", hasSize(13)));
 
 		assertThat(shiftSessionRepository.count()).isEqualTo(1);
-		assertThat(shiftSessionRepository.findAll().getFirst().getDefaultHourlyRate())
-				.isEqualByComparingTo("15.25");
+		ShiftSession createdShift = shiftSessionRepository.findAll().getFirst();
+		Long foremanCompanyId = jdbcTemplate.queryForObject(
+				"select company_id from users where email = ?",
+				Long.class,
+				"foreman@example.com"
+		);
+		Long shiftCompanyId = jdbcTemplate.queryForObject(
+				"select company_id from shift_sessions where id = ?",
+				Long.class,
+				createdShift.getId()
+		);
+		assertThat(shiftCompanyId).isEqualTo(foremanCompanyId);
+		assertThat(createdShift.getTitle()).contains("Acme Construction");
+		assertThat(createdShift.getPlannedStartTime()).isNull();
+		assertThat(createdShift.getPlannedEndTime()).isNull();
+		assertThat(createdShift.getActualStartTime()).isNull();
+		assertThat(createdShift.getActualEndTime()).isNull();
+		assertThat(createdShift.getDefaultHourlyRate()).isEqualByComparingTo("15.25");
+		assertThat(createdShift.getForemanHourlyRate()).isEqualByComparingTo("25.00");
 	}
 
 	/**
-	 * Creates a shift as an ADMIN, which is allowed to manage any shift in the MVP contract.
+	 * Attempts shift creation as ADMIN and expects the mobile MVP REST contract to reject lifecycle writes.
 	 */
 	@Test
-	void adminCanCreateShift() throws Exception {
+	void adminCannotCreateShift() throws Exception {
 		String accessToken = createAdminAndLogin();
 
 		mockMvc.perform(post(CREATE_SHIFT_URL)
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
 						.contentType(MediaType.APPLICATION_JSON)
 						.content(validCreateShiftPayload("Admin shift")))
-				.andExpect(status().isCreated())
-				.andExpect(jsonPath("$.title").value("Admin shift"))
-				.andExpect(jsonPath("$.status").value("OPEN"))
-				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25));
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
 	}
 
 	/**
@@ -174,12 +213,10 @@ class ShiftSessionControllerTests {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{
-								  "title": "Invalid break shift",
 								  "location": "Cologne",
-								  "plannedStartTime": "2026-07-01T08:00:00",
-								  "plannedEndTime": "2026-07-01T17:00:00",
 								  "defaultBreakMinutes": -1,
-								  "defaultHourlyRate": 15.25
+								  "defaultHourlyRate": 15.25,
+								  "foremanHourlyRate": 25.00
 								}
 								"""))
 				.andExpect(status().isBadRequest())
@@ -189,30 +226,53 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
-	 * Sends planned end before planned start and expects the service business validation message.
+	 * Attempts shift creation before company onboarding and expects the MVP company requirement to return 409.
 	 */
 	@Test
-	void invalidPlannedTimeOrderReturnsBadRequest() throws Exception {
-		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+	void foremanCannotCreateShiftWithoutCompany() throws Exception {
+		String accessToken = registerAndLoginWithoutCompany("foreman@example.com", "FOREMAN");
 
 		mockMvc.perform(post(CREATE_SHIFT_URL)
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
 						.contentType(MediaType.APPLICATION_JSON)
-						.content("""
-								{
-								  "title": "Invalid time shift",
-								  "location": "Cologne",
-								  "plannedStartTime": "2026-07-01T17:00:00",
-								  "plannedEndTime": "2026-07-01T08:00:00",
-								  "defaultBreakMinutes": 60,
-								  "defaultHourlyRate": 15.25
-								}
-								"""))
-				.andExpect(status().isBadRequest())
-				.andExpect(jsonPath("$.status").value(400))
-				.andExpect(jsonPath("$.error").value("Bad Request"))
-				.andExpect(jsonPath("$.message").value("plannedEndTime must be after plannedStartTime"))
+						.content(validCreateShiftPayload("No company shift")))
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message")
+						.value("Foreman must create a company before creating shifts"))
 				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
+	}
+
+	/**
+	 * Sends legacy title and planned fields and expects create to ignore them for the MVP contract.
+	 */
+	@Test
+	void plannedFieldsAreNotUsedByCreateContract() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		MvcResult result = createShiftWithPayload(accessToken, """
+				{
+				  "title": "Client supplied title",
+				  "location": "Cologne",
+				  "plannedStartTime": "2026-07-01T17:00:00",
+				  "plannedEndTime": "2026-07-01T08:00:00",
+				  "defaultBreakMinutes": 60,
+				  "defaultHourlyRate": 15.25,
+				  "foremanHourlyRate": 25.00
+				}
+				""")
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.title").value(containsString("Acme Construction")))
+				.andExpect(jsonPath("$.title").value(not("Client supplied title")))
+				.andExpect(jsonPath("$.plannedStartTime").doesNotExist())
+				.andExpect(jsonPath("$.plannedEndTime").doesNotExist())
+				.andReturn();
+
+		ShiftSession shift = shiftSessionRepository.findById(extractShiftId(result)).orElseThrow();
+		assertThat(shift.getTitle()).isNotEqualTo("Client supplied title");
+		assertThat(shift.getPlannedStartTime()).isNull();
+		assertThat(shift.getPlannedEndTime()).isNull();
 	}
 
 	/**
@@ -250,18 +310,23 @@ class ShiftSessionControllerTests {
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.id").value(shiftId))
-				.andExpect(jsonPath("$.title").value("Owner shift"))
+				.andExpect(jsonPath("$.companyId").isNumber())
+				.andExpect(jsonPath("$.companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$.title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$.location").value("Cologne"))
 				.andExpect(jsonPath("$.status").value("OPEN"))
 				.andExpect(jsonPath("$.joinCode").isString())
-				.andExpect(jsonPath("$.plannedStartTime").value("2026-07-01T08:00:00Z"))
-				.andExpect(jsonPath("$.plannedEndTime").value("2026-07-01T17:00:00Z"))
 				.andExpect(jsonPath("$.actualStartTime").value(nullValue()))
 				.andExpect(jsonPath("$.actualEndTime").value(nullValue()))
 				.andExpect(jsonPath("$.defaultBreakMinutes").value(60))
 				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25))
+				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
+				.andExpect(jsonPath("$.pauseState.allPaused").value(false))
+				.andExpect(jsonPath("$.pauseState.personallyPaused").value(false))
 				.andExpect(jsonPath("$.createdBy").isNumber())
-				.andExpect(jsonPath("$.*", hasSize(12)))
+				.andExpect(jsonPath("$.plannedStartTime").doesNotExist())
+				.andExpect(jsonPath("$.plannedEndTime").doesNotExist())
+				.andExpect(jsonPath("$.*", hasSize(14)))
 				.andExpect(jsonPath("$.company").doesNotExist())
 				.andExpect(jsonPath("$.createdAt").doesNotExist())
 				.andExpect(jsonPath("$.updatedAt").doesNotExist());
@@ -298,7 +363,11 @@ class ShiftSessionControllerTests {
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.id").value(shiftId))
-				.andExpect(jsonPath("$.title").value("Foreman shift"));
+				.andExpect(jsonPath("$.companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$.title").value(containsString("Acme Construction")))
+				.andExpect(jsonPath("$.foremanHourlyRate").doesNotExist())
+				.andExpect(jsonPath("$.pauseState.allPaused").value(false))
+				.andExpect(jsonPath("$.*", hasSize(13)));
 	}
 
 	/**
@@ -398,20 +467,21 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
-	 * Starts a foreman-owned shift as ADMIN and expects lifecycle transition access to succeed.
+	 * Attempts to start a shift as ADMIN and expects the mobile MVP REST contract to reject lifecycle writes.
 	 */
 	@Test
-	void adminStartsAnyShift() throws Exception {
+	void adminCannotStartShift() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
 		long shiftId = createShift(foremanToken, "Foreman shift");
 		String adminToken = createAdminAndLogin();
 
 		mockMvc.perform(post(startShiftUrl(shiftId))
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.id").value(shiftId))
-				.andExpect(jsonPath("$.status").value("ACTIVE"))
-				.andExpect(jsonPath("$.actualStartTime").isString());
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(startShiftUrl(shiftId)));
 	}
 
 	/**
@@ -513,6 +583,202 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
+	 * Cancels an OPEN shift as owner FOREMAN and expects a CANCELLED shift without actual times.
+	 */
+	@Test
+	void ownerForemanCanCancelOpenShift() throws Exception {
+		String accessToken = registerAndLogin("owner@example.com", "FOREMAN");
+		long shiftId = createShift(accessToken, "Owner shift");
+
+		cancelShift(accessToken, shiftId)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.id").value(shiftId))
+				.andExpect(jsonPath("$.companyId").isNumber())
+				.andExpect(jsonPath("$.companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$.status").value("CANCELLED"))
+				.andExpect(jsonPath("$.actualStartTime").value(nullValue()))
+				.andExpect(jsonPath("$.actualEndTime").value(nullValue()))
+				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
+				.andExpect(jsonPath("$.pauseState.allPaused").value(false))
+				.andExpect(jsonPath("$.*", hasSize(14)));
+
+		ShiftSession persistedShift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		assertThat(persistedShift.getStatus()).isEqualTo(ShiftStatus.CANCELLED);
+		assertThat(persistedShift.getActualStartTime()).isNull();
+		assertThat(persistedShift.getActualEndTime()).isNull();
+		assertThat(persistedShift.getForemanWorkedMinutes()).isNull();
+		assertThat(persistedShift.getForemanCalculatedSalary()).isNull();
+	}
+
+	/**
+	 * Attempts to cancel a shift as WORKER and expects role-based authorization to reject the request.
+	 */
+	@Test
+	void workerCannotCancelShift() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Foreman shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+
+		cancelShift(workerToken, shiftId)
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(cancelShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Attempts to cancel a shift as ADMIN and expects the mobile MVP REST contract to reject lifecycle writes.
+	 */
+	@Test
+	void adminCannotCancelShift() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Foreman shift");
+		String adminToken = createAdminAndLogin();
+
+		cancelShift(adminToken, shiftId)
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(cancelShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Attempts to cancel another foreman's shift and expects ownership checks to return 403.
+	 */
+	@Test
+	void anotherForemanCannotCancelShift() throws Exception {
+		String ownerToken = registerAndLogin("owner@example.com", "FOREMAN");
+		long shiftId = createShift(ownerToken, "Owner shift");
+		String anotherForemanToken = registerAndLogin("another@example.com", "FOREMAN");
+
+		cancelShift(anotherForemanToken, shiftId)
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(cancelShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Attempts to cancel an ACTIVE shift and expects a lifecycle conflict.
+	 */
+	@Test
+	void cannotCancelStartedShift() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createActiveShift(accessToken, "Active shift");
+
+		cancelShift(accessToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift can only be cancelled before it starts"))
+				.andExpect(jsonPath("$.path").value(cancelShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Attempts to cancel a CLOSED shift and expects a lifecycle conflict.
+	 */
+	@Test
+	void cannotCancelClosedShift() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createActiveShift(accessToken, "Closed shift");
+		closeShift(accessToken, shiftId).andExpect(status().isOk());
+
+		cancelShift(accessToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift can only be cancelled before it starts"))
+				.andExpect(jsonPath("$.path").value(cancelShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Cancels the same shift twice and expects the second call to fail because cancel is not idempotent.
+	 */
+	@Test
+	void repeatedCancelReturnsConflict() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(accessToken, "Cancelled shift");
+
+		cancelShift(accessToken, shiftId).andExpect(status().isOk());
+
+		cancelShift(accessToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift can only be cancelled before it starts"))
+				.andExpect(jsonPath("$.path").value(cancelShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Cancels an OPEN shift, then expects start to reject the terminal CANCELLED state.
+	 */
+	@Test
+	void cannotStartCancelledShift() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(accessToken, "Cancelled shift");
+
+		cancelShift(accessToken, shiftId).andExpect(status().isOk());
+
+		startShift(accessToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift can only be started when status is OPEN"))
+				.andExpect(jsonPath("$.path").value(startShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Cancels an OPEN shift, then expects close to reject the terminal CANCELLED state.
+	 */
+	@Test
+	void cannotCloseCancelledShift() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(accessToken, "Cancelled shift");
+
+		cancelShift(accessToken, shiftId).andExpect(status().isOk());
+
+		closeShift(accessToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift can only be closed when status is ACTIVE"))
+				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
+	}
+
+	/**
+	 * Cancels a shift with approved attendance and expects no salary persistence and no summary availability.
+	 */
+	@Test
+	void cancelledShiftDoesNotCalculateSalaryAndSummaryIsUnavailable() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Cancelled summary shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
+		approveAttendance(foremanToken, shiftId, attendanceId, "{}").andExpect(status().isOk());
+
+		cancelShift(foremanToken, shiftId).andExpect(status().isOk());
+
+		ShiftSession persistedShift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		assertThat(persistedShift.getStatus()).isEqualTo(ShiftStatus.CANCELLED);
+		assertThat(persistedShift.getForemanWorkedMinutes()).isNull();
+		assertThat(persistedShift.getForemanCalculatedSalary()).isNull();
+		assertThat(attendance.getStatus()).isEqualTo(AttendanceStatus.APPROVED);
+		assertThat(attendance.getWorkedMinutes()).isNull();
+		assertThat(attendance.getCalculatedSalary()).isNull();
+
+		getSummary(foremanToken, shiftId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.status").value(409))
+				.andExpect(jsonPath("$.error").value("Conflict"))
+				.andExpect(jsonPath("$.message").value("Shift summary is available only for CLOSED shifts"))
+				.andExpect(jsonPath("$.path").value(summaryUrl(shiftId)));
+	}
+
+	/**
 	 * Closes an ACTIVE shift as owner FOREMAN and expects CLOSED status plus an actual end timestamp.
 	 */
 	@Test
@@ -546,19 +812,20 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
-	 * Closes a foreman-created active shift as ADMIN, proving admin lifecycle access is global.
+	 * Attempts to close a shift as ADMIN and expects the mobile MVP REST contract to reject lifecycle writes.
 	 */
 	@Test
-	void adminClosesAnyActiveShift() throws Exception {
+	void adminCannotCloseShift() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
 		long shiftId = createActiveShift(foremanToken, "Foreman shift");
 		String adminToken = createAdminAndLogin();
 
 		closeShift(adminToken, shiftId)
-				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.id").value(shiftId))
-				.andExpect(jsonPath("$.status").value("CLOSED"))
-				.andExpect(jsonPath("$.actualEndTime").isString());
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Forbidden"))
+				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
 	}
 
 	/**
@@ -700,6 +967,87 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
+	 * Closes a shift with a late ACTIVE approval and expects worker salary to start from the attendance payable start,
+	 * not the global shift actualStartTime.
+	 */
+	@Test
+	void closeCalculatesLateApprovedWorkerSalaryFromPayableStart() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Late salary shift");
+		startShift(foremanToken, shiftId).andExpect(status().isOk());
+		OffsetDateTime actualStart = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(180);
+		setActualStartTime(shiftId, actualStart);
+		String workerToken = registerAndLogin("late.worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
+		approveAttendance(foremanToken, shiftId, attendanceId, "{}").andExpect(status().isOk());
+		OffsetDateTime payableStart = actualStart.plusMinutes(60);
+		setAttendanceBreakMinutes(attendanceId, 0);
+		setPayableStartTime(attendanceId, payableStart);
+
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
+
+		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		long fullShiftDuration = Duration.between(shift.getActualStartTime(), shift.getActualEndTime()).toMinutes();
+		long workerDuration = Duration.between(payableStart, shift.getActualEndTime()).toMinutes();
+		assertThat(workerDuration).isLessThan(fullShiftDuration);
+		assertThat(attendance.getWorkedMinutes()).isEqualTo(Math.toIntExact(workerDuration));
+		assertThat(attendance.getCalculatedSalary())
+				.isEqualByComparingTo(expectedSalary(Math.toIntExact(workerDuration), attendance.getHourlyRate()));
+	}
+
+	/**
+	 * Closes a shift with a late approved worker whose static break is longer than the payable window and expects
+	 * paid worker minutes and salary to clamp to zero.
+	 */
+	@Test
+	void closeClampsLateApprovedWorkerStaticBreakGreaterThanPayableWindow() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Late clamped salary shift");
+		startShift(foremanToken, shiftId).andExpect(status().isOk());
+		OffsetDateTime actualStart = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(120);
+		setActualStartTime(shiftId, actualStart);
+		String workerToken = registerAndLogin("late.clamped.worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
+		approveAttendance(foremanToken, shiftId, attendanceId, "{}").andExpect(status().isOk());
+		OffsetDateTime payableStart = actualStart.plusMinutes(100);
+		setPayableStartTime(attendanceId, payableStart);
+
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
+
+		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		long workerDuration = Duration.between(payableStart, shift.getActualEndTime()).toMinutes();
+		assertThat(workerDuration).isLessThan(attendance.getBreakMinutes());
+		assertThat(attendance.getPauseMinutes()).isZero();
+		assertThat(attendance.getWorkedMinutes()).isZero();
+		assertThat(attendance.getCalculatedSalary()).isEqualByComparingTo("0.00");
+		assertThat(attendance.getCalculatedSalary().scale()).isEqualTo(2);
+	}
+
+	/**
+	 * Closes a shift and expects private foreman salary fields to be persisted on the shift, not attendance.
+	 */
+	@Test
+	void closeCalculatesAndPersistsForemanSalaryWithoutForemanAttendance() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Foreman salary shift");
+		startShift(foremanToken, shiftId).andExpect(status().isOk());
+		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(540));
+		long attendanceCountBeforeClose = shiftAttendanceRepository.count();
+
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
+
+		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		int expectedForemanWorkedMinutes = expectedForemanWorkedMinutes(shift);
+		assertThat(shift.getForemanWorkedMinutes()).isEqualTo(expectedForemanWorkedMinutes);
+		assertThat(shift.getForemanCalculatedSalary())
+				.isEqualByComparingTo(expectedSalary(expectedForemanWorkedMinutes, shift.getForemanHourlyRate()));
+		assertThat(shift.getForemanCalculatedSalary().scale()).isEqualTo(2);
+		assertThat(shiftAttendanceRepository.count()).isEqualTo(attendanceCountBeforeClose);
+	}
+
+	/**
 	 * Approves attendance with a rate override and expects close-time salary to use the attendance override.
 	 */
 	@Test
@@ -745,31 +1093,64 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
-	 * Makes the shift duration shorter than the attendance break and expects close to roll back without salary writes.
+	 * Makes the payable window shorter than the attendance break and expects close to persist zero paid minutes.
 	 */
 	@Test
-	void invalidBreakGreaterThanDurationReturnsConflictAndDoesNotCloseShift() throws Exception {
+	void breakGreaterThanDurationClampsAttendanceSalaryAndClosesShift() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
-		long shiftId = createShift(foremanToken, "Invalid break salary shift");
+		long shiftId = createShift(foremanToken, "Clamped break salary shift");
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
 		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
 		approveAttendance(foremanToken, shiftId, attendanceId, "{}").andExpect(status().isOk());
+		ShiftSession shiftBeforeClose = shiftSessionRepository.findById(shiftId).orElseThrow();
+		shiftBeforeClose.setDefaultBreakMinutes(0);
+		shiftSessionRepository.saveAndFlush(shiftBeforeClose);
 		startShift(foremanToken, shiftId).andExpect(status().isOk());
 		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(10));
 
-		closeShift(foremanToken, shiftId)
-				.andExpect(status().isConflict())
-				.andExpect(jsonPath("$.status").value(409))
-				.andExpect(jsonPath("$.error").value("Conflict"))
-				.andExpect(jsonPath("$.message").value("Break minutes cannot be greater than shift duration"))
-				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
 
 		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
 		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
-		assertThat(shift.getStatus()).isEqualTo(ShiftStatus.ACTIVE);
-		assertThat(shift.getActualEndTime()).isNull();
-		assertThat(attendance.getWorkedMinutes()).isNull();
-		assertThat(attendance.getCalculatedSalary()).isNull();
+		assertThat(shift.getStatus()).isEqualTo(ShiftStatus.CLOSED);
+		assertThat(shift.getActualEndTime()).isNotNull();
+		assertThat(shift.getForemanWorkedMinutes()).isPositive();
+		assertThat(shift.getForemanCalculatedSalary()).isPositive();
+		assertThat(attendance.getWorkedMinutes()).isZero();
+		assertThat(attendance.getCalculatedSalary()).isEqualByComparingTo("0.00");
+	}
+
+	/**
+	 * Makes the shift duration shorter than the default break and expects private foreman salary to clamp to zero.
+	 */
+	@Test
+	void defaultBreakGreaterThanDurationClampsForemanSalaryAndKeepsItPrivate() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Clamped foreman break salary shift");
+		startShift(foremanToken, shiftId).andExpect(status().isOk());
+		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(10));
+
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
+
+		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		assertThat(shift.getStatus()).isEqualTo(ShiftStatus.CLOSED);
+		assertThat(shift.getForemanWorkedMinutes()).isZero();
+		assertThat(shift.getForemanCalculatedSalary()).isEqualByComparingTo("0.00");
+
+		getSummary(foremanToken, shiftId)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.foremanWorkedMinutes").value(0))
+				.andExpect(jsonPath("$.foremanPauseMinutes").value(0))
+				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
+				.andExpect(jsonPath("$.foremanSalary").value(0.00));
+
+		String adminToken = createAdminAndLogin();
+		getSummary(adminToken, shiftId)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.foremanWorkedMinutes").doesNotExist())
+				.andExpect(jsonPath("$.foremanPauseMinutes").doesNotExist())
+				.andExpect(jsonPath("$.foremanHourlyRate").doesNotExist())
+				.andExpect(jsonPath("$.foremanSalary").doesNotExist());
 	}
 
 	/**
@@ -814,6 +1195,7 @@ class ShiftSessionControllerTests {
 		BigDecimal totalSalary = firstAttendance.getCalculatedSalary()
 				.add(secondAttendance.getCalculatedSalary())
 				.setScale(2, RoundingMode.HALF_UP);
+		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
 
 		getSummary(foremanToken, shiftId)
 				.andExpect(status().isOk())
@@ -821,26 +1203,32 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.status").value("CLOSED"))
 				.andExpect(jsonPath("$.totalWorkers").value(2))
 				.andExpect(jsonPath("$.totalSalary").value(totalSalary.doubleValue()))
+				.andExpect(jsonPath("$.foremanWorkedMinutes").value(shift.getForemanWorkedMinutes()))
+				.andExpect(jsonPath("$.foremanPauseMinutes").value(shift.getForemanPauseMinutes()))
+				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
+				.andExpect(jsonPath("$.foremanSalary").value(shift.getForemanCalculatedSalary().doubleValue()))
 				.andExpect(jsonPath("$.workers", hasSize(2)))
 				.andExpect(jsonPath("$.workers[0].attendanceId").value(firstAttendanceId))
 				.andExpect(jsonPath("$.workers[0].workerId").isNumber())
 				.andExpect(jsonPath("$.workers[0].firstName").value("Bob"))
 				.andExpect(jsonPath("$.workers[0].lastName").value("Alpha"))
 				.andExpect(jsonPath("$.workers[0].workedMinutes").value(firstAttendance.getWorkedMinutes()))
+				.andExpect(jsonPath("$.workers[0].pauseMinutes").value(firstAttendance.getPauseMinutes()))
 				.andExpect(jsonPath("$.workers[0].hourlyRate").value(15.25))
 				.andExpect(jsonPath("$.workers[0].salary")
 						.value(firstAttendance.getCalculatedSalary().doubleValue()))
-				.andExpect(jsonPath("$.workers[0].*", hasSize(7)))
+				.andExpect(jsonPath("$.workers[0].*", hasSize(8)))
 				.andExpect(jsonPath("$.workers[0].passwordHash").doesNotExist())
 				.andExpect(jsonPath("$.workers[0].user").doesNotExist())
 				.andExpect(jsonPath("$.workers[0].email").doesNotExist())
 				.andExpect(jsonPath("$.workers[1].attendanceId").value(secondAttendanceId))
 				.andExpect(jsonPath("$.workers[1].firstName").value("Anna"))
 				.andExpect(jsonPath("$.workers[1].lastName").value("Zulu"))
+				.andExpect(jsonPath("$.workers[1].pauseMinutes").value(secondAttendance.getPauseMinutes()))
 				.andExpect(jsonPath("$.workers[1].hourlyRate").value(18.50))
 				.andExpect(jsonPath("$.workers[1].salary")
 						.value(secondAttendance.getCalculatedSalary().doubleValue()))
-				.andExpect(jsonPath("$.*", hasSize(5)))
+				.andExpect(jsonPath("$.*", hasSize(9)))
 				.andExpect(jsonPath("$.workers[?(@.attendanceId == %d)]".formatted(joinedAttendanceId))
 						.isEmpty());
 		assertThat(joinedAttendance.getCalculatedSalary()).isNull();
@@ -859,7 +1247,12 @@ class ShiftSessionControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.shiftId").value(shiftId))
 				.andExpect(jsonPath("$.status").value("CLOSED"))
-				.andExpect(jsonPath("$.totalWorkers").value(1));
+				.andExpect(jsonPath("$.totalWorkers").value(1))
+				.andExpect(jsonPath("$.foremanWorkedMinutes").doesNotExist())
+				.andExpect(jsonPath("$.foremanPauseMinutes").doesNotExist())
+				.andExpect(jsonPath("$.foremanHourlyRate").doesNotExist())
+				.andExpect(jsonPath("$.foremanSalary").doesNotExist())
+				.andExpect(jsonPath("$.*", hasSize(5)));
 	}
 
 	/**
@@ -985,16 +1378,35 @@ class ShiftSessionControllerTests {
 
 		createShiftWithPayload(accessToken, """
 				{
-				  "title": "Missing rate shift",
 				  "location": "Cologne",
-				  "plannedStartTime": "2026-07-01T08:00:00",
-				  "plannedEndTime": "2026-07-01T17:00:00",
-				  "defaultBreakMinutes": 60
+				  "defaultBreakMinutes": 60,
+				  "foremanHourlyRate": 25.00
 				}
 				""")
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.status").value(400))
 				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
+	}
+
+	/**
+	 * Omits foremanHourlyRate during shift creation and expects request validation to reject the payload.
+	 */
+	@Test
+	void missingForemanHourlyRateReturnsBadRequest() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		createShiftWithPayload(accessToken, """
+				{
+				  "location": "Cologne",
+				  "defaultBreakMinutes": 60,
+				  "defaultHourlyRate": 15.25
+				}
+				""")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.message").value("foremanHourlyRate: must not be null"))
 				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
 	}
 
@@ -1027,6 +1439,24 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
+	 * Sends a negative foreman hourly rate and expects validation to reject private salary input before persistence.
+	 */
+	@Test
+	void negativeForemanHourlyRateReturnsBadRequest() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		createShiftWithPayload(accessToken, validCreateShiftPayload(
+				"Negative foreman rate shift",
+				"15.25",
+				"-0.01"
+		))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.status").value(400))
+				.andExpect(jsonPath("$.error").value("Bad Request"))
+				.andExpect(jsonPath("$.path").value(CREATE_SHIFT_URL));
+	}
+
+	/**
 	 * Registers a user with the default test name and returns a JWT for authenticated controller requests.
 	 *
 	 * @param email email address used for registration and login
@@ -1034,7 +1464,14 @@ class ShiftSessionControllerTests {
 	 * @return JWT access token for the created user
 	 */
 	private String registerAndLogin(String email, String role) throws Exception {
-		return registerAndLogin(email, role, "Test", "User");
+		String accessToken = registerAndLoginWithoutCompany(email, role, "Test", "User");
+		if ("FOREMAN".equals(role)) {
+			createCompany(accessToken, "Acme Construction");
+		}
+		else if ("WORKER".equals(role)) {
+			joinFirstCompany(accessToken);
+		}
+		return accessToken;
 	}
 
 	/**
@@ -1047,6 +1484,42 @@ class ShiftSessionControllerTests {
 	 * @return JWT access token for the account
 	 */
 	private String registerAndLogin(
+			String email,
+			String role,
+			String firstName,
+			String lastName
+	) throws Exception {
+		String accessToken = registerAndLoginWithoutCompany(email, role, firstName, lastName);
+		if ("FOREMAN".equals(role)) {
+			createCompany(accessToken, "Acme Construction");
+		}
+		else if ("WORKER".equals(role)) {
+			joinFirstCompany(accessToken);
+		}
+		return accessToken;
+	}
+
+	/**
+	 * Registers a user and returns a JWT without doing company onboarding.
+	 *
+	 * @param email email address used for registration and login
+	 * @param role role sent to registration
+	 * @return JWT access token for the account
+	 */
+	private String registerAndLoginWithoutCompany(String email, String role) throws Exception {
+		return registerAndLoginWithoutCompany(email, role, "Test", "User");
+	}
+
+	/**
+	 * Registers a named user and logs in without doing company onboarding.
+	 *
+	 * @param email email address used for the account
+	 * @param role role sent to registration
+	 * @param firstName first name stored on the user
+	 * @param lastName last name stored on the user
+	 * @return JWT access token for the account
+	 */
+	private String registerAndLoginWithoutCompany(
 			String email,
 			String role,
 			String firstName,
@@ -1086,6 +1559,50 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
+	 * Creates a company through the foreman endpoint.
+	 *
+	 * @param accessToken foreman JWT
+	 * @param companyName company name
+	 * @return company join code
+	 */
+	private String createCompany(String accessToken, String companyName) throws Exception {
+		MvcResult result = mockMvc.perform(post(CREATE_COMPANY_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "name": "%s"
+								}
+								""".formatted(companyName)))
+				.andExpect(status().isCreated())
+				.andReturn();
+		return extractJoinCode(result);
+	}
+
+	/**
+	 * Joins the first created company through the worker endpoint.
+	 *
+	 * @param accessToken worker JWT
+	 */
+	private void joinFirstCompany(String accessToken) throws Exception {
+		Company company = companyRepository.findAll().stream()
+				.findFirst()
+				.orElse(null);
+		if (company == null) {
+			return;
+		}
+		mockMvc.perform(post(JOIN_COMPANY_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "joinCode": "%s"
+								}
+								""".formatted(company.getJoinCode())))
+				.andExpect(status().isOk());
+	}
+
+	/**
 	 * Logs in an existing test user and extracts the JWT access token from the response body.
 	 *
 	 * @param email account email
@@ -1109,39 +1626,53 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
-	 * Builds a valid shift creation request with the default hourly rate used by most tests.
+	 * Builds a valid shift creation request with the default worker and foreman hourly rates used by most tests.
 	 *
-	 * @param title shift title
+	 * @param title ignored legacy shift title kept so callers document scenario names
 	 * @return JSON request body
 	 */
 	private String validCreateShiftPayload(String title) {
-		return validCreateShiftPayload(title, "15.25");
+		return validCreateShiftPayload(title, "15.25", "25.00");
 	}
 
 	/**
-	 * Builds a shift creation request while allowing tests to vary hourly-rate validation input.
+	 * Builds a shift creation request while allowing tests to vary worker hourly-rate validation input.
 	 *
-	 * @param title shift title
+	 * @param title ignored legacy shift title
 	 * @param defaultHourlyRate literal JSON number for defaultHourlyRate
 	 * @return JSON request body
 	 */
 	private String validCreateShiftPayload(String title, String defaultHourlyRate) {
+		return validCreateShiftPayload(title, defaultHourlyRate, "25.00");
+	}
+
+	/**
+	 * Builds a shift creation request while allowing tests to vary worker and foreman hourly-rate validation input.
+	 *
+	 * @param title ignored legacy shift title
+	 * @param defaultHourlyRate literal JSON number for defaultHourlyRate
+	 * @param foremanHourlyRate literal JSON number for foremanHourlyRate
+	 * @return JSON request body
+	 */
+	private String validCreateShiftPayload(
+			String title,
+			String defaultHourlyRate,
+			String foremanHourlyRate
+	) {
 		return """
 				{
-				  "title": "%s",
 				  "location": "Cologne",
-				  "plannedStartTime": "2026-07-01T08:00:00",
-				  "plannedEndTime": "2026-07-01T17:00:00",
 				  "defaultBreakMinutes": 60,
-				  "defaultHourlyRate": %s
+				  "defaultHourlyRate": %s,
+				  "foremanHourlyRate": %s
 				}
-				""".formatted(title, defaultHourlyRate);
+				""".formatted(defaultHourlyRate, foremanHourlyRate);
 	}
 
 	/**
 	 * Creates a valid shift through the API and extracts its generated id.
 	 *
-	 * @param accessToken JWT for a FOREMAN or ADMIN
+	 * @param accessToken JWT for a FOREMAN
 	 * @param title shift title
 	 * @return created shift id
 	 */
@@ -1150,9 +1681,7 @@ class ShiftSessionControllerTests {
 				.andExpect(status().isCreated())
 				.andReturn();
 
-		Matcher matcher = SHIFT_ID_PATTERN.matcher(result.getResponse().getContentAsString());
-		assertThat(matcher.find()).isTrue();
-		return Long.parseLong(matcher.group(1));
+		return extractShiftId(result);
 	}
 
 	/**
@@ -1179,6 +1708,7 @@ class ShiftSessionControllerTests {
 	private long createActiveShift(String accessToken, String title) throws Exception {
 		long shiftId = createShift(accessToken, title);
 		startShift(accessToken, shiftId).andExpect(status().isOk());
+		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(120));
 		return shiftId;
 	}
 
@@ -1211,6 +1741,28 @@ class ShiftSessionControllerTests {
 	 */
 	private ResultActions startShift(String accessToken, long shiftId) throws Exception {
 		return mockMvc.perform(post(startShiftUrl(shiftId))
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken));
+	}
+
+	/**
+	 * Builds the cancel endpoint URL for a shift.
+	 *
+	 * @param shiftId shift id
+	 * @return endpoint path
+	 */
+	private String cancelShiftUrl(long shiftId) {
+		return shiftUrl(shiftId) + "/cancel";
+	}
+
+	/**
+	 * Sends a cancel request for a shift as the given caller.
+	 *
+	 * @param accessToken JWT for the caller
+	 * @param shiftId target shift id
+	 * @return MockMvc result actions for assertions
+	 */
+	private ResultActions cancelShift(String accessToken, long shiftId) throws Exception {
+		return mockMvc.perform(post(cancelShiftUrl(shiftId))
 				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken));
 	}
 
@@ -1323,6 +1875,30 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
+	 * Overrides an attendance static break to isolate salary duration assertions.
+	 *
+	 * @param attendanceId attendance row to update
+	 * @param breakMinutes break minutes to persist
+	 */
+	private void setAttendanceBreakMinutes(long attendanceId, int breakMinutes) {
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		attendance.setBreakMinutes(breakMinutes);
+		shiftAttendanceRepository.saveAndFlush(attendance);
+	}
+
+	/**
+	 * Overrides payableStartTime so close-time payroll tests can use deterministic late-worker windows.
+	 *
+	 * @param attendanceId attendance row to update
+	 * @param payableStartTime effective worker payable start to persist
+	 */
+	private void setPayableStartTime(long attendanceId, OffsetDateTime payableStartTime) {
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		attendance.setPayableStartTime(payableStartTime);
+		shiftAttendanceRepository.saveAndFlush(attendance);
+	}
+
+	/**
 	 * Mirrors the production worked-minute formula so controller tests can assert persisted salary output.
 	 *
 	 * @param shift closed shift entity
@@ -1330,8 +1906,19 @@ class ShiftSessionControllerTests {
 	 * @return expected worked minutes
 	 */
 	private int expectedWorkedMinutes(ShiftSession shift, ShiftAttendance attendance) {
-		return Math.toIntExact(Duration.between(shift.getActualStartTime(), shift.getActualEndTime()).toMinutes()
-				- attendance.getBreakMinutes());
+		long durationMinutes = Duration.between(shift.getActualStartTime(), shift.getActualEndTime()).toMinutes();
+		return Math.toIntExact(Math.max(0, durationMinutes - attendance.getBreakMinutes()));
+	}
+
+	/**
+	 * Mirrors the private foreman worked-minute formula used on close.
+	 *
+	 * @param shift closed shift entity
+	 * @return expected foreman worked minutes
+	 */
+	private int expectedForemanWorkedMinutes(ShiftSession shift) {
+		long durationMinutes = Duration.between(shift.getActualStartTime(), shift.getActualEndTime()).toMinutes();
+		return Math.toIntExact(Math.max(0, durationMinutes - shift.getDefaultBreakMinutes()));
 	}
 
 	/**
@@ -1366,5 +1953,17 @@ class ShiftSessionControllerTests {
 		Matcher matcher = JOIN_CODE_PATTERN.matcher(result.getResponse().getContentAsString());
 		assertThat(matcher.find()).isTrue();
 		return matcher.group(1);
+	}
+
+	/**
+	 * Extracts the shift id from a create-shift response.
+	 *
+	 * @param result MockMvc result containing a create response
+	 * @return created shift id
+	 */
+	private long extractShiftId(MvcResult result) throws Exception {
+		Matcher matcher = SHIFT_ID_PATTERN.matcher(result.getResponse().getContentAsString());
+		assertThat(matcher.find()).isTrue();
+		return Long.parseLong(matcher.group(1));
 	}
 }

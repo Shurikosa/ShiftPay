@@ -34,7 +34,7 @@ public class UserService {
 	 */
 	@Transactional(readOnly = true)
 	public UserResponse getCurrentUser(AuthenticatedUserPrincipal principal) {
-		return userRepository.findById(principal.id())
+		return userRepository.findWithCompanyById(principal.id())
 				.map(UserResponse::from)
 				.orElseThrow(() -> new JwtAuthenticationException("Authenticated user not found"));
 	}

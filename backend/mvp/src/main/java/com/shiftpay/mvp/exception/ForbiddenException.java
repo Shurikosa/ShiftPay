@@ -13,4 +13,13 @@ public class ForbiddenException extends RuntimeException {
 	public ForbiddenException() {
 		super("Forbidden");
 	}
+
+	/**
+	 * Creates a forbidden exception with a client-facing message.
+	 *
+	 * @param message forbidden reason
+	 */
+	public ForbiddenException(String message) {
+		super(message);
+	}
 }

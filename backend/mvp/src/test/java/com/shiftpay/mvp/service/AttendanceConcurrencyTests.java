@@ -28,6 +28,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -127,11 +128,11 @@ class AttendanceConcurrencyTests {
 	/**
 	 * Starts an OPEN shift while a concurrent approval waits on the same shift lock.
 	 *
-	 * <p>After the start commits, approval must observe ACTIVE status and fail, leaving attendance JOINED rather than
-	 * approving a worker after the shift has already started.</p>
+	 * <p>After the start commits, approval observes ACTIVE status and remains valid. The attendance is approved with a
+	 * payable start timestamp for active-shift payroll.</p>
 	 */
 	@Test
-	void approvalWaitsForConcurrentStartAndThenReturnsConflict() throws Exception {
+	void approvalWaitsForConcurrentStartAndThenApprovesActiveShiftAttendance() throws Exception {
 		Scenario scenario = createScenario(ShiftStatus.OPEN);
 
 		ConcurrentResults<?, ?> results = runWithFirstTransactionHeld(
@@ -148,21 +149,23 @@ class AttendanceConcurrencyTests {
 		);
 
 		assertThat(results.first().error()).isNull();
-		assertThat(results.second().error()).isInstanceOf(ShiftStateConflictException.class);
-		assertThat(shiftAttendanceRepository.findById(scenario.attendance().getId()).orElseThrow().getStatus())
-				.isEqualTo(AttendanceStatus.JOINED);
+		assertThat(results.second().error()).isNull();
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(scenario.attendance().getId()).orElseThrow();
+		assertThat(attendance.getStatus()).isEqualTo(AttendanceStatus.APPROVED);
+		assertThat(attendance.getPayableStartTime()).isEqualTo(attendance.getApprovedAt());
 	}
 
 	/**
 	 * Starts an OPEN shift while a second worker attempts to join with the same join code.
 	 *
-	 * <p>The join must block on the locked shift, then see ACTIVE status and fail so no late attendance row is
-	 * created after start.</p>
+	 * <p>The join blocks on the locked shift, then sees ACTIVE status and succeeds as a late join request.</p>
 	 */
 	@Test
-	void joinWaitsForConcurrentStartAndThenReturnsConflict() throws Exception {
+	void joinWaitsForConcurrentStartAndThenCreatesLateAttendance() throws Exception {
 		Scenario scenario = createScenario(ShiftStatus.OPEN);
 		User secondWorker = createUser("second.worker@example.com", Role.WORKER);
+		secondWorker.setCompany(scenario.shift().getCompany());
+		userRepository.saveAndFlush(secondWorker);
 		AuthenticatedUserPrincipal secondWorkerPrincipal = principal(secondWorker);
 
 		ConcurrentResults<?, ?> results = runWithFirstTransactionHeld(
@@ -177,11 +180,11 @@ class AttendanceConcurrencyTests {
 		);
 
 		assertThat(results.first().error()).isNull();
-		assertThat(results.second().error()).isInstanceOf(ShiftStateConflictException.class);
+		assertThat(results.second().error()).isNull();
 		assertThat(shiftAttendanceRepository.existsByShiftSessionIdAndWorkerId(
 				scenario.shift().getId(),
 				secondWorker.getId()
-		)).isFalse();
+		)).isTrue();
 	}
 
 	/**
@@ -314,11 +317,15 @@ class AttendanceConcurrencyTests {
 	 */
 	private Scenario createScenario(ShiftStatus shiftStatus) {
 		Company company = new Company();
-		company.setName("Default Company");
+		company.setName("Concurrent Company");
+		company.setJoinCode("LOCKCO");
 		company = companyRepository.save(company);
 
 		User foreman = createUser("foreman@example.com", Role.FOREMAN);
 		User worker = createUser("worker@example.com", Role.WORKER);
+		foreman.setCompany(company);
+		worker.setCompany(company);
+		userRepository.saveAll(List.of(foreman, worker));
 
 		ShiftSession shift = new ShiftSession();
 		shift.setCompany(company);
@@ -327,6 +334,7 @@ class AttendanceConcurrencyTests {
 		shift.setStatus(shiftStatus);
 		shift.setDefaultBreakMinutes(60);
 		shift.setDefaultHourlyRate(new BigDecimal("15.00"));
+		shift.setForemanHourlyRate(new BigDecimal("25.00"));
 		shift.setCreatedBy(foreman);
 		if (shiftStatus == ShiftStatus.ACTIVE) {
 			shift.setActualStartTime(OffsetDateTime.now(ZoneOffset.UTC).minusHours(1));

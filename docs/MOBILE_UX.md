@@ -18,7 +18,7 @@ The app should prioritize:
 - company onboarding for foremen and workers
 - fast shift joining for workers
 - clear managed-shift visibility for foremen
-- clear pause and cancellation status
+- clear cancellation status
 - readable shift status and salary information
 - simple forms with obvious success and error states
 
@@ -38,7 +38,8 @@ Worker tasks:
 - join a shift with a join code
 - see current and past joined shifts
 - see company name in the dashboard or main menu
-- see shift status, attendance status, pause status, worked minutes, and calculated salary
+- see shift status, attendance status, worked minutes, and calculated salary
+- pause and resume themselves during an active joined shift
 
 ### Foreman
 
@@ -270,7 +271,7 @@ Empty state:
 
 Purpose:
 
-- let a worker join an open shift by join code
+- let a worker join an OPEN shift before start or an ACTIVE shift as a late worker by join code
 
 Fields:
 
@@ -290,7 +291,8 @@ Rules:
 - normalize user input visually as uppercase if practical
 - worker never enters or edits hourly rate
 - worker must already belong to the shift's company
-- show duplicate join, unknown code, forbidden, and closed/non-open shift errors
+- backend accepts joins only for `OPEN` and `ACTIVE` shifts
+- show duplicate join, unknown code, forbidden, and `CLOSED`/`CANCELLED` shift errors
 
 ### MyShiftHistoryScreen
 
@@ -330,11 +332,12 @@ Content:
 - company name
 - shift status
 - attendance status
-- whether worker is paused or global pause is active
 - actual start/end times when available
 - hourly rate snapshot
 - break minutes
-- pause minutes when available
+- payable start time when provided by the backend
+- current personal/all pause state
+- persisted pause minutes after close
 - worked minutes
 - calculated salary
 
@@ -342,6 +345,17 @@ API calls:
 
 - can use selected item data from `GET /api/v1/me/shifts`
 - may refresh history if needed
+- `POST /api/v1/shifts/{shiftId}/pauses/me/start`
+- `POST /api/v1/shifts/{shiftId}/pauses/me/end`
+
+Rules:
+
+- worker pause controls are available only while the shift is `ACTIVE`
+- worker pause controls require approved attendance, not only a pending join request
+- worker pause controls affect only the current worker
+- show whether an all-participant pause is active from `pauseState`
+- do not calculate pause-adjusted salary on the client
+- for late workers, display backend persisted `payableStartTime`, `workedMinutes`, `pauseMinutes`, and `calculatedSalary`; do not derive them from `actualStartTime`
 
 ### ForemanDashboardScreen
 
@@ -355,8 +369,7 @@ Content:
 - company name
 - primary action to create a shift
 - managed shift list
-- status labels for `OPEN`, `ACTIVE`, and `CLOSED`
-- global pause and foreman self pause status for active shifts
+- status labels for `OPEN`, `ACTIVE`, `CLOSED`, and `CANCELLED`
 
 API calls:
 
@@ -402,8 +415,8 @@ Rules:
 - default hourly rate is required
 - foreman hourly rate is required
 - default break minutes is optional and defaults to 0 in the backend
-- dynamic pauses are the primary MVP break-tracking mechanism
 - default break minutes cannot be negative when entered
+- dynamic pause tracking is separate from create shift and is managed only after the shift becomes `ACTIVE`
 
 ### ForemanShiftDetailsScreen
 
@@ -421,9 +434,7 @@ Content:
 - default hourly rate for workers
 - foreman hourly rate, visible only to the owner foreman
 - actual start/end times when available
-- global pause status
-- foreman self pause status
-- worker pause status in attendance rows
+- pause state for all participants and the foreman's own personal pause
 - attendance list
 - lifecycle actions
 
@@ -431,10 +442,10 @@ Actions:
 
 - approve joined worker
 - start shift
+- pause/resume self while active
+- pause/resume everyone while active
 - cancel shift before start
 - close shift
-- start/stop foreman self pause
-- start/stop global pause for everyone
 - open summary for closed shifts
 
 API calls:
@@ -444,21 +455,27 @@ API calls:
 - `POST /api/v1/shifts/{shiftId}/attendance/{attendanceId}/approve`
 - `POST /api/v1/shifts/{shiftId}/start`
 - `POST /api/v1/shifts/{shiftId}/cancel`
+- `POST /api/v1/shifts/{shiftId}/pauses/me/start`
+- `POST /api/v1/shifts/{shiftId}/pauses/me/end`
+- `POST /api/v1/shifts/{shiftId}/pauses/all/start`
+- `POST /api/v1/shifts/{shiftId}/pauses/all/end`
 - `POST /api/v1/shifts/{shiftId}/close`
-- planned pause endpoints under `POST /api/v1/shifts/{shiftId}/pauses/...`
 
 Rules:
 
-- approve is available only for `JOINED` attendance while the shift is `OPEN`
+- approve is available only for `JOINED` attendance while the shift is `OPEN` or `ACTIVE`
 - start is available only while the shift is `OPEN`
 - cancel is available only while the shift is `OPEN`
+- pause/resume is available only while the shift is `ACTIVE`
+- foreman self pause affects only the owner foreman
+- pause for all affects foreman and workers
 - close is available only while the shift is `ACTIVE`
 - summary is available only after the shift is `CLOSED`
 - actualStartTime and actualEndTime are set by the backend
 - do not calculate worker or foreman salary on the client
+- late worker pay starts from backend `payableStartTime`/approval time, not the global shift start
 - cancelled shifts should show CANCELLED status and no salary summary action
-- pause controls are available only while the shift is `ACTIVE`
-- do not calculate pause-adjusted salary on the client
+- use backend `pauseState` and attendance-level pause state; do not derive active pause state locally beyond rendering returned fields
 
 ### ShiftSummaryScreen
 
@@ -470,10 +487,9 @@ Content:
 
 - total workers
 - total worker salary
-- worker rows with worked minutes and calculated salary
-- worker pause minutes when available
+- worker rows with pause minutes, worked minutes, and calculated salary
 - private foreman salary fields for the owner foreman:
-  foremanWorkedMinutes, foremanHourlyRate, foremanSalary
+  foremanWorkedMinutes, foremanPauseMinutes, foremanHourlyRate, foremanSalary
 
 API calls:
 
@@ -484,7 +500,7 @@ Rules:
 - show a clear message if the shift is not closed yet
 - do not recalculate worker or foreman salary on the client
 - worker rows are based only on approved worker attendance
-- backend salary already subtracts static break minutes and accumulated pause minutes
+- backend salary subtracts static break minutes and backend-tracked effective pause minutes
 - do not show foreman salary fields to workers
 - ADMIN users are not a mobile MVP target and should not receive foreman salary fields through REST/mobile API
 
@@ -499,7 +515,7 @@ Use loading states when:
 - loading dashboards
 - creating or joining a company
 - joining a shift
-- creating, starting, cancelling, closing, pausing, resuming, or approving a shift
+- creating, starting, pausing, resuming, cancelling, closing, or approving a shift
 
 ### Empty
 
@@ -533,9 +549,9 @@ Show success feedback for:
 - company join
 - attendance approval
 - shift start
+- shift pause/resume
 - shift cancel
 - shift close
-- pause start/stop
 
 ## 7. Basic Visual Direction
 
@@ -561,7 +577,21 @@ Show success feedback for:
 - payroll/tax calculations
 - chat or messaging
 
-## 9. Implementation Notes
+## 9. Pause UX Contract
+
+Pause is implemented in the backend for active shifts.
+
+Mobile should implement:
+
+- worker self pause during an active joined shift
+- foreman self pause during an active owned shift
+- foreman all-participant pause during an active owned shift
+- backend-provided `pauseState` in shift, managed-shift, attendance, and worker-history DTOs
+- backend-provided `pauseMinutes`/`foremanPauseMinutes` after close
+
+Mobile must not calculate pause-adjusted salary. It should display backend persisted `payableStartTime`, `workedMinutes`, `pauseMinutes`, `foremanPauseMinutes`, and salary fields after close. All-participant pauses that began before a late worker's payable start are already clipped by the backend for that worker.
+
+## 10. Implementation Notes
 
 - Use React Native, Expo, and TypeScript.
 - Keep API calls in `src/api/`.
@@ -574,7 +604,8 @@ Show success feedback for:
 - Do not calculate salary on the client.
 - The mobile app should consume persisted `workedMinutes` and
   `calculatedSalary` values returned by the backend.
-- The mobile app should show pause status and pause minutes from the backend,
-  but should not calculate pause-adjusted salary.
+- For late workers, the mobile app should treat backend `payableStartTime` as the worker's effective salary start.
+- The mobile app should consume backend `pauseState`, `pauseMinutes`, and
+  `foremanPauseMinutes` rather than deriving pause totals locally.
 - If an API endpoint is missing or unclear, update `docs/API.md` before building
   against assumptions.

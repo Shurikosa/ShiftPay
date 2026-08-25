@@ -10,6 +10,7 @@ import java.math.BigDecimal;
  * @param firstName worker first name
  * @param lastName worker last name
  * @param workedMinutes persisted worked minutes for the attendance
+ * @param pauseMinutes persisted pause minutes deducted for the attendance
  * @param hourlyRate attendance rate used for salary calculation
  * @param salary persisted calculated salary with scale two
  */
@@ -19,6 +20,7 @@ public record WorkerSummaryResponse(
 		String firstName,
 		String lastName,
 		Integer workedMinutes,
+		Integer pauseMinutes,
 		BigDecimal hourlyRate,
 		BigDecimal salary
 ) {

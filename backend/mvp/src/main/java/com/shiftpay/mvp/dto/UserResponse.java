@@ -13,13 +13,15 @@ import com.shiftpay.mvp.entity.User;
  * @param firstName user's first name
  * @param lastName user's last name
  * @param role user's application role
+ * @param company assigned company, or null when the user has not created or joined one
  */
 public record UserResponse(
 		Long id,
 		String email,
 		String firstName,
 		String lastName,
-		Role role
+		Role role,
+		CompanySummaryResponse company
 ) {
 
 	/**
@@ -34,7 +36,8 @@ public record UserResponse(
 				user.getEmail(),
 				user.getFirstName(),
 				user.getLastName(),
-				user.getRole()
+				user.getRole(),
+				CompanySummaryResponse.from(user.getCompany(), user.getRole() == Role.FOREMAN)
 		);
 	}
 }

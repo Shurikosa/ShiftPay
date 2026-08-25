@@ -1,6 +1,7 @@
 package com.shiftpay.mvp.controller;
 
 import com.shiftpay.mvp.dto.CreateShiftRequest;
+import com.shiftpay.mvp.dto.PauseResponse;
 import com.shiftpay.mvp.dto.ShiftCloseResponse;
 import com.shiftpay.mvp.dto.ShiftCreateResponse;
 import com.shiftpay.mvp.dto.ShiftResponse;
@@ -8,6 +9,7 @@ import com.shiftpay.mvp.dto.ShiftStartResponse;
 import com.shiftpay.mvp.dto.ShiftSummaryResponse;
 import com.shiftpay.mvp.security.AuthenticatedUserPrincipal;
 import com.shiftpay.mvp.service.ShiftSessionService;
+import com.shiftpay.mvp.service.ShiftPauseService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -22,29 +24,34 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Handles shift session endpoints under {@code /api/v1/shifts}.
  *
- * <p>Foremen and admins use this controller to create, read, start, close, and summarize shifts. Role and ownership
- * rules are enforced by Spring Security and {@link ShiftSessionService}.</p>
+ * <p>Foremen use this controller to create, start, cancel, and close shifts. Foremen and admins can read supported shift
+ * views. Role and ownership rules are enforced by Spring Security and {@link ShiftSessionService}.</p>
  */
 @RestController
 @RequestMapping("/api/v1/shifts")
 public class ShiftSessionController {
 
 	private final ShiftSessionService shiftSessionService;
+	private final ShiftPauseService shiftPauseService;
 
 	/**
 	 * Creates the controller with the shift session business service.
 	 *
 	 * @param shiftSessionService service used for shift lifecycle and summary operations
 	 */
-	public ShiftSessionController(ShiftSessionService shiftSessionService) {
+	public ShiftSessionController(
+			ShiftSessionService shiftSessionService,
+			ShiftPauseService shiftPauseService
+	) {
 		this.shiftSessionService = shiftSessionService;
+		this.shiftPauseService = shiftPauseService;
 	}
 
 	/**
 	 * Handles {@code POST /api/v1/shifts}.
 	 *
 	 * @param request shift creation request
-	 * @param principal authenticated foreman or admin principal
+	 * @param principal authenticated foreman principal
 	 * @return created shift response with generated join code
 	 */
 	@PostMapping
@@ -75,7 +82,7 @@ public class ShiftSessionController {
 	 * Handles {@code POST /api/v1/shifts/{shiftId}/start}.
 	 *
 	 * @param shiftId shift id from the URL
-	 * @param principal authenticated foreman or admin principal
+	 * @param principal authenticated foreman principal
 	 * @return shift start response with actual start time
 	 */
 	@PostMapping("/{shiftId}/start")
@@ -84,6 +91,81 @@ public class ShiftSessionController {
 			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
 	) {
 		return shiftSessionService.startShift(shiftId, principal);
+	}
+
+	/**
+	 * Handles {@code POST /api/v1/shifts/{shiftId}/cancel}.
+	 *
+	 * @param shiftId shift id from the URL
+	 * @param principal authenticated owner foreman principal
+	 * @return cancelled shift details response
+	 */
+	@PostMapping("/{shiftId}/cancel")
+	public ShiftResponse cancelShift(
+			@PathVariable Long shiftId,
+			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
+	) {
+		return shiftSessionService.cancelShift(shiftId, principal);
+	}
+
+	/**
+	 * Handles {@code POST /api/v1/shifts/{shiftId}/pauses/me/start}.
+	 *
+	 * @param shiftId shift id from the URL
+	 * @param principal authenticated worker or owner foreman principal
+	 * @return started personal pause response
+	 */
+	@PostMapping("/{shiftId}/pauses/me/start")
+	public PauseResponse startMyPause(
+			@PathVariable Long shiftId,
+			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
+	) {
+		return shiftPauseService.startMyPause(shiftId, principal);
+	}
+
+	/**
+	 * Handles {@code POST /api/v1/shifts/{shiftId}/pauses/me/end}.
+	 *
+	 * @param shiftId shift id from the URL
+	 * @param principal authenticated worker or owner foreman principal
+	 * @return ended personal pause response
+	 */
+	@PostMapping("/{shiftId}/pauses/me/end")
+	public PauseResponse endMyPause(
+			@PathVariable Long shiftId,
+			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
+	) {
+		return shiftPauseService.endMyPause(shiftId, principal);
+	}
+
+	/**
+	 * Handles {@code POST /api/v1/shifts/{shiftId}/pauses/all/start}.
+	 *
+	 * @param shiftId shift id from the URL
+	 * @param principal authenticated owner foreman principal
+	 * @return started all-participant pause response
+	 */
+	@PostMapping("/{shiftId}/pauses/all/start")
+	public PauseResponse startAllPause(
+			@PathVariable Long shiftId,
+			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
+	) {
+		return shiftPauseService.startAllPause(shiftId, principal);
+	}
+
+	/**
+	 * Handles {@code POST /api/v1/shifts/{shiftId}/pauses/all/end}.
+	 *
+	 * @param shiftId shift id from the URL
+	 * @param principal authenticated owner foreman principal
+	 * @return ended all-participant pause response
+	 */
+	@PostMapping("/{shiftId}/pauses/all/end")
+	public PauseResponse endAllPause(
+			@PathVariable Long shiftId,
+			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
+	) {
+		return shiftPauseService.endAllPause(shiftId, principal);
 	}
 
 	/**
@@ -105,7 +187,7 @@ public class ShiftSessionController {
 	 * Handles {@code POST /api/v1/shifts/{shiftId}/close}.
 	 *
 	 * @param shiftId shift id from the URL
-	 * @param principal authenticated foreman or admin principal
+	 * @param principal authenticated foreman principal
 	 * @return shift close response with actual end time
 	 */
 	@PostMapping("/{shiftId}/close")

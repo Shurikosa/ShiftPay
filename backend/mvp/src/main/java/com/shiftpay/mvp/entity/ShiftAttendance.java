@@ -63,6 +63,10 @@ public class ShiftAttendance {
 	private Integer workedMinutes;
 
 	@Setter
+	@Column(name = "pause_minutes")
+	private Integer pauseMinutes;
+
+	@Setter
 	@Column(name = "calculated_salary", precision = 12, scale = 2)
 	private BigDecimal calculatedSalary;
 
@@ -73,6 +77,10 @@ public class ShiftAttendance {
 	@Setter
 	@Column(name = "approved_at")
 	private OffsetDateTime approvedAt;
+
+	@Setter
+	@Column(name = "payable_start_time")
+	private OffsetDateTime payableStartTime;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;

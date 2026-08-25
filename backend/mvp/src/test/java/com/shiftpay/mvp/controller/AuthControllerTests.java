@@ -16,6 +16,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -75,6 +76,7 @@ class AuthControllerTests {
 				.andExpect(jsonPath("$.firstName").value("John"))
 				.andExpect(jsonPath("$.lastName").value("Worker"))
 				.andExpect(jsonPath("$.role").value("WORKER"))
+				.andExpect(jsonPath("$.company").value(nullValue()))
 				.andExpect(jsonPath("$.password").doesNotExist())
 				.andExpect(jsonPath("$.passwordHash").doesNotExist());
 	}
@@ -230,6 +232,7 @@ class AuthControllerTests {
 				.andExpect(jsonPath("$.user.firstName").value("John"))
 				.andExpect(jsonPath("$.user.lastName").value("Worker"))
 				.andExpect(jsonPath("$.user.role").value("WORKER"))
+				.andExpect(jsonPath("$.user.company").value(nullValue()))
 				.andExpect(jsonPath("$.user.password").doesNotExist())
 				.andExpect(jsonPath("$.user.passwordHash").doesNotExist())
 				.andReturn();

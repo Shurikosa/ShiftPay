@@ -16,8 +16,8 @@ import java.util.List;
  * Handles authenticated current-user convenience endpoints under {@code /api/v1/me}.
  *
  * <p>The shift history endpoint is available to any authenticated role, but {@link AttendanceService} always filters
- * by the current user's own worker-attendance records. The managed-shifts endpoint is for foreman/admin dashboards
- * and delegates creator-owned shift lookup to {@link ShiftSessionService}.</p>
+ * by the current user's own worker-attendance records. The managed-shifts endpoint is for the foreman dashboard and
+ * keeps minimal admin compatibility by returning creator-owned shifts only.</p>
  */
 @RestController
 @RequestMapping("/api/v1/me")
@@ -54,7 +54,8 @@ public class MeController {
 	 * Handles {@code GET /api/v1/me/managed-shifts}.
 	 *
 	 * <p>Spring Security allows only FOREMAN and ADMIN. For the MVP both roles receive shifts created by the current
-	 * user, keeping full admin listings for the later Vaadin admin UI.</p>
+	 * user, keeping full admin listings for the later Vaadin admin UI. ADMIN users cannot create shifts through the
+	 * REST/mobile API, so this is normally empty for admins.</p>
 	 *
 	 * @param principal authenticated foreman or admin principal
 	 * @return shifts created by the current user, newest first

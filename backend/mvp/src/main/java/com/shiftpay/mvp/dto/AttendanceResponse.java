@@ -19,8 +19,11 @@ import java.time.OffsetDateTime;
  * @param status current attendance status
  * @param hourlyRate rate snapshot or approval override used for salary calculation
  * @param breakMinutes break minutes deducted from this attendance
+ * @param payableStartTime effective worker payable start time, or null before it is known
+ * @param pauseMinutes persisted pause minutes deducted after close, or null before salary calculation
  * @param workedMinutes persisted worked minutes after close, or null before salary calculation
  * @param calculatedSalary persisted salary after close, or null before salary calculation
+ * @param pauseState pause state for this attendance worker
  * @param joinedAt UTC timestamp when the worker joined
  * @param approvedAt UTC timestamp when attendance was approved, or null
  */
@@ -32,8 +35,11 @@ public record AttendanceResponse(
 		AttendanceStatus status,
 		BigDecimal hourlyRate,
 		Integer breakMinutes,
+		OffsetDateTime payableStartTime,
+		Integer pauseMinutes,
 		Integer workedMinutes,
 		BigDecimal calculatedSalary,
+		PauseStateResponse pauseState,
 		OffsetDateTime joinedAt,
 		OffsetDateTime approvedAt
 ) {
@@ -45,6 +51,33 @@ public record AttendanceResponse(
 	 * @return attendance response DTO
 	 */
 	public static AttendanceResponse from(ShiftAttendance attendance) {
+		return from(attendance, PauseStateResponse.none(), null);
+	}
+
+	/**
+	 * Maps an attendance entity plus pause state to the shift attendance list response.
+	 *
+	 * @param attendance attendance entity with worker already fetched
+	 * @param pauseState pause state for the attendance worker
+	 * @return attendance response DTO
+	 */
+	public static AttendanceResponse from(ShiftAttendance attendance, PauseStateResponse pauseState) {
+		return from(attendance, pauseState, null);
+	}
+
+	/**
+	 * Maps an attendance entity plus pause state and payable start to the shift attendance list response.
+	 *
+	 * @param attendance attendance entity with worker already fetched
+	 * @param pauseState pause state for the attendance worker
+	 * @param payableStartTime effective worker payable start time
+	 * @return attendance response DTO
+	 */
+	public static AttendanceResponse from(
+			ShiftAttendance attendance,
+			PauseStateResponse pauseState,
+			OffsetDateTime payableStartTime
+	) {
 		return new AttendanceResponse(
 				attendance.getId(),
 				attendance.getWorker().getId(),
@@ -53,8 +86,11 @@ public record AttendanceResponse(
 				attendance.getStatus(),
 				attendance.getHourlyRate(),
 				attendance.getBreakMinutes(),
+				payableStartTime,
+				attendance.getPauseMinutes(),
 				attendance.getWorkedMinutes(),
 				attendance.getCalculatedSalary(),
+				pauseState,
 				attendance.getJoinedAt(),
 				attendance.getApprovedAt()
 		);

@@ -6,9 +6,11 @@ import com.shiftpay.mvp.dto.AttendanceResponse;
 import com.shiftpay.mvp.dto.JoinShiftRequest;
 import com.shiftpay.mvp.dto.JoinShiftResponse;
 import com.shiftpay.mvp.dto.MyShiftHistoryResponse;
+import com.shiftpay.mvp.dto.PauseStateResponse;
 import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftAttendance;
+import com.shiftpay.mvp.entity.ShiftPauseInterval;
 import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.ShiftStatus;
 import com.shiftpay.mvp.entity.User;
@@ -18,6 +20,7 @@ import com.shiftpay.mvp.exception.ForbiddenException;
 import com.shiftpay.mvp.exception.ShiftNotFoundException;
 import com.shiftpay.mvp.exception.ShiftStateConflictException;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
+import com.shiftpay.mvp.repository.ShiftPauseIntervalRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
 import com.shiftpay.mvp.security.AuthenticatedUserPrincipal;
@@ -42,30 +45,38 @@ import java.util.Objects;
 public class AttendanceService {
 
 	private final ShiftAttendanceRepository shiftAttendanceRepository;
+	private final ShiftPauseIntervalRepository shiftPauseIntervalRepository;
 	private final ShiftSessionRepository shiftSessionRepository;
+	private final PauseViewFactory pauseViewFactory;
 	private final UserRepository userRepository;
 
 	/**
 	 * Creates the service with repositories required for attendance workflows.
 	 *
 	 * @param shiftAttendanceRepository attendance repository
+	 * @param shiftPauseIntervalRepository pause interval repository
 	 * @param shiftSessionRepository shift repository used for state checks and locks
+	 * @param pauseViewFactory factory used to build mobile pause state fragments
 	 * @param userRepository user repository used to resolve the authenticated worker
 	 */
 	public AttendanceService(
 			ShiftAttendanceRepository shiftAttendanceRepository,
+			ShiftPauseIntervalRepository shiftPauseIntervalRepository,
 			ShiftSessionRepository shiftSessionRepository,
+			PauseViewFactory pauseViewFactory,
 			UserRepository userRepository
 	) {
 		this.shiftAttendanceRepository = shiftAttendanceRepository;
+		this.shiftPauseIntervalRepository = shiftPauseIntervalRepository;
 		this.shiftSessionRepository = shiftSessionRepository;
+		this.pauseViewFactory = pauseViewFactory;
 		this.userRepository = userRepository;
 	}
 
 	/**
-	 * Joins the authenticated worker to an OPEN shift by join code.
+	 * Joins the authenticated worker to an OPEN or ACTIVE shift by join code.
 	 *
-	 * <p>The method trims and uppercases the join code, locks the target shift, rejects non-open shifts and duplicate
+	 * <p>The method trims and uppercases the join code, locks the target shift, rejects terminal shifts and duplicate
 	 * joins, copies the shift default hourly rate and break minutes into attendance, and stores the join timestamp in
 	 * UTC. Workers never provide their own hourly rate.</p>
 	 *
@@ -79,12 +90,16 @@ public class AttendanceService {
 		ShiftSession shiftSession = shiftSessionRepository.findByJoinCodeForUpdate(normalizedJoinCode)
 				.orElseThrow(ShiftNotFoundException::new);
 
-		if (shiftSession.getStatus() != ShiftStatus.OPEN) {
-			throw new ShiftStateConflictException("Workers can only join shifts with status OPEN");
+		if (shiftSession.getStatus() != ShiftStatus.OPEN && shiftSession.getStatus() != ShiftStatus.ACTIVE) {
+			throw new ShiftStateConflictException("Workers can only join shifts with status OPEN or ACTIVE");
 		}
 
-		User worker = userRepository.findById(principal.id())
+		User worker = userRepository.findWithCompanyById(principal.id())
 				.orElseThrow(() -> new JwtAuthenticationException("Authenticated user not found"));
+		if (worker.getCompany() == null
+				|| !Objects.equals(worker.getCompany().getId(), shiftSession.getCompany().getId())) {
+			throw new ForbiddenException("Worker must join the company before joining this shift");
+		}
 		if (shiftAttendanceRepository.existsByShiftSessionIdAndWorkerId(shiftSession.getId(), worker.getId())) {
 			throw new AttendanceConflictException("Worker has already joined this shift");
 		}
@@ -116,8 +131,32 @@ public class AttendanceService {
 	 */
 	@Transactional(readOnly = true)
 	public List<MyShiftHistoryResponse> getMyShiftHistory(AuthenticatedUserPrincipal principal) {
-		return shiftAttendanceRepository.findMyShiftHistoryByWorkerId(principal.id()).stream()
-				.map(MyShiftHistoryResponse::from)
+		List<ShiftAttendance> attendanceRows = shiftAttendanceRepository.findMyShiftHistoryByWorkerId(principal.id());
+		List<Long> shiftIds = attendanceRows.stream()
+				.map((attendance) -> attendance.getShiftSession().getId())
+				.toList();
+		List<ShiftPauseInterval> pauseIntervals = shiftIds.isEmpty()
+				? List.of()
+				: shiftPauseIntervalRepository.findAllByShiftSessionIdIn(shiftIds);
+		return attendanceRows.stream()
+				.map((attendance) -> {
+					ShiftSession shiftSession = attendance.getShiftSession();
+					List<ShiftPauseInterval> intervals = pauseIntervals.stream()
+							.filter((pauseInterval) -> Objects.equals(
+									pauseInterval.getShiftSession().getId(),
+									shiftSession.getId()
+							))
+							.toList();
+					OffsetDateTime payableStartTime = workerPayableWindowStart(shiftSession, attendance);
+					PauseStateResponse pauseState = pauseViewFactory.forUser(
+							shiftSession,
+							intervals,
+							principal.id(),
+							attendance.getPauseMinutes(),
+							payableStartTime
+					);
+					return MyShiftHistoryResponse.from(attendance, pauseState, payableStartTime);
+				})
 				.toList();
 	}
 
@@ -140,13 +179,28 @@ public class AttendanceService {
 				.orElseThrow(ShiftNotFoundException::new);
 		validateAttendanceManagementAccess(shiftSession, principal);
 
-		return shiftAttendanceRepository.findAllByShiftSessionIdWithWorker(shiftId).stream()
-				.map(AttendanceResponse::from)
+		List<ShiftAttendance> attendanceRows = shiftAttendanceRepository.findAllByShiftSessionIdWithWorker(shiftId);
+		List<ShiftPauseInterval> pauseIntervals = shiftPauseIntervalRepository.findAllByShiftSessionId(shiftId);
+		return attendanceRows.stream()
+				.map((attendance) -> {
+					OffsetDateTime payableStartTime = workerPayableWindowStart(shiftSession, attendance);
+					return AttendanceResponse.from(
+							attendance,
+							pauseViewFactory.forUser(
+									shiftSession,
+									pauseIntervals,
+									attendance.getWorker().getId(),
+									attendance.getPauseMinutes(),
+									payableStartTime
+							),
+							payableStartTime
+					);
+				})
 				.toList();
 	}
 
 	/**
-	 * Approves a joined worker attendance record while the shift is OPEN.
+	 * Approves a joined worker attendance record while the shift is OPEN or ACTIVE.
 	 *
 	 * <p>The method locks the shift first and attendance second, enforces owner/admin access, allows only
 	 * JOINED-to-APPROVED transition, optionally overrides the attendance hourly rate, and records approval time in UTC.
@@ -173,8 +227,8 @@ public class AttendanceService {
 				.findByIdAndShiftSessionIdForUpdate(attendanceId, shiftId)
 				.orElseThrow(AttendanceNotFoundException::new);
 
-		if (shiftSession.getStatus() != ShiftStatus.OPEN) {
-			throw new ShiftStateConflictException("Attendance can only be approved while shift status is OPEN");
+		if (shiftSession.getStatus() != ShiftStatus.OPEN && shiftSession.getStatus() != ShiftStatus.ACTIVE) {
+			throw new ShiftStateConflictException("Attendance can only be approved while shift status is OPEN or ACTIVE");
 		}
 		if (attendance.getStatus() != AttendanceStatus.JOINED) {
 			throw new AttendanceConflictException("Attendance can only be approved when status is JOINED");
@@ -183,10 +237,31 @@ public class AttendanceService {
 		if (request != null && request.hourlyRate() != null) {
 			attendance.setHourlyRate(request.hourlyRate());
 		}
+		OffsetDateTime approvedAt = OffsetDateTime.now(ZoneOffset.UTC);
 		attendance.setStatus(AttendanceStatus.APPROVED);
-		attendance.setApprovedAt(OffsetDateTime.now(ZoneOffset.UTC));
+		attendance.setApprovedAt(approvedAt);
+		attendance.setPayableStartTime(resolvePayableStartTime(shiftSession, approvedAt));
 
 		return ApproveAttendanceResponse.from(attendance);
+	}
+
+	private OffsetDateTime resolvePayableStartTime(ShiftSession shiftSession, OffsetDateTime approvedAt) {
+		if (shiftSession.getStatus() == ShiftStatus.ACTIVE) {
+			return approvedAt;
+		}
+		return null;
+	}
+
+	private OffsetDateTime workerPayableWindowStart(ShiftSession shiftSession, ShiftAttendance attendance) {
+		if (attendance.getStatus() != AttendanceStatus.APPROVED) {
+			return null;
+		}
+		OffsetDateTime actualStartTime = shiftSession.getActualStartTime();
+		OffsetDateTime payableStartTime = attendance.getPayableStartTime();
+		if (actualStartTime == null || payableStartTime == null || !payableStartTime.isAfter(actualStartTime)) {
+			return actualStartTime;
+		}
+		return payableStartTime;
 	}
 
 	/**

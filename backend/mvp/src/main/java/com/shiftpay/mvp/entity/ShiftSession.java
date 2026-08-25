@@ -21,7 +21,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 
 /**
- * Shift session entity managed by a foreman or admin.
+ * Shift session entity managed by a foreman.
  *
  * <p>The session owns lifecycle timestamps, join code, default break and hourly-rate values, and is the parent for
  * worker attendance rows.</p>
@@ -80,6 +80,22 @@ public class ShiftSession {
 	@Setter
 	@Column(name = "default_hourly_rate", nullable = false, precision = 12, scale = 2)
 	private BigDecimal defaultHourlyRate;
+
+	@Setter
+	@Column(name = "foreman_hourly_rate", nullable = false, precision = 12, scale = 2)
+	private BigDecimal foremanHourlyRate;
+
+	@Setter
+	@Column(name = "foreman_worked_minutes")
+	private Integer foremanWorkedMinutes;
+
+	@Setter
+	@Column(name = "foreman_pause_minutes")
+	private Integer foremanPauseMinutes;
+
+	@Setter
+	@Column(name = "foreman_calculated_salary", precision = 12, scale = 2)
+	private BigDecimal foremanCalculatedSalary;
 
 	@Setter
 	@ManyToOne(fetch = FetchType.LAZY, optional = false)
