@@ -301,14 +301,19 @@ public class ShiftSessionService {
 
 		for (ShiftAttendance attendance : attendanceRows) {
 			if (attendance.getStatus() == AttendanceStatus.APPROVED) {
+				OffsetDateTime workerPayableStart = workerPayableStart(shiftSession, attendance);
+				long workerDurationMinutes = salaryCalculationService.calculateDurationMinutes(
+						workerPayableStart,
+						actualEndTime
+				);
 				int pauseMinutes = pauseCalculationService.calculateEffectivePauseMinutes(
 						pauseIntervals,
 						attendance.getWorker().getId(),
-						shiftSession.getActualStartTime(),
+						workerPayableStart,
 						actualEndTime
 				);
 				SalaryCalculationService.SalaryCalculationResult salary = salaryCalculationService.calculate(
-						durationMinutes,
+						workerDurationMinutes,
 						attendance.getBreakMinutes(),
 						pauseMinutes,
 						attendance.getHourlyRate()
@@ -398,6 +403,26 @@ public class ShiftSessionService {
 				attendance.getHourlyRate(),
 				attendance.getCalculatedSalary().setScale(2, RoundingMode.HALF_UP)
 		);
+	}
+
+	/**
+	 * Finds the start of the worker's payable interval for close-time salary calculation.
+	 *
+	 * <p>Workers approved before the shift began are paid from the shift actual start. Workers approved during an
+	 * already active shift are paid from their approval timestamp. A defensive max also prevents persisted timestamps
+	 * before actualStartTime from expanding the payable interval.</p>
+	 *
+	 * @param shiftSession shift being closed
+	 * @param attendance approved worker attendance
+	 * @return effective worker payable start time
+	 */
+	private OffsetDateTime workerPayableStart(ShiftSession shiftSession, ShiftAttendance attendance) {
+		OffsetDateTime actualStartTime = shiftSession.getActualStartTime();
+		OffsetDateTime payableStartTime = attendance.getPayableStartTime();
+		if (payableStartTime == null || !payableStartTime.isAfter(actualStartTime)) {
+			return actualStartTime;
+		}
+		return payableStartTime;
 	}
 
 	/**

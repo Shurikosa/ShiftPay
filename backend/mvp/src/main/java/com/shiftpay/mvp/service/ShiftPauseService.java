@@ -1,6 +1,7 @@
 package com.shiftpay.mvp.service;
 
 import com.shiftpay.mvp.dto.PauseResponse;
+import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.PauseScope;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftAttendance;
@@ -65,8 +66,8 @@ public class ShiftPauseService {
 	@Transactional
 	public PauseResponse startMyPause(Long shiftId, AuthenticatedUserPrincipal principal) {
 		ShiftSession shiftSession = findShiftForPause(shiftId);
-		User targetUser = validatePersonalPauseAccess(shiftSession, principal);
 		validateActiveShiftForPause(shiftSession);
+		User targetUser = validatePersonalPauseAccess(shiftSession, principal);
 
 		if (shiftPauseIntervalRepository.findActivePersonalForUpdate(shiftId, targetUser.getId()).isPresent()) {
 			throw new ShiftStateConflictException("Personal pause is already active");
@@ -90,8 +91,8 @@ public class ShiftPauseService {
 	@Transactional
 	public PauseResponse endMyPause(Long shiftId, AuthenticatedUserPrincipal principal) {
 		ShiftSession shiftSession = findShiftForPause(shiftId);
-		User targetUser = validatePersonalPauseAccess(shiftSession, principal);
 		validateActiveShiftForPause(shiftSession);
+		User targetUser = validatePersonalPauseAccess(shiftSession, principal);
 
 		ShiftPauseInterval pauseInterval = shiftPauseIntervalRepository
 				.findActivePersonalForUpdate(shiftId, targetUser.getId())
@@ -177,6 +178,9 @@ public class ShiftPauseService {
 				.orElseThrow(() -> new ForbiddenException("Worker must join this shift before pausing"));
 		if (!Objects.equals(attendance.getShiftSession().getCompany().getId(), currentUser.getCompany().getId())) {
 			throw new ForbiddenException("Worker must belong to the shift company before pausing");
+		}
+		if (attendance.getStatus() != AttendanceStatus.APPROVED) {
+			throw new ForbiddenException("Worker must be approved for this shift before pausing");
 		}
 		return currentUser;
 	}

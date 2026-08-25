@@ -99,6 +99,7 @@ class PauseControllerTests {
 		CreatedShift shift = createShift(foremanToken, 0, "20.00");
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
 		long attendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), attendanceId).andExpect(status().isOk());
 		startShift(foremanToken, shift.id()).andExpect(status().isOk());
 		Long workerId = userRepository.findByEmail("worker@example.com").orElseThrow().getId();
 
@@ -176,6 +177,43 @@ class PauseControllerTests {
 	}
 
 	/**
+	 * Requires approval, not just a pending attendance row, before a worker can use personal pause.
+	 */
+	@Test
+	void workerCannotPauseBeforeApproval() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, 0, "20.00");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		joinAndGetAttendanceId(workerToken, shift.joinCode());
+		startShift(foremanToken, shift.id()).andExpect(status().isOk());
+
+		startMyPause(workerToken, shift.id())
+				.andExpect(status().isForbidden())
+				.andExpect(jsonPath("$.status").value(403))
+				.andExpect(jsonPath("$.error").value("Forbidden"))
+				.andExpect(jsonPath("$.message").value("Worker must be approved for this shift before pausing"))
+				.andExpect(jsonPath("$.path").value(myPauseStartUrl(shift.id())));
+	}
+
+	/**
+	 * Allows a late worker to use personal pause after joining and getting approved during an ACTIVE shift.
+	 */
+	@Test
+	void lateApprovedWorkerCanStartPersonalPause() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, 0, "20.00");
+		startShift(foremanToken, shift.id()).andExpect(status().isOk());
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), attendanceId).andExpect(status().isOk());
+
+		startMyPause(workerToken, shift.id())
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.scope").value("PERSONAL"))
+				.andExpect(jsonPath("$.active").value(true));
+	}
+
+	/**
 	 * Starts and ends the owner foreman's personal pause without creating foreman attendance.
 	 */
 	@Test
@@ -211,7 +249,8 @@ class PauseControllerTests {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
 		CreatedShift shift = createShift(foremanToken, 0, "20.00");
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
-		joinAndGetAttendanceId(workerToken, shift.joinCode());
+		long attendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), attendanceId).andExpect(status().isOk());
 		startShift(foremanToken, shift.id()).andExpect(status().isOk());
 
 		startAllPause(foremanToken, shift.id())
@@ -270,7 +309,8 @@ class PauseControllerTests {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
 		CreatedShift shift = createShift(foremanToken, 0, "20.00");
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
-		joinAndGetAttendanceId(workerToken, shift.joinCode());
+		long attendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), attendanceId).andExpect(status().isOk());
 		startShift(foremanToken, shift.id()).andExpect(status().isOk());
 
 		startMyPause(workerToken, shift.id()).andExpect(status().isOk());
@@ -396,6 +436,110 @@ class PauseControllerTests {
 	}
 
 	/**
+	 * Clips a late worker's personal pause deduction to their payable interval.
+	 */
+	@Test
+	void lateWorkerPersonalPauseMinutesAreBoundedToPayableInterval() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, 0, "60.00");
+		startShift(foremanToken, shift.id()).andExpect(status().isOk());
+		OffsetDateTime actualStart = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(180);
+		setActualStartTime(shift.id(), actualStart);
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), attendanceId).andExpect(status().isOk());
+		OffsetDateTime payableStart = actualStart.plusMinutes(60);
+		setPayableStartTime(attendanceId, payableStart);
+		User worker = userRepository.findByEmail("worker@example.com").orElseThrow();
+		createPauseInterval(
+				shift.id(),
+				PauseScope.PERSONAL,
+				worker,
+				actualStart.plusMinutes(30),
+				actualStart.plusMinutes(90)
+		);
+
+		closeShift(foremanToken, shift.id()).andExpect(status().isOk());
+
+		ShiftSession closedShift = shiftSessionRepository.findById(shift.id()).orElseThrow();
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		long workerDurationMinutes = Duration.between(payableStart, closedShift.getActualEndTime()).toMinutes();
+		assertThat(attendance.getPauseMinutes()).isEqualTo(30);
+		assertThat(attendance.getWorkedMinutes()).isEqualTo(Math.toIntExact(workerDurationMinutes - 30));
+		assertThat(attendance.getCalculatedSalary()).isEqualByComparingTo(
+				BigDecimal.valueOf(workerDurationMinutes - 30).setScale(2)
+		);
+	}
+
+	/**
+	 * Deducts all-participant pauses from a late worker only after that worker's payable start.
+	 */
+	@Test
+	void allPauseBeforeLateWorkerApprovalDoesNotSubtractBeforeWorkerStart() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, 0, "60.00");
+		startShift(foremanToken, shift.id()).andExpect(status().isOk());
+		OffsetDateTime actualStart = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(180);
+		setActualStartTime(shift.id(), actualStart);
+		createPauseInterval(
+				shift.id(),
+				PauseScope.ALL,
+				null,
+				actualStart.plusMinutes(15),
+				actualStart.plusMinutes(75)
+		);
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), attendanceId).andExpect(status().isOk());
+		OffsetDateTime payableStart = actualStart.plusMinutes(60);
+		setPayableStartTime(attendanceId, payableStart);
+
+		closeShift(foremanToken, shift.id()).andExpect(status().isOk());
+
+		ShiftSession closedShift = shiftSessionRepository.findById(shift.id()).orElseThrow();
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		long workerDurationMinutes = Duration.between(payableStart, closedShift.getActualEndTime()).toMinutes();
+		assertThat(attendance.getPauseMinutes()).isEqualTo(15);
+		assertThat(attendance.getWorkedMinutes()).isEqualTo(Math.toIntExact(workerDurationMinutes - 15));
+		assertThat(closedShift.getForemanPauseMinutes()).isEqualTo(60);
+	}
+
+	/**
+	 * Clamps paid minutes and salary to zero when static break plus dynamic pause exceed a late worker's payable window.
+	 */
+	@Test
+	void lateWorkerBreakAndPauseGreaterThanPayableWindowClampsSalaryToZero() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, 15, "60.00");
+		startShift(foremanToken, shift.id()).andExpect(status().isOk());
+		OffsetDateTime actualStart = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(120);
+		setActualStartTime(shift.id(), actualStart);
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), attendanceId).andExpect(status().isOk());
+		OffsetDateTime payableStart = actualStart.plusMinutes(100);
+		setPayableStartTime(attendanceId, payableStart);
+		User worker = userRepository.findByEmail("worker@example.com").orElseThrow();
+		createPauseInterval(
+				shift.id(),
+				PauseScope.PERSONAL,
+				worker,
+				actualStart.plusMinutes(105),
+				actualStart.plusMinutes(120)
+		);
+
+		closeShift(foremanToken, shift.id()).andExpect(status().isOk());
+
+		ShiftSession closedShift = shiftSessionRepository.findById(shift.id()).orElseThrow();
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		long workerDurationMinutes = Duration.between(payableStart, closedShift.getActualEndTime()).toMinutes();
+		assertThat(workerDurationMinutes).isLessThan(attendance.getBreakMinutes() + attendance.getPauseMinutes());
+		assertThat(attendance.getPauseMinutes()).isEqualTo(15);
+		assertThat(attendance.getWorkedMinutes()).isZero();
+		assertThat(attendance.getCalculatedSalary()).isEqualByComparingTo("0.00");
+	}
+
+	/**
 	 * Keeps foreman private salary and rate fields out of worker history while exposing worker pause state.
 	 */
 	@Test
@@ -403,7 +547,8 @@ class PauseControllerTests {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
 		CreatedShift shift = createShift(foremanToken, 0, "20.00");
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
-		joinAndGetAttendanceId(workerToken, shift.joinCode());
+		long attendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), attendanceId).andExpect(status().isOk());
 		startShift(foremanToken, shift.id()).andExpect(status().isOk());
 		startAllPause(foremanToken, shift.id()).andExpect(status().isOk());
 		startMyPause(workerToken, shift.id()).andExpect(status().isOk());
@@ -599,6 +744,12 @@ class PauseControllerTests {
 		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId).orElseThrow();
 		shiftSession.setActualStartTime(actualStartTime);
 		shiftSessionRepository.saveAndFlush(shiftSession);
+	}
+
+	private void setPayableStartTime(long attendanceId, OffsetDateTime payableStartTime) {
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		attendance.setPayableStartTime(payableStartTime);
+		shiftAttendanceRepository.saveAndFlush(attendance);
 	}
 
 	private void createPauseInterval(

@@ -112,6 +112,7 @@ Follow-up backend tasks:
 - [x] Implement shift cancel endpoint and lifecycle rules
 - [x] Make `defaultBreakMinutes` optional and default it to 0
 - [x] Implement pause system for active shifts
+- [x] Allow late worker join/approval for ACTIVE shifts with payable-start salary calculation
 - [ ] Set default JWT expiration to 8 hours
 
 Follow-up mobile tasks:
@@ -125,6 +126,7 @@ Follow-up mobile tasks:
 - [ ] Implement shift cancel UI after backend endpoint is ready
 - [ ] Make `defaultBreakMinutes` optional and default it to 0 in mobile forms
 - [ ] Implement pause UI and API client calls using backend pause endpoints
+- [ ] Update join/approval UI copy for ACTIVE late joins and backend `payableStartTime`
 
 ## Milestone 7: Mobile Foundation
 

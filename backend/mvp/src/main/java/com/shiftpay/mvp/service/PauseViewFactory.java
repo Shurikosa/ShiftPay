@@ -43,17 +43,37 @@ public class PauseViewFactory {
 			Long userId,
 			Integer persistedPauseMinutes
 	) {
+		return forUser(shiftSession, intervals, userId, persistedPauseMinutes, shiftSession.getActualStartTime());
+	}
+
+	/**
+	 * Builds pause state for one user's view of a shift using a caller-selected effective pause window start.
+	 *
+	 * @param shiftSession shift session
+	 * @param intervals pause intervals for the shift
+	 * @param userId user whose personal pause state should be shown, or null
+	 * @param persistedPauseMinutes close-time persisted pause minutes, or null before close
+	 * @param effectiveWindowStart start of the current payable/effective pause window, or null when unavailable
+	 * @return pause state DTO
+	 */
+	public PauseStateResponse forUser(
+			ShiftSession shiftSession,
+			List<ShiftPauseInterval> intervals,
+			Long userId,
+			Integer persistedPauseMinutes,
+			OffsetDateTime effectiveWindowStart
+	) {
 		OffsetDateTime allPauseStartedAt = activeAllPauseStartedAt(intervals);
 		OffsetDateTime personalPauseStartedAt = userId == null ? null : activePersonalPauseStartedAt(intervals, userId);
 		Integer effectivePauseMinutes = persistedPauseMinutes;
-		if (effectivePauseMinutes == null && userId != null && shiftSession.getActualStartTime() != null) {
+		if (effectivePauseMinutes == null && userId != null && effectiveWindowStart != null) {
 			OffsetDateTime windowEnd = shiftSession.getActualEndTime() == null
 					? OffsetDateTime.now(ZoneOffset.UTC)
 					: shiftSession.getActualEndTime();
 			effectivePauseMinutes = pauseCalculationService.calculateEffectivePauseMinutes(
 					intervals,
 					userId,
-					shiftSession.getActualStartTime(),
+					effectiveWindowStart,
 					windowEnd
 			);
 		}

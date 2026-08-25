@@ -12,8 +12,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * Service unit tests for salary and worked-minute calculation.
  *
- * <p>The class covers the core salary formula, break deduction, zero-rate behavior, HALF_UP money rounding, and
- * validation for impossible break durations.</p>
+ * <p>The class covers the core salary formula, break deduction, zero-rate behavior, HALF_UP money rounding, zero
+ * clamping when unpaid minutes exceed the work window, and validation for negative values.</p>
  */
 class SalaryCalculationServiceTests {
 
@@ -100,16 +100,91 @@ class SalaryCalculationServiceTests {
 	}
 
 	/**
-	 * Rejects break minutes greater than total duration because that would create negative worked time.
+	 * Clamps paid minutes and salary to zero when break minutes exceed the payable duration.
 	 */
 	@Test
-	void breakGreaterThanDurationFails() {
-		assertThatThrownBy(() -> salaryCalculationService.calculate(
+	void breakGreaterThanDurationClampsToZero() {
+		SalaryCalculationService.SalaryCalculationResult result = salaryCalculationService.calculate(
 				60,
 				61,
 				new BigDecimal("15.00")
+		);
+
+		assertThat(result.workedMinutes()).isZero();
+		assertThat(result.calculatedSalary()).isEqualByComparingTo("0.00");
+		assertThat(result.calculatedSalary().scale()).isEqualTo(2);
+	}
+
+	/**
+	 * Clamps paid minutes and salary to zero when static break plus dynamic pause exceed the payable duration.
+	 */
+	@Test
+	void breakAndPauseGreaterThanDurationClampsToZero() {
+		SalaryCalculationService.SalaryCalculationResult result = salaryCalculationService.calculate(
+				20,
+				10,
+				15,
+				new BigDecimal("30.00")
+		);
+
+		assertThat(result.workedMinutes()).isZero();
+		assertThat(result.calculatedSalary()).isEqualByComparingTo("0.00");
+	}
+
+	/**
+	 * Rejects negative break minutes before any clamping is applied.
+	 */
+	@Test
+	void negativeBreakStillFails() {
+		assertThatThrownBy(() -> salaryCalculationService.calculate(
+				60,
+				-1,
+				new BigDecimal("15.00")
 		))
 				.isInstanceOf(ShiftStateConflictException.class)
-				.hasMessage("Break minutes cannot be greater than shift duration");
+				.hasMessage("Break minutes cannot be negative");
+	}
+
+	/**
+	 * Rejects negative durations before any clamping is applied.
+	 */
+	@Test
+	void negativeDurationStillFails() {
+		assertThatThrownBy(() -> salaryCalculationService.calculate(
+				-1,
+				0,
+				new BigDecimal("15.00")
+		))
+				.isInstanceOf(ShiftStateConflictException.class)
+				.hasMessage("Shift duration cannot be negative");
+	}
+
+	/**
+	 * Rejects negative pause minutes before any clamping is applied.
+	 */
+	@Test
+	void negativePauseStillFails() {
+		assertThatThrownBy(() -> salaryCalculationService.calculate(
+				60,
+				0,
+				-1,
+				new BigDecimal("15.00")
+		))
+				.isInstanceOf(ShiftStateConflictException.class)
+				.hasMessage("Pause minutes cannot be negative");
+	}
+
+	/**
+	 * Rejects negative hourly rates before salary calculation.
+	 */
+	@Test
+	void negativeRateStillFails() {
+		assertThatThrownBy(() -> salaryCalculationService.calculate(
+				60,
+				0,
+				new BigDecimal("-0.01")
+		))
+				.isInstanceOf(ShiftStateConflictException.class)
+				.hasMessage("Attendance hourlyRate cannot be negative");
 	}
 }

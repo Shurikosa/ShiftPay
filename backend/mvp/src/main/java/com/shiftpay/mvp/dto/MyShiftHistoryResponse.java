@@ -26,6 +26,7 @@ import java.time.OffsetDateTime;
  * @param attendanceStatus current attendance status for the user
  * @param hourlyRate attendance rate snapshot or override
  * @param breakMinutes break minutes stored on attendance
+ * @param payableStartTime effective worker payable start time, or null before it is known
  * @param pauseMinutes persisted pause minutes deducted after close, or null before salary calculation
  * @param workedMinutes persisted worked minutes after close, or null
  * @param calculatedSalary persisted salary after close, or null
@@ -44,6 +45,7 @@ public record MyShiftHistoryResponse(
 		AttendanceStatus attendanceStatus,
 		BigDecimal hourlyRate,
 		Integer breakMinutes,
+		OffsetDateTime payableStartTime,
 		Integer pauseMinutes,
 		Integer workedMinutes,
 		BigDecimal calculatedSalary,
@@ -57,7 +59,7 @@ public record MyShiftHistoryResponse(
 	 * @return personal shift history response DTO
 	 */
 	public static MyShiftHistoryResponse from(ShiftAttendance attendance) {
-		return from(attendance, PauseStateResponse.none());
+		return from(attendance, PauseStateResponse.none(), null);
 	}
 
 	/**
@@ -68,6 +70,22 @@ public record MyShiftHistoryResponse(
 	 * @return personal shift history response DTO
 	 */
 	public static MyShiftHistoryResponse from(ShiftAttendance attendance, PauseStateResponse pauseState) {
+		return from(attendance, pauseState, null);
+	}
+
+	/**
+	 * Maps attendance with its shift, pause state, and effective payable start to the personal history response.
+	 *
+	 * @param attendance attendance entity for the current user
+	 * @param pauseState pause state for the current user's attendance
+	 * @param payableStartTime effective worker payable start time
+	 * @return personal shift history response DTO
+	 */
+	public static MyShiftHistoryResponse from(
+			ShiftAttendance attendance,
+			PauseStateResponse pauseState,
+			OffsetDateTime payableStartTime
+	) {
 		ShiftSession shiftSession = attendance.getShiftSession();
 		return new MyShiftHistoryResponse(
 				shiftSession.getId(),
@@ -82,6 +100,7 @@ public record MyShiftHistoryResponse(
 				attendance.getStatus(),
 				attendance.getHourlyRate(),
 				attendance.getBreakMinutes(),
+				payableStartTime,
 				attendance.getPauseMinutes(),
 				attendance.getWorkedMinutes(),
 				attendance.getCalculatedSalary(),

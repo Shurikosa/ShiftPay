@@ -194,8 +194,8 @@ Hourly Rate Ownership
 - ADMIN cannot create shifts or set defaultHourlyRate through the REST/mobile API.
 - ShiftAttendance.hourlyRate is copied from ShiftSession.defaultHourlyRate when a worker joins.
 - ShiftAttendance.hourlyRate is a snapshot for that worker and shift, so later shift-rate changes do not rewrite historical attendance.
-- FOREMAN can override ShiftAttendance.hourlyRate while approving attendance for an owned OPEN shift.
-- ADMIN can override ShiftAttendance.hourlyRate while approving attendance for any OPEN shift.
+- FOREMAN can override ShiftAttendance.hourlyRate while approving attendance for an owned OPEN or ACTIVE shift.
+- ADMIN can override ShiftAttendance.hourlyRate while approving attendance for any OPEN or ACTIVE shift.
 - Approval without an override preserves the join-time attendance rate snapshot.
 - An attendance-specific override does not modify ShiftSession.defaultHourlyRate or other attendance records.
 - ShiftSession.foremanHourlyRate is private to the owner FOREMAN in the REST/mobile MVP.
@@ -216,6 +216,7 @@ workedMinutes
 calculatedSalary
 joinedAt
 approvedAt
+payableStartTime
 createdAt
 updatedAt
 
@@ -225,9 +226,10 @@ Attendance Approval
 - FOREMAN ownership is enforced in the service layer against ShiftSession.createdBy.
 - FOREMAN access is scoped to shifts in their company.
 - Attendance is loaded by both attendance id and shift session id, so a URL shift mismatch is returned as not found.
-- Approval is allowed only while the shift is OPEN.
+- Approval is allowed only while the shift is OPEN or ACTIVE.
 - The only allowed approval transition is JOINED -> APPROVED.
 - approvedAt is recorded using the current server time in UTC.
+- payableStartTime is null for pre-start approvals and is set to approvedAt for ACTIVE-shift approvals.
 - The optional hourly-rate override uses BigDecimal and is limited to non-negative values with two decimal places.
 
 Attendance Query
@@ -237,7 +239,7 @@ Attendance Query
 - The repository fetches attendance and worker in one query to avoid N+1 loading.
 - Results are ordered by joinedAt ascending and then attendance id ascending.
 - Controllers return attendance DTOs and never expose User entities or password hashes.
-- Attendance DTOs expose pauseState, pauseMinutes, workedMinutes, and calculatedSalary so active pause state and close-time salary results can be read without a summary endpoint.
+- Attendance DTOs expose payableStartTime, pauseState, pauseMinutes, workedMinutes, and calculatedSalary so active pause state and close-time salary results can be read without a summary endpoint.
 
 Worker Shift History
 
@@ -251,7 +253,7 @@ Worker Shift History
 - The repository fetches attendance with shift in one query to avoid N+1 loading.
 - Results are ordered by joinedAt descending and then attendance id descending.
 - DTOs expose shift and attendance fields only, never User entities, emails, password hashes, foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary.
-- DTOs include company name, pauseState for active shift display, and persisted pauseMinutes after close-time salary calculation.
+- DTOs include company name, payableStartTime, pauseState for active shift display, and persisted pauseMinutes after close-time salary calculation.
 
 Foreman Managed Shifts
 
@@ -285,23 +287,30 @@ Salary Calculation
 - Close locks all attendance rows for the shift with PESSIMISTIC_WRITE after locking the ShiftSession.
 - Worker salary is calculated only for APPROVED attendance.
 - JOINED, REJECTED, and CANCELLED attendance keep workedMinutes and calculatedSalary null.
-- workedMinutes = minutes_between(actualStartTime, actualEndTime) - attendance.breakMinutes - attendance.pauseMinutes.
+- For attendance approved before shift start, worker payable start is ShiftSession.actualStartTime.
+- For attendance approved while the shift is ACTIVE, worker payable start is ShiftAttendance.payableStartTime/approvedAt.
+- durationMinutes = minutes_between(worker payable start, actualEndTime).
+- unpaidMinutes = attendance.breakMinutes + attendance.pauseMinutes.
+- workedMinutes = max(0, durationMinutes - unpaidMinutes).
 - calculatedSalary = workedMinutes / 60 * attendance.hourlyRate.
 - calculatedSalary is stored with scale 2 and RoundingMode.HALF_UP.
-- attendance.pauseMinutes is calculated from the union of all-pause intervals and the worker's personal pause intervals.
+- attendance.pauseMinutes is calculated from the union of all-pause intervals and the worker's personal pause intervals, clipped to the worker payable interval.
 - Salary uses ShiftAttendance.hourlyRate, including any attendance-specific approval override.
 - Foreman salary is calculated separately from worker attendance.
 - The backend must not create a ShiftAttendance row for foreman salary.
 - Foreman salary uses ShiftSession.foremanHourlyRate.
-- foremanWorkedMinutes = minutes_between(actualStartTime, actualEndTime) - ShiftSession.defaultBreakMinutes - ShiftSession.foremanPauseMinutes.
+- foremanDurationMinutes = minutes_between(actualStartTime, actualEndTime).
+- foremanUnpaidMinutes = ShiftSession.defaultBreakMinutes + ShiftSession.foremanPauseMinutes.
+- foremanWorkedMinutes = max(0, foremanDurationMinutes - foremanUnpaidMinutes).
 - foremanPauseMinutes is calculated from the union of all-pause intervals and the foreman's personal pause intervals.
 - foremanSalary = foremanWorkedMinutes / 60 * ShiftSession.foremanHourlyRate.
 - foremanSalary is stored or returned with scale 2 and RoundingMode.HALF_UP.
 - Static defaultBreakMinutes is optional and defaults to 0.
 - Dynamic pauses are separate from defaultBreakMinutes.
+- Static break minutes, or static break plus effective pause minutes, that exceed the payable duration clamp paid minutes and salary to zero for workers and the private foreman salary.
 - CANCELLED shifts do not calculate salary.
 - No client should calculate worker or foreman salary.
-- Close fails with 409 if actualStartTime is missing, an attendance breakMinutes is greater than shift duration, ShiftSession.defaultBreakMinutes is greater than shift duration, or break plus effective pause minutes are greater than shift duration.
+- Close fails with 409 if actualStartTime is missing or salary inputs are negative where request validation normally prevents them.
 - Close is transactional: when salary validation fails, the shift remains ACTIVE and attendance salary fields are not written.
 
 Pause System
@@ -309,6 +318,7 @@ Pause System
 - Pause tracking is implemented for ACTIVE shifts.
 - Pause is separate from static defaultBreakMinutes.
 - WORKER can start and stop pause only for themselves.
+- WORKER personal pause requires approved attendance on the ACTIVE shift.
 - FOREMAN can start and stop self pause on their own active shift.
 - FOREMAN can start and stop global pause for everyone on their own active shift.
 - ADMIN cannot pause through the REST/mobile API.
@@ -318,6 +328,7 @@ Pause System
 - Ending a pause with no active interval for that target/scope returns 409.
 - ShiftPauseInterval stores shift, scope, user for PERSONAL pauses, startedAt, and endedAt.
 - ALL pause intervals have no user and affect every paid participant on the shift.
+- ALL pause intervals affect late workers only from their payable start onward.
 - Pause status must be visible in mobile dashboards and details.
 - Worker views show whether the worker is paused or global pause is active.
 - Foreman views show global pause status, foreman self pause status, and worker pause status.
@@ -358,7 +369,7 @@ Concurrency Control
 - ShiftPauseInterval rows are locked during close before active intervals are auto-ended and salary deductions are calculated.
 - Operations that require both rows always lock ShiftSession first and ShiftAttendance second.
 - Concurrent approvals serialize so only the first JOINED -> APPROVED transition succeeds.
-- Start serializes with join and approval, preventing either operation from succeeding after the shift becomes ACTIVE.
+- Start serializes with join and approval; operations that observe ACTIVE status can still create late joins or approve pending attendance under the ACTIVE rules.
 - Cancel serializes with join, approval, start, and close, preventing worker joins and lifecycle transitions after the shift becomes CANCELLED.
 - Close serializes concurrent lifecycle transitions and prevents duplicate successful close operations.
 - Pause start/end locks ShiftSession first and then active pause intervals so pause operations serialize with close and lifecycle state changes.
@@ -414,8 +425,8 @@ WORKER:
 - own profile
 - join company
 - own shifts
-- join shift
-- pause/resume self on ACTIVE shifts they joined in their company
+- join OPEN shifts and ACTIVE shifts in their company
+- pause/resume self on ACTIVE shifts where they have approved attendance
 
 FOREMAN:
 - create own company

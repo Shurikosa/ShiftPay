@@ -268,7 +268,7 @@ Empty state:
 
 Purpose:
 
-- let a worker join an open shift by join code
+- let a worker join an OPEN shift before start or an ACTIVE shift as a late worker by join code
 
 Fields:
 
@@ -288,7 +288,8 @@ Rules:
 - normalize user input visually as uppercase if practical
 - worker never enters or edits hourly rate
 - worker must already belong to the shift's company
-- show duplicate join, unknown code, forbidden, and closed/non-open shift errors
+- backend accepts joins only for `OPEN` and `ACTIVE` shifts
+- show duplicate join, unknown code, forbidden, and `CLOSED`/`CANCELLED` shift errors
 
 ### MyShiftHistoryScreen
 
@@ -330,6 +331,7 @@ Content:
 - actual start/end times when available
 - hourly rate snapshot
 - break minutes
+- payable start time when provided by the backend
 - current personal/all pause state
 - persisted pause minutes after close
 - worked minutes
@@ -345,9 +347,11 @@ API calls:
 Rules:
 
 - worker pause controls are available only while the shift is `ACTIVE`
+- worker pause controls require approved attendance, not only a pending join request
 - worker pause controls affect only the current worker
 - show whether an all-participant pause is active from `pauseState`
 - do not calculate pause-adjusted salary on the client
+- for late workers, display backend persisted `payableStartTime`, `workedMinutes`, `pauseMinutes`, and `calculatedSalary`; do not derive them from `actualStartTime`
 
 ### ForemanDashboardScreen
 
@@ -455,7 +459,7 @@ API calls:
 
 Rules:
 
-- approve is available only for `JOINED` attendance while the shift is `OPEN`
+- approve is available only for `JOINED` attendance while the shift is `OPEN` or `ACTIVE`
 - start is available only while the shift is `OPEN`
 - cancel is available only while the shift is `OPEN`
 - pause/resume is available only while the shift is `ACTIVE`
@@ -465,6 +469,7 @@ Rules:
 - summary is available only after the shift is `CLOSED`
 - actualStartTime and actualEndTime are set by the backend
 - do not calculate worker or foreman salary on the client
+- late worker pay starts from backend `payableStartTime`/approval time, not the global shift start
 - cancelled shifts should show CANCELLED status and no salary summary action
 - use backend `pauseState` and attendance-level pause state; do not derive active pause state locally beyond rendering returned fields
 
@@ -580,7 +585,7 @@ Mobile should implement:
 - backend-provided `pauseState` in shift, managed-shift, attendance, and worker-history DTOs
 - backend-provided `pauseMinutes`/`foremanPauseMinutes` after close
 
-Mobile must not calculate pause-adjusted salary. It should display backend persisted `workedMinutes`, `pauseMinutes`, `foremanPauseMinutes`, and salary fields after close.
+Mobile must not calculate pause-adjusted salary. It should display backend persisted `payableStartTime`, `workedMinutes`, `pauseMinutes`, `foremanPauseMinutes`, and salary fields after close. All-participant pauses that began before a late worker's payable start are already clipped by the backend for that worker.
 
 ## 10. Implementation Notes
 
@@ -595,6 +600,7 @@ Mobile must not calculate pause-adjusted salary. It should display backend persi
 - Do not calculate salary on the client.
 - The mobile app should consume persisted `workedMinutes` and
   `calculatedSalary` values returned by the backend.
+- For late workers, the mobile app should treat backend `payableStartTime` as the worker's effective salary start.
 - The mobile app should consume backend `pauseState`, `pauseMinutes`, and
   `foremanPauseMinutes` rather than deriving pause totals locally.
 - If an API endpoint is missing or unclear, update `docs/API.md` before building

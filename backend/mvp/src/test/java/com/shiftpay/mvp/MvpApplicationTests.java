@@ -66,7 +66,8 @@ class MvpApplicationTests {
 		assertThat(countColumn("shift_sessions", "foreman_pause_minutes")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "foreman_calculated_salary")).isEqualTo(1);
 		assertThat(countColumn("shift_attendance", "pause_minutes")).isEqualTo(1);
-		assertThat(latestFlywayVersion()).isEqualTo("8");
+		assertThat(countColumn("shift_attendance", "payable_start_time")).isEqualTo(1);
+		assertThat(latestFlywayVersion()).isEqualTo("9");
 	}
 
 	/**

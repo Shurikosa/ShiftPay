@@ -967,6 +967,65 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
+	 * Closes a shift with a late ACTIVE approval and expects worker salary to start from the attendance payable start,
+	 * not the global shift actualStartTime.
+	 */
+	@Test
+	void closeCalculatesLateApprovedWorkerSalaryFromPayableStart() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Late salary shift");
+		startShift(foremanToken, shiftId).andExpect(status().isOk());
+		OffsetDateTime actualStart = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(180);
+		setActualStartTime(shiftId, actualStart);
+		String workerToken = registerAndLogin("late.worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
+		approveAttendance(foremanToken, shiftId, attendanceId, "{}").andExpect(status().isOk());
+		OffsetDateTime payableStart = actualStart.plusMinutes(60);
+		setAttendanceBreakMinutes(attendanceId, 0);
+		setPayableStartTime(attendanceId, payableStart);
+
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
+
+		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		long fullShiftDuration = Duration.between(shift.getActualStartTime(), shift.getActualEndTime()).toMinutes();
+		long workerDuration = Duration.between(payableStart, shift.getActualEndTime()).toMinutes();
+		assertThat(workerDuration).isLessThan(fullShiftDuration);
+		assertThat(attendance.getWorkedMinutes()).isEqualTo(Math.toIntExact(workerDuration));
+		assertThat(attendance.getCalculatedSalary())
+				.isEqualByComparingTo(expectedSalary(Math.toIntExact(workerDuration), attendance.getHourlyRate()));
+	}
+
+	/**
+	 * Closes a shift with a late approved worker whose static break is longer than the payable window and expects
+	 * paid worker minutes and salary to clamp to zero.
+	 */
+	@Test
+	void closeClampsLateApprovedWorkerStaticBreakGreaterThanPayableWindow() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createShift(foremanToken, "Late clamped salary shift");
+		startShift(foremanToken, shiftId).andExpect(status().isOk());
+		OffsetDateTime actualStart = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(120);
+		setActualStartTime(shiftId, actualStart);
+		String workerToken = registerAndLogin("late.clamped.worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
+		approveAttendance(foremanToken, shiftId, attendanceId, "{}").andExpect(status().isOk());
+		OffsetDateTime payableStart = actualStart.plusMinutes(100);
+		setPayableStartTime(attendanceId, payableStart);
+
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
+
+		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		long workerDuration = Duration.between(payableStart, shift.getActualEndTime()).toMinutes();
+		assertThat(workerDuration).isLessThan(attendance.getBreakMinutes());
+		assertThat(attendance.getPauseMinutes()).isZero();
+		assertThat(attendance.getWorkedMinutes()).isZero();
+		assertThat(attendance.getCalculatedSalary()).isEqualByComparingTo("0.00");
+		assertThat(attendance.getCalculatedSalary().scale()).isEqualTo(2);
+	}
+
+	/**
 	 * Closes a shift and expects private foreman salary fields to be persisted on the shift, not attendance.
 	 */
 	@Test
@@ -1034,12 +1093,12 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
-	 * Makes the shift duration shorter than the attendance break and expects close to roll back without salary writes.
+	 * Makes the payable window shorter than the attendance break and expects close to persist zero paid minutes.
 	 */
 	@Test
-	void invalidBreakGreaterThanDurationReturnsConflictAndDoesNotCloseShift() throws Exception {
+	void breakGreaterThanDurationClampsAttendanceSalaryAndClosesShift() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
-		long shiftId = createShift(foremanToken, "Invalid break salary shift");
+		long shiftId = createShift(foremanToken, "Clamped break salary shift");
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
 		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
 		approveAttendance(foremanToken, shiftId, attendanceId, "{}").andExpect(status().isOk());
@@ -1049,45 +1108,49 @@ class ShiftSessionControllerTests {
 		startShift(foremanToken, shiftId).andExpect(status().isOk());
 		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(10));
 
-		closeShift(foremanToken, shiftId)
-				.andExpect(status().isConflict())
-				.andExpect(jsonPath("$.status").value(409))
-				.andExpect(jsonPath("$.error").value("Conflict"))
-				.andExpect(jsonPath("$.message").value("Break minutes cannot be greater than shift duration"))
-				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
 
 		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
 		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
-		assertThat(shift.getStatus()).isEqualTo(ShiftStatus.ACTIVE);
-		assertThat(shift.getActualEndTime()).isNull();
-		assertThat(shift.getForemanWorkedMinutes()).isNull();
-		assertThat(shift.getForemanCalculatedSalary()).isNull();
-		assertThat(attendance.getWorkedMinutes()).isNull();
-		assertThat(attendance.getCalculatedSalary()).isNull();
+		assertThat(shift.getStatus()).isEqualTo(ShiftStatus.CLOSED);
+		assertThat(shift.getActualEndTime()).isNotNull();
+		assertThat(shift.getForemanWorkedMinutes()).isPositive();
+		assertThat(shift.getForemanCalculatedSalary()).isPositive();
+		assertThat(attendance.getWorkedMinutes()).isZero();
+		assertThat(attendance.getCalculatedSalary()).isEqualByComparingTo("0.00");
 	}
 
 	/**
-	 * Makes the shift duration shorter than the default break and expects private foreman salary validation to roll back.
+	 * Makes the shift duration shorter than the default break and expects private foreman salary to clamp to zero.
 	 */
 	@Test
-	void defaultBreakGreaterThanDurationReturnsConflictAndDoesNotCloseShift() throws Exception {
+	void defaultBreakGreaterThanDurationClampsForemanSalaryAndKeepsItPrivate() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
-		long shiftId = createShift(foremanToken, "Invalid foreman break salary shift");
+		long shiftId = createShift(foremanToken, "Clamped foreman break salary shift");
 		startShift(foremanToken, shiftId).andExpect(status().isOk());
 		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(10));
 
-		closeShift(foremanToken, shiftId)
-				.andExpect(status().isConflict())
-				.andExpect(jsonPath("$.status").value(409))
-				.andExpect(jsonPath("$.error").value("Conflict"))
-				.andExpect(jsonPath("$.message").value("Break minutes cannot be greater than shift duration"))
-				.andExpect(jsonPath("$.path").value(closeShiftUrl(shiftId)));
+		closeShift(foremanToken, shiftId).andExpect(status().isOk());
 
 		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
-		assertThat(shift.getStatus()).isEqualTo(ShiftStatus.ACTIVE);
-		assertThat(shift.getActualEndTime()).isNull();
-		assertThat(shift.getForemanWorkedMinutes()).isNull();
-		assertThat(shift.getForemanCalculatedSalary()).isNull();
+		assertThat(shift.getStatus()).isEqualTo(ShiftStatus.CLOSED);
+		assertThat(shift.getForemanWorkedMinutes()).isZero();
+		assertThat(shift.getForemanCalculatedSalary()).isEqualByComparingTo("0.00");
+
+		getSummary(foremanToken, shiftId)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.foremanWorkedMinutes").value(0))
+				.andExpect(jsonPath("$.foremanPauseMinutes").value(0))
+				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
+				.andExpect(jsonPath("$.foremanSalary").value(0.00));
+
+		String adminToken = createAdminAndLogin();
+		getSummary(adminToken, shiftId)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.foremanWorkedMinutes").doesNotExist())
+				.andExpect(jsonPath("$.foremanPauseMinutes").doesNotExist())
+				.andExpect(jsonPath("$.foremanHourlyRate").doesNotExist())
+				.andExpect(jsonPath("$.foremanSalary").doesNotExist());
 	}
 
 	/**
@@ -1812,6 +1875,30 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
+	 * Overrides an attendance static break to isolate salary duration assertions.
+	 *
+	 * @param attendanceId attendance row to update
+	 * @param breakMinutes break minutes to persist
+	 */
+	private void setAttendanceBreakMinutes(long attendanceId, int breakMinutes) {
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		attendance.setBreakMinutes(breakMinutes);
+		shiftAttendanceRepository.saveAndFlush(attendance);
+	}
+
+	/**
+	 * Overrides payableStartTime so close-time payroll tests can use deterministic late-worker windows.
+	 *
+	 * @param attendanceId attendance row to update
+	 * @param payableStartTime effective worker payable start to persist
+	 */
+	private void setPayableStartTime(long attendanceId, OffsetDateTime payableStartTime) {
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		attendance.setPayableStartTime(payableStartTime);
+		shiftAttendanceRepository.saveAndFlush(attendance);
+	}
+
+	/**
 	 * Mirrors the production worked-minute formula so controller tests can assert persisted salary output.
 	 *
 	 * @param shift closed shift entity
@@ -1819,8 +1906,8 @@ class ShiftSessionControllerTests {
 	 * @return expected worked minutes
 	 */
 	private int expectedWorkedMinutes(ShiftSession shift, ShiftAttendance attendance) {
-		return Math.toIntExact(Duration.between(shift.getActualStartTime(), shift.getActualEndTime()).toMinutes()
-				- attendance.getBreakMinutes());
+		long durationMinutes = Duration.between(shift.getActualStartTime(), shift.getActualEndTime()).toMinutes();
+		return Math.toIntExact(Math.max(0, durationMinutes - attendance.getBreakMinutes()));
 	}
 
 	/**
@@ -1830,8 +1917,8 @@ class ShiftSessionControllerTests {
 	 * @return expected foreman worked minutes
 	 */
 	private int expectedForemanWorkedMinutes(ShiftSession shift) {
-		return Math.toIntExact(Duration.between(shift.getActualStartTime(), shift.getActualEndTime()).toMinutes()
-				- shift.getDefaultBreakMinutes());
+		long durationMinutes = Duration.between(shift.getActualStartTime(), shift.getActualEndTime()).toMinutes();
+		return Math.toIntExact(Math.max(0, durationMinutes - shift.getDefaultBreakMinutes()));
 	}
 
 	/**

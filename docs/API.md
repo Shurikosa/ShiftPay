@@ -776,22 +776,24 @@ Access and state rules:
 - actualStartTime must exist.
 - For each APPROVED attendance, the backend calculates and stores workedMinutes and calculatedSalary.
 - Close auto-ends any active personal or all-participant pause intervals at actualEndTime.
-- workedMinutes = minutes_between(actualStartTime, actualEndTime) - attendance.breakMinutes - effective pause minutes.
+- durationMinutes = minutes_between(worker payable start, actualEndTime).
+- unpaidMinutes = attendance.breakMinutes + effective pause minutes.
+- workedMinutes = max(0, durationMinutes - unpaidMinutes).
 - calculatedSalary = workedMinutes / 60 * attendance.hourlyRate, rounded to 2 decimal places with HALF_UP.
 - Effective pause minutes are the union of all-pause intervals and that user's personal pause intervals; overlapping intervals are not double-counted.
 - The backend persists each approved attendance pauseMinutes.
 - Salary uses the attendance hourlyRate snapshot or attendance-specific override, not shift.defaultHourlyRate.
 - JOINED, REJECTED, and CANCELLED attendance keep workedMinutes and calculatedSalary as null.
 - The backend calculates foremanWorkedMinutes and foremanSalary separately from worker attendance.
-- foremanWorkedMinutes = minutes_between(actualStartTime, actualEndTime) - shift.defaultBreakMinutes - foreman effective pause minutes.
+- foremanDurationMinutes = minutes_between(actualStartTime, actualEndTime).
+- foremanUnpaidMinutes = shift.defaultBreakMinutes + foreman effective pause minutes.
+- foremanWorkedMinutes = max(0, foremanDurationMinutes - foremanUnpaidMinutes).
 - The backend persists foremanPauseMinutes.
 - foremanSalary = foremanWorkedMinutes / 60 * shift.foremanHourlyRate, rounded to 2 decimal places with HALF_UP.
 - Foreman salary uses ShiftSession.foremanHourlyRate.
 - The backend must not create a ShiftAttendance row for foreman salary.
 - CANCELLED shifts cannot be closed and do not calculate salary.
-- If breakMinutes is greater than the shift duration, close returns 409 and the shift remains ACTIVE.
-- If defaultBreakMinutes is greater than the shift duration, close returns 409 and the shift remains ACTIVE.
-- If break plus effective pause minutes are greater than the shift duration, close returns 409 and the shift remains ACTIVE.
+- If static break minutes or static break plus effective pause minutes exceed the payable duration, close still succeeds and persists workedMinutes/foremanWorkedMinutes and salary/foremanSalary as zero.
 
 Response:
 
@@ -863,30 +865,6 @@ Status: 409 Conflict
   "path": "/api/v1/shifts/100/close"
 }
 
-Break is greater than shift duration:
-
-Status: 409 Conflict
-
-{
-  "timestamp": "2026-07-01T17:00:00Z",
-  "status": 409,
-  "error": "Conflict",
-  "message": "Break minutes cannot be greater than shift duration",
-  "path": "/api/v1/shifts/100/close"
-}
-
-Break plus pause is greater than shift duration:
-
-Status: 409 Conflict
-
-{
-  "timestamp": "2026-07-01T17:00:00Z",
-  "status": 409,
-  "error": "Conflict",
-  "message": "Break and pause minutes cannot be greater than shift duration",
-  "path": "/api/v1/shifts/100/close"
-}
-
 5. Shift Join
 Join shift by code
 
@@ -901,7 +879,9 @@ Authorization: Bearer <token>
 Rules:
 
 - joinCode is normalized with trim and uppercase.
-- The shift must have status OPEN.
+- The shift must have status OPEN or ACTIVE.
+- A WORKER should join an OPEN shift before it starts, or may join an ACTIVE shift as a late worker.
+- CLOSED and CANCELLED shifts cannot be joined and return 409.
 - The worker must already be a member of the company that owns the shift.
 - A worker can join the same shift only once.
 - A worker never sets hourlyRate.
@@ -988,7 +968,7 @@ Status: 409 Conflict
   "path": "/api/v1/shifts/join"
 }
 
-Shift is not OPEN:
+Shift is not joinable:
 
 Status: 409 Conflict
 
@@ -996,7 +976,7 @@ Status: 409 Conflict
   "timestamp": "2026-07-01T07:55:00Z",
   "status": 409,
   "error": "Conflict",
-  "message": "Workers can only join shifts with status OPEN",
+  "message": "Workers can only join shifts with status OPEN or ACTIVE",
   "path": "/api/v1/shifts/join"
 }
 
@@ -1044,6 +1024,7 @@ Status: 200 OK
     "status": "JOINED",
     "hourlyRate": 15.00,
     "breakMinutes": 0,
+    "payableStartTime": null,
     "pauseMinutes": null,
     "workedMinutes": null,
     "calculatedSalary": null,
@@ -1061,6 +1042,7 @@ Status: 200 OK
 
 For APPROVED attendance after the shift is closed, pauseMinutes, workedMinutes, and calculatedSalary contain the close-time calculation.
 For JOINED, REJECTED, and CANCELLED attendance, pauseMinutes, workedMinutes, and calculatedSalary remain null.
+payableStartTime is null until the worker has approved attendance and an effective payable start. For a worker approved before the shift starts, the effective payable start is the shift actualStartTime and may be returned after start. For a worker approved during an ACTIVE shift, payableStartTime is the approval time.
 pauseState shows the all-pause state plus the listed worker's personal pause state. It does not expose foreman salary or rate fields.
 
 Missing, invalid, or expired token:
@@ -1113,7 +1095,7 @@ Rules:
 
 - FOREMAN can approve attendance only for a shift they created.
 - ADMIN can approve attendance for any shift.
-- The shift must have status OPEN.
+- The shift must have status OPEN or ACTIVE.
 - The attendance must belong to the shift identified by shiftId.
 - Only the JOINED -> APPROVED transition is allowed.
 - The request body is optional.
@@ -1121,6 +1103,8 @@ Rules:
 - If hourlyRate is provided, it overrides the rate only for this attendance.
 - hourlyRate must be non-negative and have at most two decimal places.
 - approvedAt is set by the backend to the current server time in UTC.
+- If approval happens before the shift starts, the worker's payable start is shift actualStartTime.
+- If approval happens while the shift is already ACTIVE, the worker's payable start is approvedAt.
 
 Request without a rate override:
 
@@ -1205,7 +1189,7 @@ Status: 404 Not Found
   "path": "/api/v1/shifts/100/attendance/500/approve"
 }
 
-Shift is not OPEN:
+Shift is not approvable:
 
 Status: 409 Conflict
 
@@ -1213,7 +1197,7 @@ Status: 409 Conflict
   "timestamp": "2026-07-06T20:00:00Z",
   "status": 409,
   "error": "Conflict",
-  "message": "Attendance can only be approved while shift status is OPEN",
+  "message": "Attendance can only be approved while shift status is OPEN or ACTIVE",
   "path": "/api/v1/shifts/100/attendance/500/approve"
 }
 
@@ -1254,7 +1238,7 @@ POST /api/v1/shifts/{shiftId}/pauses/all/end
 Access and state rules:
 
 - `/pauses/me/*` is available to WORKER and FOREMAN.
-- WORKER can start/end only their own personal pause after joining the ACTIVE shift in their company.
+- WORKER can start/end only their own personal pause after they have APPROVED attendance on the ACTIVE shift in their company.
 - FOREMAN can start/end only their own personal pause on a shift they created.
 - `/pauses/all/*` is available only to the owner FOREMAN.
 - ADMIN is not allowed to pause through the REST/mobile API.
@@ -1263,6 +1247,7 @@ Access and state rules:
 - Duplicate start for the same active scope/target returns 409.
 - Ending when there is no active pause for that scope/target returns 409.
 - All-pause applies to the foreman and all workers on the shift.
+- All-pause affects late workers only inside their payable work interval.
 - Personal pause applies only to the targeted current user.
 - If personal and all-pause intervals overlap, close-time salary calculation subtracts the union of intervals without double-counting.
 - Close auto-ends active pause intervals at actualEndTime before calculating salary.
@@ -1373,13 +1358,22 @@ Static break minutes and dynamic pause minutes are both unpaid deductions. Dynam
 
 Worker salary formula after close:
 
-worker_worked_minutes = actualEndTime - actualStartTime - attendance.breakMinutes - attendance.pauseMinutes
+worker_payable_start = actualStartTime for attendance approved before shift start, or approvedAt/payableStartTime for attendance approved while ACTIVE
+worker_duration_minutes = actualEndTime - worker_payable_start
+worker_unpaid_minutes = attendance.breakMinutes + attendance.pauseMinutes
+worker_worked_minutes = max(0, worker_duration_minutes - worker_unpaid_minutes)
 worker_salary = worker_worked_minutes / 60 * attendance.hourlyRate
+
+Worker worked minutes cannot be negative. Static break minutes, or static break plus pause minutes, that exceed a worker's payable duration clamp worker_worked_minutes and worker_salary to zero. Pause calculations are clipped to the worker payable work interval, so all-pause or personal pause time before a late worker's payable start is not deducted from that worker.
 
 Foreman salary formula after close:
 
-foreman_worked_minutes = actualEndTime - actualStartTime - shift.defaultBreakMinutes - shift.foremanPauseMinutes
+foreman_duration_minutes = actualEndTime - actualStartTime
+foreman_unpaid_minutes = shift.defaultBreakMinutes + shift.foremanPauseMinutes
+foreman_worked_minutes = max(0, foreman_duration_minutes - foreman_unpaid_minutes)
 foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
+
+Foreman worked minutes cannot be negative. Static break minutes, or static break plus pause minutes, that exceed the foreman's payable duration clamp foreman_worked_minutes and foreman_salary to zero.
 
 Salary is rounded to 2 decimal places with HALF_UP. Salary is calculated only when close succeeds.
 
@@ -1406,12 +1400,13 @@ Rules:
 - totalWorkers is the number of included APPROVED attendance records.
 - totalSalary is the sum of included worker calculatedSalary values with scale 2.
 - Worker summary remains limited to APPROVED worker attendance.
-- Salary results subtract static break minutes and effective pause minutes.
+- Salary results subtract static break minutes and effective pause minutes, then clamp paid minutes to zero when unpaid minutes exceed the payable duration.
+- Late approved worker salary starts from the worker payable start time, not the global shift actualStartTime.
 - CANCELLED shifts do not return summary because salary is not calculated.
 - Workers are sorted by lastName ascending, firstName ascending, then workerId ascending.
 - If an APPROVED attendance has null workedMinutes or calculatedSalary, the endpoint returns 409.
 - The owner FOREMAN receives private foreman salary fields separately from workers: foremanWorkedMinutes, foremanPauseMinutes, foremanHourlyRate, and foremanSalary.
-- foremanWorkedMinutes uses actualEndTime - actualStartTime - ShiftSession.defaultBreakMinutes - foremanPauseMinutes.
+- foremanWorkedMinutes uses max(0, actualEndTime - actualStartTime - ShiftSession.defaultBreakMinutes - foremanPauseMinutes).
 - foremanSalary uses ShiftSession.foremanHourlyRate.
 - WORKER never receives foreman salary fields.
 - For the MVP REST/mobile API, ADMIN does not receive foreman salary fields.
@@ -1542,6 +1537,7 @@ Rules:
 - OPEN, ACTIVE, CANCELLED, and unapproved attendance may return null workedMinutes and calculatedSalary.
 - This endpoint reads stored attendance salary fields and does not recalculate salary.
 - The response includes pauseState for active shift display and pauseMinutes after close-time salary calculation.
+- The response includes payableStartTime when the backend knows the worker's effective salary start.
 - Results are sorted by joinedAt descending, then attendanceId descending.
 - The response does not expose User entities, worker records, email, or passwordHash.
 - The repository fetches attendance with shift in one query to avoid N+1 loading.
@@ -1562,6 +1558,7 @@ Response:
     "attendanceStatus": "APPROVED",
     "hourlyRate": 15.00,
     "breakMinutes": 0,
+    "payableStartTime": "2026-07-01T08:05:00Z",
     "pauseMinutes": 0,
     "workedMinutes": 480,
     "calculatedSalary": 120.00,
@@ -1576,6 +1573,7 @@ Response:
 ]
 
 Worker history never returns foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary.
+Salary remains backend-calculated. Mobile should display persisted workedMinutes, pauseMinutes, payableStartTime, and calculatedSalary without recalculating them.
 
 Missing, invalid, or expired token:
 
@@ -1676,19 +1674,19 @@ All API errors should use this format:
 
 {
   "timestamp": "2026-07-01T10:00:00",
-  "status": 400,
-  "error": "Bad Request",
-  "message": "Break time cannot be greater than shift duration",
-  "path": "/api/v1/shifts/100/summary"
+  "status": 409,
+  "error": "Conflict",
+  "message": "Shift can only be closed when status is ACTIVE",
+  "path": "/api/v1/shifts/100/close"
 }
 
 9. Authorization Rules
 WORKER:
 - can see own profile
 - can join company by company join code
-- can join shift
+- can join OPEN shifts and ACTIVE shifts in their company
 - can see own shift history
-- can pause/resume self on ACTIVE shifts they joined in their company
+- can pause/resume self on ACTIVE shifts where they have approved attendance
 
 FOREMAN:
 - can create own company
