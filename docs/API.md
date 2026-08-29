@@ -775,6 +775,7 @@ Access and state rules:
 - Only a shift with status ACTIVE can be closed.
 - actualStartTime must exist.
 - For each APPROVED attendance, the backend calculates and stores workedMinutes and calculatedSalary.
+- For each APPROVED attendance, the backend sets paymentStatus to UNPAID after close.
 - Close auto-ends any active personal or all-participant pause intervals at actualEndTime.
 - durationMinutes = minutes_between(worker payable start, actualEndTime).
 - unpaidMinutes = attendance.breakMinutes + effective pause minutes.
@@ -1034,6 +1035,7 @@ Status: 200 OK
     "firstName": "John",
     "lastName": "Worker",
     "status": "JOINED",
+    "paymentStatus": "UNPAID",
     "hourlyRate": 15.00,
     "breakMinutes": 0,
     "payableStartTime": null,
@@ -1054,6 +1056,7 @@ Status: 200 OK
 
 For APPROVED attendance after the shift is closed, pauseMinutes, workedMinutes, and calculatedSalary contain the close-time calculation.
 For JOINED, REJECTED, and CANCELLED attendance, pauseMinutes, workedMinutes, and calculatedSalary remain null.
+paymentStatus is separate from shift status and attendance approval status. Payroll endpoints are the source of truth for payout request and rounded payout fields.
 payableStartTime is null until the worker has approved attendance and an effective payable start. For a worker approved before the shift starts, the effective payable start is the shift actualStartTime and may be returned after start. For a worker approved during an ACTIVE shift, payableStartTime is the approval time.
 pauseState shows the all-pause state plus the listed worker's personal pause state. It does not expose foreman salary or rate fields.
 
@@ -1578,6 +1581,7 @@ Rules:
 - CLOSED shifts return workedMinutes and calculatedSalary when those values were already calculated and stored.
 - OPEN, ACTIVE, CANCELLED, and unapproved attendance may return null workedMinutes and calculatedSalary.
 - This endpoint reads stored attendance salary fields and does not recalculate salary.
+- CLOSED approved attendance includes paymentStatus so the worker can see whether the payroll item is UNPAID, PAYMENT_REQUESTED, or PAID.
 - The response includes pauseState for active shift display and pauseMinutes after close-time salary calculation.
 - The response includes payableStartTime when the backend knows the worker's effective salary start.
 - Results are sorted by joinedAt descending, then attendanceId descending.
@@ -1598,6 +1602,7 @@ Response:
     "actualStartTime": "2026-07-01T08:05:00Z",
     "actualEndTime": "2026-07-01T17:00:00Z",
     "attendanceStatus": "APPROVED",
+    "paymentStatus": "UNPAID",
     "paused": false,
     "globalPauseActive": false,
     "hourlyRate": 15.00,
@@ -1618,6 +1623,7 @@ Response:
 
 Worker history never returns foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary.
 Salary remains backend-calculated. Mobile should display persisted workedMinutes, pauseMinutes, payableStartTime, and calculatedSalary without recalculating them.
+Rounded payout minutes and payout amounts are returned by payroll endpoints. Mobile must not derive them from worker history.
 
 Missing, invalid, or expired token:
 
@@ -1712,7 +1718,844 @@ Status: 403 Forbidden
   "path": "/api/v1/me/managed-shifts"
 }
 
-8. Error Response Format
+8. Payroll Requests
+
+Payroll Requests MVP adds a payment lifecycle separate from ShiftStatus.
+
+ShiftStatus remains only:
+
+OPEN
+ACTIVE
+CLOSED
+CANCELLED
+
+Do not add PAID or NOT_PAID to ShiftStatus.
+
+Attendance payment status:
+
+UNPAID
+PAYMENT_REQUESTED
+PAID
+
+paymentStatus is stored on every ShiftAttendance row. New attendance starts as UNPAID, but only CLOSED, APPROVED, UNPAID attendance with persisted workedMinutes and calculatedSalary is payable.
+
+Payout request status for MVP:
+
+PENDING
+APPROVED
+
+REJECTED and CANCELLED are reserved future statuses. Do not expose reject or cancel endpoints in the MVP unless a later docs update explicitly adds them.
+
+Backend is the source of truth for payroll. Mobile must not calculate salary, rounded payable minutes, or payout amounts.
+
+Data model proposal:
+
+shift_attendance additions:
+
+- paymentStatus
+- paidAt
+
+payout_requests:
+
+- id
+- companyId
+- workerId
+- managerForemanId
+- status
+- rawPayableMinutesTotal
+- payoutRoundedMinutesTotal
+- exactCalculatedAmountTotal
+- payoutAmount
+- requestedAt
+- approvedBy
+- approvedAt
+- paidAt
+- createdAt
+- updatedAt
+
+payout_request_items:
+
+- id
+- payoutRequestId
+- attendanceId
+- shiftSessionId
+- rawPayableMinutes
+- payoutRoundedMinutes
+- hourlyRate
+- calculatedSalary
+- roundedItemAmountExact
+- payoutAmount
+- createdAt
+- paidAt
+
+Payroll rounding:
+
+- rawPayableMinutes is the already persisted ShiftAttendance.workedMinutes from the close flow.
+- calculatedSalary remains the exact audit/display amount from rawPayableMinutes and hourlyRate, stored with scale 2 and HALF_UP.
+- payoutRoundedMinutes is calculated per attendance item as `ceil(rawPayableMinutes / 15) * 15`.
+- If rawPayableMinutes is 0, payoutRoundedMinutes is 0.
+- roundedItemAmountExact is `payoutRoundedMinutes / 60 * hourlyRate`.
+- payoutAmount is a whole-number money amount with no cents, calculated per attendance item from roundedItemAmountExact using RoundingMode.CEILING.
+- Because amounts are non-negative, CEILING means round up to the next whole currency unit when there is any fractional part.
+- Request totals are sums of item-level rawPayableMinutes, payoutRoundedMinutes, calculatedSalary, and payoutAmount.
+- Preview and create use the same backend calculation rules. Preview is non-binding; create always revalidates and recalculates server-side.
+
+Example:
+
+- rawPayableMinutes 467, hourlyRate 15.00
+- payoutRoundedMinutes 480
+- calculatedSalary from close flow: 116.75
+- roundedItemAmountExact: 120.00
+- payoutAmount: 120
+
+Zero example:
+
+- rawPayableMinutes 0, hourlyRate 15.00
+- payoutRoundedMinutes 0
+- calculatedSalary from close flow: 0.00
+- roundedItemAmountExact: 0.00
+- payoutAmount: 0
+
+### List my payable attendances
+
+Only WORKER.
+
+GET /api/v1/me/payable-attendances
+
+Headers:
+
+Authorization: Bearer <token>
+
+Rules:
+
+- Returns only attendance records owned by the current user.
+- Returns only APPROVED attendance on CLOSED shifts.
+- Returns only attendance with paymentStatus UNPAID.
+- Results are sorted by shift actualEndTime descending, then attendanceId descending.
+- Worker must belong to the same company as the attendance shift.
+- The endpoint reads persisted workedMinutes and calculatedSalary. It does not recalculate close-time salary.
+- The endpoint calculates payoutRoundedMinutes and payoutAmount on the backend for display and selection.
+- Zero-minute, zero-amount attendance may be returned when it is otherwise payable so the worker can include it in a payout request and clear the payroll state.
+- Worker never receives foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary.
+
+Response:
+
+Status: 200 OK
+
+[
+  {
+    "attendanceId": 500,
+    "shiftId": 100,
+    "companyId": 10,
+    "companyName": "Acme Construction",
+    "title": "Tuesday 10:00 - Acme Construction",
+    "location": "Cologne",
+    "actualStartTime": "2026-07-01T08:05:00Z",
+    "actualEndTime": "2026-07-01T17:00:00Z",
+    "paymentStatus": "UNPAID",
+    "rawPayableMinutes": 467,
+    "payoutRoundedMinutes": 480,
+    "hourlyRate": 15.00,
+    "calculatedSalary": 116.75,
+    "payoutAmount": 120
+  },
+  {
+    "attendanceId": 501,
+    "shiftId": 101,
+    "companyId": 10,
+    "companyName": "Acme Construction",
+    "title": "Wednesday 10:00 - Acme Construction",
+    "location": "Cologne",
+    "actualStartTime": "2026-07-02T10:00:00Z",
+    "actualEndTime": "2026-07-02T10:00:00Z",
+    "paymentStatus": "UNPAID",
+    "rawPayableMinutes": 0,
+    "payoutRoundedMinutes": 0,
+    "hourlyRate": 15.00,
+    "calculatedSalary": 0.00,
+    "payoutAmount": 0
+  }
+]
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/me/payable-attendances"
+}
+
+FOREMAN or ADMIN:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/me/payable-attendances"
+}
+
+### Preview my payout request
+
+Only WORKER.
+
+POST /api/v1/me/payout-requests/preview
+
+Headers:
+
+Authorization: Bearer <token>
+
+Request:
+
+{
+  "attendanceIds": [500, 501]
+}
+
+Rules:
+
+- attendanceIds is explicit selection by the worker.
+- attendanceIds must not be empty.
+- Duplicate attendanceIds return 400 Bad Request. The backend must not silently de-duplicate them.
+- All selected attendance records must belong to the current worker.
+- All selected attendance records must belong to the worker's current company.
+- All selected attendance records must be APPROVED attendance on CLOSED shifts.
+- All selected attendance records must have workedMinutes and calculatedSalary already persisted.
+- All selected attendance records must have paymentStatus UNPAID.
+- Attendance with rawPayableMinutes 0 and payoutAmount 0 is allowed when it otherwise satisfies the payable rules.
+- Already PAID attendance cannot be previewed for a new request.
+- PAYMENT_REQUESTED attendance cannot be previewed for another pending request.
+- For the MVP, all selected attendance records must belong to shifts created by the same foreman so one foreman can approve the whole request.
+- Preview does not create PayoutRequest rows, does not create PayoutRequestItem rows, and does not change attendance paymentStatus.
+- Preview is non-binding. Create revalidates and recalculates server-side because attendance payment state can change after preview.
+
+Response:
+
+Status: 200 OK
+
+{
+  "rawPayableMinutes": 467,
+  "payoutRoundedMinutes": 480,
+  "exactCalculatedAmount": 116.75,
+  "payoutAmount": 120,
+  "items": [
+    {
+      "attendanceId": 500,
+      "shiftId": 100,
+      "title": "Tuesday 10:00 - Acme Construction",
+      "actualStartTime": "2026-07-01T08:05:00Z",
+      "actualEndTime": "2026-07-01T17:00:00Z",
+      "paymentStatus": "UNPAID",
+      "rawPayableMinutes": 467,
+      "payoutRoundedMinutes": 480,
+      "hourlyRate": 15.00,
+      "calculatedSalary": 116.75,
+      "payoutAmount": 120
+    },
+    {
+      "attendanceId": 501,
+      "shiftId": 101,
+      "title": "Wednesday 10:00 - Acme Construction",
+      "actualStartTime": "2026-07-02T10:00:00Z",
+      "actualEndTime": "2026-07-02T10:00:00Z",
+      "paymentStatus": "UNPAID",
+      "rawPayableMinutes": 0,
+      "payoutRoundedMinutes": 0,
+      "hourlyRate": 15.00,
+      "calculatedSalary": 0.00,
+      "payoutAmount": 0
+    }
+  ]
+}
+
+Validation error:
+
+Status: 400 Bad Request
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "attendanceIds: must not be empty",
+  "path": "/api/v1/me/payout-requests/preview"
+}
+
+Duplicate attendanceIds:
+
+Status: 400 Bad Request
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "attendanceIds: must not contain duplicates",
+  "path": "/api/v1/me/payout-requests/preview"
+}
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/me/payout-requests/preview"
+}
+
+FOREMAN or ADMIN:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/me/payout-requests/preview"
+}
+
+Attendance not owned by current worker or not found:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Attendance not found",
+  "path": "/api/v1/me/payout-requests/preview"
+}
+
+Attendance is not payable:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Attendance is not payable",
+  "path": "/api/v1/me/payout-requests/preview"
+}
+
+Attendance is already included in another pending request:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Attendance is already included in a pending payout request",
+  "path": "/api/v1/me/payout-requests/preview"
+}
+
+Attendance is already paid:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Attendance is already paid",
+  "path": "/api/v1/me/payout-requests/preview"
+}
+
+Selected attendances have different approvers:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Payout request items must belong to shifts managed by the same foreman",
+  "path": "/api/v1/me/payout-requests/preview"
+}
+
+### Create my payout request
+
+Only WORKER.
+
+POST /api/v1/me/payout-requests
+
+Headers:
+
+Authorization: Bearer <token>
+
+Request:
+
+{
+  "attendanceIds": [500, 501]
+}
+
+Rules:
+
+- attendanceIds is explicit selection by the worker.
+- attendanceIds must not be empty.
+- Duplicate attendanceIds return 400 Bad Request. The backend must not silently de-duplicate them.
+- All selected attendance records must belong to the current worker.
+- All selected attendance records must belong to the worker's current company.
+- All selected attendance records must be APPROVED attendance on CLOSED shifts.
+- All selected attendance records must have workedMinutes and calculatedSalary already persisted.
+- All selected attendance records must have paymentStatus UNPAID.
+- Attendance with rawPayableMinutes 0 and payoutAmount 0 is allowed when it otherwise satisfies the payable rules.
+- Already PAID attendance cannot be included in a new request.
+- PAYMENT_REQUESTED attendance cannot be included in another pending request.
+- For the MVP, all selected attendance records must belong to shifts created by the same foreman so one foreman can approve the whole request.
+- Creation is transactional. If any selected attendance is invalid, no request is created and no attendance paymentStatus changes.
+- Create recalculates all totals server-side and does not trust preview totals or client-side totals.
+- On success, the backend creates a PENDING payout request, creates payout request items, snapshots exact and rounded item values, and sets selected attendance paymentStatus to PAYMENT_REQUESTED.
+- requestedAt is set by the backend to the current server time in UTC.
+
+Response:
+
+Status: 201 Created
+
+{
+  "id": 900,
+  "companyId": 10,
+  "companyName": "Acme Construction",
+  "workerId": 1,
+  "workerFirstName": "John",
+  "workerLastName": "Worker",
+  "status": "PENDING",
+  "rawPayableMinutes": 467,
+  "payoutRoundedMinutes": 480,
+  "exactCalculatedAmount": 116.75,
+  "payoutAmount": 120,
+  "requestedAt": "2026-07-06T20:00:00Z",
+  "approvedAt": null,
+  "paidAt": null,
+  "items": [
+    {
+      "attendanceId": 500,
+      "shiftId": 100,
+      "title": "Tuesday 10:00 - Acme Construction",
+      "actualStartTime": "2026-07-01T08:05:00Z",
+      "actualEndTime": "2026-07-01T17:00:00Z",
+      "paymentStatus": "PAYMENT_REQUESTED",
+      "rawPayableMinutes": 467,
+      "payoutRoundedMinutes": 480,
+      "hourlyRate": 15.00,
+      "calculatedSalary": 116.75,
+      "payoutAmount": 120
+    },
+    {
+      "attendanceId": 501,
+      "shiftId": 101,
+      "title": "Wednesday 10:00 - Acme Construction",
+      "actualStartTime": "2026-07-02T10:00:00Z",
+      "actualEndTime": "2026-07-02T10:00:00Z",
+      "paymentStatus": "PAYMENT_REQUESTED",
+      "rawPayableMinutes": 0,
+      "payoutRoundedMinutes": 0,
+      "hourlyRate": 15.00,
+      "calculatedSalary": 0.00,
+      "payoutAmount": 0
+    }
+  ]
+}
+
+Validation error:
+
+Status: 400 Bad Request
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "attendanceIds: must not be empty",
+  "path": "/api/v1/me/payout-requests"
+}
+
+Duplicate attendanceIds:
+
+Status: 400 Bad Request
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "attendanceIds: must not contain duplicates",
+  "path": "/api/v1/me/payout-requests"
+}
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/me/payout-requests"
+}
+
+FOREMAN or ADMIN:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/me/payout-requests"
+}
+
+Attendance not owned by current worker or not found:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Attendance not found",
+  "path": "/api/v1/me/payout-requests"
+}
+
+Attendance is not payable:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Attendance is not payable",
+  "path": "/api/v1/me/payout-requests"
+}
+
+Attendance is already included in another pending request:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Attendance is already included in a pending payout request",
+  "path": "/api/v1/me/payout-requests"
+}
+
+Attendance is already paid:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Attendance is already paid",
+  "path": "/api/v1/me/payout-requests"
+}
+
+Selected attendances have different approvers:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Payout request items must belong to shifts managed by the same foreman",
+  "path": "/api/v1/me/payout-requests"
+}
+
+### List my payout requests
+
+Only WORKER.
+
+GET /api/v1/me/payout-requests
+
+Optional query:
+
+status=PENDING
+status=APPROVED
+
+Rules:
+
+- Returns payout requests created by the current worker.
+- Worker sees only own payroll data.
+- Worker never receives foreman salary or rate fields.
+- Results are sorted by requestedAt descending, then request id descending.
+
+Response:
+
+Status: 200 OK
+
+[
+  {
+    "id": 900,
+    "companyId": 10,
+    "companyName": "Acme Construction",
+    "workerId": 1,
+    "workerFirstName": "John",
+    "workerLastName": "Worker",
+    "status": "PENDING",
+    "rawPayableMinutes": 467,
+    "payoutRoundedMinutes": 480,
+    "exactCalculatedAmount": 116.75,
+    "payoutAmount": 120,
+    "requestedAt": "2026-07-06T20:00:00Z",
+    "approvedAt": null,
+    "paidAt": null,
+    "items": [
+      {
+        "attendanceId": 500,
+        "shiftId": 100,
+        "title": "Tuesday 10:00 - Acme Construction",
+        "actualStartTime": "2026-07-01T08:05:00Z",
+        "actualEndTime": "2026-07-01T17:00:00Z",
+        "paymentStatus": "PAYMENT_REQUESTED",
+        "rawPayableMinutes": 467,
+        "payoutRoundedMinutes": 480,
+        "hourlyRate": 15.00,
+        "calculatedSalary": 116.75,
+        "payoutAmount": 120
+      }
+    ]
+  }
+]
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/me/payout-requests"
+}
+
+FOREMAN or ADMIN:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/me/payout-requests"
+}
+
+### List managed payout requests
+
+Only FOREMAN.
+
+GET /api/v1/me/managed-payout-requests
+
+Optional query:
+
+status=PENDING
+status=APPROVED
+
+Rules:
+
+- Returns payout requests for the current foreman's company and shifts created by the current foreman.
+- Default status filter is PENDING if status is omitted.
+- A foreman does not see payout requests for another company.
+- A foreman does not see payout requests containing shifts they do not manage.
+- Worker identity, selected shifts/days, raw hours/minutes, exact calculated amount, rounded payable minutes, and whole-number payout amount are visible to the approving foreman.
+- Foreman never receives another foreman's private salary or rate fields through payroll request DTOs.
+- Results are sorted by requestedAt ascending, then request id ascending for PENDING requests.
+
+Response:
+
+Status: 200 OK
+
+[
+  {
+    "id": 900,
+    "companyId": 10,
+    "companyName": "Acme Construction",
+    "workerId": 1,
+    "workerFirstName": "John",
+    "workerLastName": "Worker",
+    "status": "PENDING",
+    "rawPayableMinutes": 467,
+    "payoutRoundedMinutes": 480,
+    "exactCalculatedAmount": 116.75,
+    "payoutAmount": 120,
+    "requestedAt": "2026-07-06T20:00:00Z",
+    "approvedAt": null,
+    "paidAt": null,
+    "items": [
+      {
+        "attendanceId": 500,
+        "shiftId": 100,
+        "title": "Tuesday 10:00 - Acme Construction",
+        "actualStartTime": "2026-07-01T08:05:00Z",
+        "actualEndTime": "2026-07-01T17:00:00Z",
+        "paymentStatus": "PAYMENT_REQUESTED",
+        "rawPayableMinutes": 467,
+        "payoutRoundedMinutes": 480,
+        "hourlyRate": 15.00,
+        "calculatedSalary": 116.75,
+        "payoutAmount": 120
+      }
+    ]
+  }
+]
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/me/managed-payout-requests"
+}
+
+WORKER or ADMIN:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/me/managed-payout-requests"
+}
+
+### Approve managed payout request
+
+Only FOREMAN.
+
+POST /api/v1/me/managed-payout-requests/{requestId}/approve
+
+Headers:
+
+Authorization: Bearer <token>
+
+This endpoint does not accept a request body.
+
+Rules:
+
+- FOREMAN can approve only payout requests for their current company.
+- FOREMAN can approve only payout requests where every selected attendance belongs to a shift created by that FOREMAN.
+- The payout request must be PENDING.
+- Every selected attendance must still have paymentStatus PAYMENT_REQUESTED.
+- Approval is transactional. If any selected attendance is no longer PAYMENT_REQUESTED, the request is not approved.
+- On success, the backend sets payout request status to APPROVED, sets approvedBy and approvedAt, sets item paidAt, and sets every selected attendance paymentStatus to PAID.
+- Attendance paidAt is set to approvedAt in the MVP because approval is the payment-completion event.
+- Future payment processing may separate approvedAt from paidAt.
+
+Response:
+
+Status: 200 OK
+
+{
+  "id": 900,
+  "companyId": 10,
+  "companyName": "Acme Construction",
+  "workerId": 1,
+  "workerFirstName": "John",
+  "workerLastName": "Worker",
+  "status": "APPROVED",
+  "rawPayableMinutes": 467,
+  "payoutRoundedMinutes": 480,
+  "exactCalculatedAmount": 116.75,
+  "payoutAmount": 120,
+  "requestedAt": "2026-07-06T20:00:00Z",
+  "approvedAt": "2026-07-07T09:30:00Z",
+  "paidAt": "2026-07-07T09:30:00Z",
+  "items": [
+    {
+      "attendanceId": 500,
+      "shiftId": 100,
+      "title": "Tuesday 10:00 - Acme Construction",
+      "actualStartTime": "2026-07-01T08:05:00Z",
+      "actualEndTime": "2026-07-01T17:00:00Z",
+      "paymentStatus": "PAID",
+      "rawPayableMinutes": 467,
+      "payoutRoundedMinutes": 480,
+      "hourlyRate": 15.00,
+      "calculatedSalary": 116.75,
+      "payoutAmount": 120
+    }
+  ]
+}
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-07T09:30:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/me/managed-payout-requests/900/approve"
+}
+
+WORKER, ADMIN, non-owner FOREMAN, or wrong company:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-07T09:30:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/me/managed-payout-requests/900/approve"
+}
+
+Payout request not found:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-07T09:30:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Payout request not found",
+  "path": "/api/v1/me/managed-payout-requests/900/approve"
+}
+
+Payout request is not pending:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-07T09:30:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Payout request can only be approved when status is PENDING",
+  "path": "/api/v1/me/managed-payout-requests/900/approve"
+}
+
+Selected attendance changed payment state:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-07T09:30:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Payout request attendance is no longer payment requested",
+  "path": "/api/v1/me/managed-payout-requests/900/approve"
+}
+
+9. Error Response Format
 
 All API errors should use this format:
 
@@ -1724,13 +2567,16 @@ All API errors should use this format:
   "path": "/api/v1/shifts/100/close"
 }
 
-9. Authorization Rules
+10. Authorization Rules
 WORKER:
 - can see own profile
 - can join company by company join code
 - can join OPEN shifts and ACTIVE shifts in their company
 - can see own shift history
 - can pause/resume self on ACTIVE shifts where they have approved attendance
+- can list own payable CLOSED attendance
+- can create payout requests only from own CLOSED, APPROVED, UNPAID attendance in their company
+- can list own payout requests
 
 FOREMAN:
 - can create own company
@@ -1743,11 +2589,14 @@ FOREMAN:
 - can see shift summary
 - can pause/resume self on own ACTIVE shifts
 - can pause/resume all participants on own ACTIVE shifts
+- can list payout requests for their company and shifts they created
+- can approve only PENDING payout requests for their company and shifts they created
 
 ADMIN:
 - can read shift detail, list attendance, approve attendance, and see worker-only shift summary through current REST endpoints
 - cannot create, start, close, cancel, or pause shifts through the REST/mobile API
 - can call `GET /api/v1/me/managed-shifts`, normally returning an empty list because ADMIN REST shift creation is disabled
 - does not receive foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary through the MVP REST/mobile API
+- cannot create or approve payout requests through the MVP REST/mobile API
 - full user management is deferred until after the mobile MVP and should be implemented through the Vaadin admin dashboard
 - mobile MVP has no ADMIN flow

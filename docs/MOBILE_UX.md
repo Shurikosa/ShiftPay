@@ -20,6 +20,7 @@ The app should prioritize:
 - clear managed-shift visibility for foremen
 - clear cancellation status
 - readable shift status and salary information
+- clear payroll request status for closed unpaid work
 - simple forms with obvious success and error states
 
 The MVP should feel like a practical workforce tool, not a marketing site.
@@ -40,6 +41,9 @@ Worker tasks:
 - see company name in the dashboard or main menu
 - see shift status, attendance status, worked minutes, and calculated salary
 - pause and resume themselves during an active joined shift
+- see closed unpaid attendance records
+- select unpaid work days and create a payout request
+- track own pending and approved payout requests
 
 ### Foreman
 
@@ -58,6 +62,8 @@ Foreman tasks:
 - start, cancel, and close shifts
 - pause themselves or pause everyone during an active shift
 - see closed-shift summary
+- review worker payout requests for their company and managed shifts
+- approve pending payout requests
 
 Admin users are not a mobile MVP target. Admin user management is deferred to
 the Vaadin admin dashboard.
@@ -105,10 +111,16 @@ added later.
 - `JoinShiftScreen`
 - `MyShiftHistoryScreen`
 - `WorkerShiftDetailsScreen`
+- `WorkerPayrollScreen`
 
 Worker navigation is centered on joining a shift and reading personal attendance
 history from `GET /api/v1/me/shifts`. A worker who does not belong to a company
 should be routed to company join before shift join.
+
+Worker payroll navigation is centered on backend-owned payroll data from
+`GET /api/v1/me/payable-attendances`,
+`POST /api/v1/me/payout-requests/preview`, and
+`GET /api/v1/me/payout-requests`.
 
 ### Foreman Flow
 
@@ -117,6 +129,7 @@ should be routed to company join before shift join.
 - `CreateShiftScreen`
 - `ForemanShiftDetailsScreen`
 - `ShiftSummaryScreen`
+- `ForemanPayrollRequestsScreen`
 
 The foreman shift details screen can contain attendance as a section or navigate
 to a dedicated attendance list screen if the implementation becomes clearer.
@@ -124,6 +137,8 @@ to a dedicated attendance list screen if the implementation becomes clearer.
 Foreman navigation is centered on managed shifts from
 `GET /api/v1/me/managed-shifts`. A foreman who does not have a company should
 be routed to company creation before shift creation or shift start.
+Foreman payroll navigation shows payout requests from
+`GET /api/v1/me/managed-payout-requests`.
 
 ## 5. Screens
 
@@ -251,7 +266,9 @@ Content:
 - company name when joined
 - primary action to join a shift
 - shortcut to shift history
+- shortcut to payroll
 - recent joined shifts if available
+- outstanding unpaid or requested payroll status when returned by the backend
 - pause status if the worker has an active joined shift:
   worker paused, global pause active, or not paused
 
@@ -259,6 +276,8 @@ API calls:
 
 - `GET /api/v1/users/me`
 - `GET /api/v1/me/shifts`
+- `GET /api/v1/me/payable-attendances` if showing unpaid count or payroll preview
+- `GET /api/v1/me/payout-requests` if showing pending/approved status preview
 
 Empty state:
 
@@ -266,6 +285,7 @@ Empty state:
 - clear action to join by code
 - no company yet
 - clear action to join company by company join code
+- no unpaid payroll items
 
 ### JoinShiftScreen
 
@@ -307,6 +327,7 @@ Content:
 - company name
 - shift status
 - attendance status
+- payment status when present: `UNPAID`, `PAYMENT_REQUESTED`, or `PAID`
 - pause status when active
 - actual date/time when available
 - salary when calculated
@@ -340,6 +361,7 @@ Content:
 - persisted pause minutes after close
 - worked minutes
 - calculated salary
+- payment status when present
 
 API calls:
 
@@ -355,7 +377,59 @@ Rules:
 - worker pause controls affect only the current worker
 - show whether an all-participant pause is active from `pauseState`
 - do not calculate pause-adjusted salary on the client
+- do not calculate rounded payroll minutes or payout amount on the client
 - for late workers, display backend persisted `payableStartTime`, `workedMinutes`, `pauseMinutes`, and `calculatedSalary`; do not derive them from `actualStartTime`
+
+### WorkerPayrollScreen
+
+Purpose:
+
+- let a worker select CLOSED unpaid work days and create a payout request
+- show pending and approved payout requests for the current worker
+
+Content:
+
+- company name
+- selectable list or calendar of payable attendance records
+- checkbox beside each unpaid closed day
+- shift title, date, location, raw worked minutes or formatted hours/minutes
+- exact calculated salary for audit/display
+- backend-rounded payable minutes
+- backend-calculated whole-number payout amount
+- selected total raw minutes, rounded minutes, exact amount, and payout amount
+- own payout request history with status badges
+
+Actions:
+
+- select or clear attendance records
+- submit payout request
+- refresh payable attendances and payout requests
+
+API calls:
+
+- `GET /api/v1/me/payable-attendances`
+- `POST /api/v1/me/payout-requests/preview`
+- `POST /api/v1/me/payout-requests`
+- `GET /api/v1/me/payout-requests`
+
+Rules:
+
+- show only backend-returned payable attendance records
+- use explicit attendanceIds from selected checkboxes
+- disable submit when no attendance is selected
+- call `POST /api/v1/me/payout-requests/preview` after selection changes before showing selected totals
+- selected total raw minutes, rounded minutes, exact amount, and payout amount must come from the latest backend preview response
+- do not sum selected totals locally
+- preview is non-binding; create can still fail or return changed totals because the backend revalidates and recalculates during creation
+- after successful request creation, refresh payable attendances and payout requests
+- if selected attendanceIds contain duplicates due to UI state bugs, backend returns 400; the UI should refresh selection state instead of trying to de-duplicate silently
+- `UNPAID` items are selectable
+- `PAYMENT_REQUESTED` and `PAID` items are shown only in request/history context, not as selectable payable items
+- mobile may format minutes into hours/minutes for display
+- mobile must not calculate salary, rounded payable minutes, or payout amount
+- backend preview/create `payoutRoundedMinutes`, `calculatedSalary`, and `payoutAmount` are the values shown to the user
+- use status badges for `UNPAID`, `PAYMENT_REQUESTED`, `PAID`, `PENDING`, and `APPROVED`
+- if backend returns a conflict because an item was already requested or paid, refresh and show the updated state
 
 ### ForemanDashboardScreen
 
@@ -369,12 +443,15 @@ Content:
 - company name
 - primary action to create a shift
 - managed shift list
+- shortcut to payroll requests
 - status labels for `OPEN`, `ACTIVE`, `CLOSED`, and `CANCELLED`
+- pending payout request count if loaded
 
 API calls:
 
 - `GET /api/v1/users/me`
 - `GET /api/v1/me/managed-shifts`
+- `GET /api/v1/me/managed-payout-requests` if showing pending request count or preview
 
 Rules:
 
@@ -504,6 +581,49 @@ Rules:
 - do not show foreman salary fields to workers
 - ADMIN users are not a mobile MVP target and should not receive foreman salary fields through REST/mobile API
 
+### ForemanPayrollRequestsScreen
+
+Purpose:
+
+- let a foreman review and approve worker payout requests
+
+Content:
+
+- company name
+- pending payout request list
+- worker name
+- selected shifts/days per request
+- raw payable minutes with hours/minutes formatting
+- exact calculated amount for audit/display
+- backend-rounded payable minutes
+- backend-calculated whole-number payout amount
+- requestedAt, approvedAt, and paidAt when present
+- status badges for `PENDING` and `APPROVED`
+
+Actions:
+
+- filter by pending or approved requests
+- open request detail if needed
+- approve a pending payout request
+- refresh request list
+
+API calls:
+
+- `GET /api/v1/me/managed-payout-requests`
+- `POST /api/v1/me/managed-payout-requests/{requestId}/approve`
+
+Rules:
+
+- only FOREMAN uses this screen
+- if no company exists, route FOREMAN to `CompanyCreateScreen`
+- default list should focus on `PENDING` requests
+- foreman sees only requests for their company and shifts they created
+- approve is available only for `PENDING` requests
+- after approve, refresh the managed payout request list
+- show backend conflict errors when a request was already approved or an attendance is no longer payment requested
+- do not show another foreman's private salary fields
+- do not calculate salary, rounded payable minutes, or payout amount on the client
+
 ## 6. Shared States
 
 ### Loading
@@ -526,6 +646,9 @@ Use empty states when:
 - foreman has not created a company
 - foreman has no managed shifts
 - attendance list has no joined workers
+- worker has no payable attendance records
+- worker has no payout requests
+- foreman has no pending payout requests
 
 Each empty state should include one clear next action when an action is available.
 
@@ -533,7 +656,8 @@ Each empty state should include one clear next action when an action is availabl
 
 Show backend error messages when they are safe and useful, for example validation,
 duplicate email, invalid credentials, duplicate join, forbidden, or shift state
-conflicts.
+conflicts. For payroll, show conflicts for already requested or already paid
+attendance and stale approve attempts.
 
 Use a generic fallback for network failures.
 
@@ -552,6 +676,8 @@ Show success feedback for:
 - shift pause/resume
 - shift cancel
 - shift close
+- payout request creation
+- payout request approval
 
 ## 7. Basic Visual Direction
 
@@ -559,6 +685,8 @@ Show success feedback for:
 - Prefer white or near-white surfaces with dark readable text.
 - Use one strong accent color for primary actions.
 - Use distinct status colors for shift and attendance states.
+- Use distinct status badges for payroll states: `UNPAID`,
+  `PAYMENT_REQUESTED`, `PAID`, `PENDING`, and `APPROVED`.
 - Keep typography compact but readable.
 - Use consistent spacing.
 - Use cards for shift rows and worker rows.
@@ -574,7 +702,9 @@ Show success feedback for:
 - QR code scanning
 - PDF export
 - admin screens
-- payroll/tax calculations
+- tax calculations
+- payment processing
+- accounting integrations
 - chat or messaging
 
 ## 9. Pause UX Contract
@@ -602,8 +732,11 @@ Mobile must not calculate pause-adjusted salary. It should display backend persi
 - Do not hardcode backend URLs inside screens.
 - REST API is the source of truth.
 - Do not calculate salary on the client.
+- Do not calculate rounded payroll minutes or payout amounts on the client.
 - The mobile app should consume persisted `workedMinutes` and
   `calculatedSalary` values returned by the backend.
+- The mobile app should consume payroll `paymentStatus`,
+  `payoutRoundedMinutes`, and `payoutAmount` values returned by the backend.
 - For late workers, the mobile app should treat backend `payableStartTime` as the worker's effective salary start.
 - The mobile app should consume backend `pauseState`, `pauseMinutes`, and
   `foremanPauseMinutes` rather than deriving pause totals locally.

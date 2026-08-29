@@ -80,6 +80,41 @@ Each Codex session should take one small task from this file.
 - [x] Use BigDecimal for money
 - [x] Add unit tests for salary calculation
 
+## Milestone 6.1: Payroll Requests MVP
+
+Backend tasks:
+
+- [ ] Add attendance payment status: UNPAID, PAYMENT_REQUESTED, PAID
+- [ ] Initialize APPROVED CLOSED attendance as UNPAID during close flow
+- [ ] Add payout_requests table/entity with worker, company, manager foreman, status, totals, requestedAt, approvedAt, paidAt
+- [ ] Add payout_request_items table/entity with attendance snapshots, exact amount, rounded minutes, whole-number payout amount, and paidAt
+- [ ] Add payroll rounding service: ceil raw payable minutes to 15-minute intervals and round item payout amount up to whole money units
+- [ ] Implement `GET /api/v1/me/payable-attendances`
+- [ ] Implement `POST /api/v1/me/payout-requests/preview`
+- [ ] Implement `POST /api/v1/me/payout-requests`
+- [ ] Implement `GET /api/v1/me/payout-requests`
+- [ ] Implement `GET /api/v1/me/managed-payout-requests`
+- [ ] Implement `POST /api/v1/me/managed-payout-requests/{requestId}/approve`
+- [ ] Enforce worker ownership, company scope, CLOSED shift, APPROVED attendance, UNPAID payment status, and same-manager-foreman request validation
+- [ ] Reject duplicate attendanceIds with 400 Bad Request for preview and create
+- [ ] Prevent PAID or PAYMENT_REQUESTED attendance from being added to a new pending request
+- [ ] Enforce foreman approval only for own company and own managed shifts
+- [ ] Add transactional locking for payout request creation and approval
+- [ ] Add backend tests for payroll authorization, conflicts, transactional status updates, privacy, and rounding edge cases
+- [ ] Update OpenAPI/Swagger docs for payroll endpoints after implementation
+
+Mobile tasks:
+
+- [ ] Add payroll API client methods and TypeScript DTOs
+- [ ] Add Worker Payroll screen with selectable CLOSED unpaid attendance days
+- [ ] Add backend preview call for selected payout totals
+- [ ] Add payout request creation flow using explicit attendanceIds
+- [ ] Show worker payout request history with PENDING and APPROVED status badges
+- [ ] Add Foreman Payroll Requests screen for pending/approved requests
+- [ ] Add foreman approve action and refresh behavior
+- [ ] Display backend `paymentStatus`, `payoutRoundedMinutes`, `calculatedSalary`, and whole-number `payoutAmount`
+- [ ] Ensure mobile formats time only and does not calculate or sum salary, rounded payroll minutes, payout amounts, or selected totals
+
 ## Milestone 6.5: Backend API Contract Stabilization
 
 - [x] Implement worker shift history endpoint

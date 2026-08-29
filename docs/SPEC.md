@@ -72,6 +72,9 @@ A worker can:
 - see own salary calculation
 - see shift history
 - see company name in the mobile app
+- see CLOSED unpaid attendance records
+- create a payout request from selected unpaid attendance records
+- see own payout request statuses
 
 ### 4.2 Foreman
 
@@ -95,6 +98,8 @@ A foreman can:
 - view worker salary summary
 - view their own private foreman salary summary
 - see company name in the mobile app
+- view payout requests for workers in their company and their managed shifts
+- approve pending payout requests
 
 ### 4.3 Admin
 
@@ -148,7 +153,6 @@ Basic flow:
 
 A shift can have these statuses:
 
-CREATED
 OPEN
 ACTIVE
 CLOSED
@@ -345,7 +349,101 @@ foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
 -Calculated salary is rounded to 2 decimal places with HALF_UP.
 -Closing fails if actualStartTime is missing or salary input values are negative where request validation normally prevents them.
 
-13. Authentication
+## 13. Payroll Requests MVP
+
+Payroll Requests MVP tracks worker payment separately from the shift lifecycle.
+Do not add PAID or NOT_PAID to ShiftStatus. Shift lifecycle remains:
+
+- OPEN
+- ACTIVE
+- CLOSED
+- CANCELLED
+
+Payment lifecycle is tracked on worker attendance and payout requests.
+
+Attendance payment status:
+
+- UNPAID
+- PAYMENT_REQUESTED
+- PAID
+
+Payout request status for MVP:
+
+- PENDING
+- APPROVED
+
+REJECTED and CANCELLED are optional future statuses. They are not required for
+the first Payroll Requests MVP unless a later docs update adds reject/cancel
+flows.
+
+Business flow:
+
+1. A foreman closes a shift.
+2. The backend persists workedMinutes and calculatedSalary for APPROVED worker
+   attendance.
+3. CLOSED APPROVED attendance starts with paymentStatus UNPAID.
+4. Worker opens Payroll and sees own CLOSED UNPAID attendance records.
+5. Worker explicitly selects attendance records, usually from a calendar or list
+   with checkboxes next to work days.
+6. Worker previews the selected payout request totals through the backend.
+7. Worker creates a payout request with attendanceIds.
+8. Backend revalidates and recalculates the request during creation.
+9. Selected attendance records move to PAYMENT_REQUESTED.
+10. Foreman sees the payout request with worker identity, selected shifts/days,
+   raw hours/minutes, exact calculated amount, rounded payable minutes, and
+   whole-number payout amount.
+11. Foreman approves the payout request.
+12. Selected attendance records move to PAID.
+
+Validation and conflict rules:
+
+- Worker can request payout only for their own attendance.
+- Preview and create requests must reject duplicate attendanceIds with 400 Bad
+  Request. The backend must not silently de-duplicate IDs.
+- Worker can request payout only for attendance in their current company.
+- Worker can request payout only for APPROVED attendance on CLOSED shifts.
+- Already PAID attendance cannot be included in a new request.
+- PAYMENT_REQUESTED attendance cannot be included in another pending request.
+- For MVP, one payout request must contain attendance records managed by one
+  foreman so one foreman can approve the whole request.
+- Foreman can approve only payout requests for their company and shifts they
+  created.
+- Payout request approval is transactional. If any selected attendance is no
+  longer PAYMENT_REQUESTED, approval fails without partial updates.
+- Preview is non-binding. Create revalidates and recalculates server-side
+  because attendance payment state can change after preview.
+
+Rounding rules:
+
+- Backend is the source of truth for payroll.
+- Mobile must not calculate salary, rounded payable minutes, or payout amount.
+- Mobile must call the backend preview endpoint for selected totals before
+  submission and may display only backend-returned preview totals.
+- rawPayableMinutes is the persisted ShiftAttendance.workedMinutes from the
+  close flow.
+- calculatedSalary remains the exact audit/display amount from rawPayableMinutes
+  and hourlyRate, stored with scale 2 and HALF_UP.
+- payoutRoundedMinutes = ceil(rawPayableMinutes to the nearest 15 minutes).
+- If rawPayableMinutes is 0, payoutRoundedMinutes is 0.
+- roundedItemAmountExact = payoutRoundedMinutes / 60 * hourlyRate.
+- payoutAmount is whole-number money with no cents, rounded from
+  roundedItemAmountExact using CEILING.
+- Request totals are sums of item-level rawPayableMinutes,
+  payoutRoundedMinutes, calculatedSalary, and payoutAmount.
+
+Privacy rules:
+
+- Worker sees only their own payroll data.
+- Worker never sees foreman salary or foreman rate fields.
+- Foreman sees worker payout requests only for their company and managed shifts.
+- Payroll request DTOs must not expose User entities, password hashes, or
+  unrelated company/foreman private salary fields.
+
+Payroll Requests MVP is not payment processing, tax calculation, accounting, or
+bank transfer automation. It is a request/approval workflow that marks selected
+attendance records as PAID after foreman approval.
+
+## 14. Authentication
 
 The system should support:
 
@@ -369,7 +467,7 @@ WORKER
 FOREMAN
 ADMIN
 
-14. Biometric Authentication
+## 15. Biometric Authentication
 
 Biometric login can be added later on the mobile device.
 
@@ -379,7 +477,7 @@ Important rule:
 
 Biometrics should not replace backend authentication. It should only unlock locally stored session/token on the device.
 
-15. Cross-Platform Requirement
+## 16. Cross-Platform Requirement
 
 The mobile app should work on:
 
@@ -393,11 +491,11 @@ React Native + Expo + TypeScript
 The admin dashboard should be a web UI served by the backend Spring Boot application using Vaadin.
 It should not be a separate React, Vue, or Angular frontend project for the MVP.
 
-16. Out of Scope for First MVP
+## 17. Out of Scope for First MVP
 
 The first MVP should not include:
 
-complex payroll system
+complex payroll beyond payout request approval
 tax calculation
 GPS tracking
 biometric login
@@ -410,7 +508,7 @@ accounting integration
 
 These can be added later.
 
-17. First MVP Features
+## 18. First MVP Features
 
 Required:
 
@@ -433,6 +531,11 @@ calculate worker salary
 calculate private foreman salary
 worker shift history
 foreman shift summary
+worker payable attendance list
+worker payout request creation
+worker payout request history
+foreman payout request review
+foreman payout request approval
 cancel shift
 dynamic pause tracking
 

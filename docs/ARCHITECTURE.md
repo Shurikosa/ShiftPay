@@ -20,6 +20,7 @@ user management
 shift sessions
 attendance
 salary calculation
+payroll request workflow
 reports
 admin dashboard served with Vaadin
 
@@ -52,6 +53,8 @@ ShiftService
 AttendanceService
 PauseService
 SalaryCalculationService
+PayrollRoundingService
+PayoutRequestService
 Repositories
 
 Repositories handle database access.
@@ -215,11 +218,50 @@ breakMinutes
 pauseMinutes
 workedMinutes
 calculatedSalary
+paymentStatus
+paidAt
 joinedAt
 approvedAt
 payableStartTime
 createdAt
 updatedAt
+
+PayoutRequest
+
+Fields:
+
+id
+companyId
+workerId
+managerForemanId
+status
+rawPayableMinutesTotal
+payoutRoundedMinutesTotal
+exactCalculatedAmountTotal
+payoutAmount
+requestedAt
+approvedBy
+approvedAt
+paidAt
+createdAt
+updatedAt
+
+PayoutRequestItem
+
+Fields:
+
+id
+payoutRequestId
+attendanceId
+shiftSessionId
+rawPayableMinutes
+payoutRoundedMinutes
+hourlyRate
+calculatedSalary
+roundedItemAmountExact
+payoutAmount
+createdAt
+paidAt
 
 Attendance Approval
 
@@ -241,6 +283,7 @@ Attendance Query
 - Results are ordered by joinedAt ascending and then attendance id ascending.
 - Controllers return attendance DTOs and never expose User entities or password hashes.
 - Attendance DTOs expose payableStartTime, pauseState, pauseMinutes, workedMinutes, and calculatedSalary so active pause state and close-time salary results can be read without a summary endpoint.
+- Attendance DTOs expose paymentStatus where payroll status matters. Shift status and attendance approval status remain separate from payment status.
 
 Worker Shift History
 
@@ -251,6 +294,7 @@ Worker Shift History
 - OPEN, ACTIVE, CLOSED, and CANCELLED shifts are included.
 - The endpoint reads persisted workedMinutes and calculatedSalary from ShiftAttendance and never recalculates salary.
 - OPEN, ACTIVE, CANCELLED, and unapproved attendance can return null workedMinutes and calculatedSalary.
+- CLOSED approved attendance exposes paymentStatus so the worker can distinguish UNPAID, PAYMENT_REQUESTED, and PAID.
 - The repository fetches attendance with shift in one query to avoid N+1 loading.
 - Results are ordered by joinedAt descending and then attendance id descending.
 - DTOs expose shift and attendance fields only, never User entities, emails, password hashes, foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary.
@@ -316,6 +360,62 @@ salary to zero for workers and the private foreman salary.
 - Close fails with 409 if actualStartTime is missing or salary inputs are negative where request validation normally prevents
 them.
 - Close is transactional: when salary validation fails, the shift remains ACTIVE and attendance salary fields are not written.
+- Close initializes approved worker attendance paymentStatus as UNPAID. It does not create payout requests.
+
+Payroll Requests
+
+- Payroll status is separate from ShiftSession.status. Do not add PAID or NOT_PAID to ShiftStatus.
+- ShiftSession.status remains OPEN, ACTIVE, CLOSED, and CANCELLED.
+- ShiftAttendance.paymentStatus values are UNPAID, PAYMENT_REQUESTED, and PAID.
+- PayoutRequest.status values for the MVP are PENDING and APPROVED.
+- REJECTED and CANCELLED are future statuses and should not be exposed without a later docs update.
+- Worker payable attendance listing reads only the current worker's APPROVED attendance on CLOSED shifts with paymentStatus UNPAID.
+- Payout request preview accepts explicit attendanceIds and returns the same total/item calculation shape as create without persistence.
+- Preview uses the same validation and authorization as create, including duplicate attendanceIds returning 400 Bad Request.
+- Preview does not insert PayoutRequest rows, does not insert PayoutRequestItem rows, and does not change ShiftAttendance.paymentStatus.
+- Preview is non-binding. Create always revalidates and recalculates server-side before persisting.
+- Mobile selected totals must come from preview responses and must not be summed or calculated locally.
+- Payout request creation accepts explicit attendanceIds, matching the mobile checkbox/calendar selection model.
+- Payout request creation rejects duplicate attendanceIds with 400 Bad Request. It must not silently de-duplicate IDs.
+- Payout request creation locks selected ShiftAttendance rows with PESSIMISTIC_WRITE before validating and updating paymentStatus.
+- Selected attendance must belong to the current worker, the worker's current company, CLOSED shifts, and APPROVED attendance.
+- Selected attendance must have workedMinutes and calculatedSalary already persisted.
+- Already PAID attendance cannot be requested again.
+- PAYMENT_REQUESTED attendance cannot be included in another pending request.
+- For the MVP, all selected attendance records in one payout request must belong to shifts created by the same foreman.
+- On successful creation, PayoutRequest stores companyId, workerId, managerForemanId, PENDING status, requestedAt, total raw payable minutes, total rounded payable minutes, total exact calculated amount, and total whole-number payout amount.
+- PayoutRequestItem snapshots attendanceId, shiftSessionId, rawPayableMinutes, payoutRoundedMinutes, hourlyRate, calculatedSalary, roundedItemAmountExact, and payoutAmount.
+- Snapshot item fields preserve what the worker requested even if future shift or rate data changes.
+- PayoutRequestService sets selected attendance paymentStatus to PAYMENT_REQUESTED in the same transaction that creates the request and items.
+- Foreman managed payout listing returns only requests for the foreman's current company where managerForemanId equals the current user id.
+- Foreman approval locks the PayoutRequest and its selected ShiftAttendance rows.
+- Foreman can approve only PENDING requests where every selected attendance still has paymentStatus PAYMENT_REQUESTED.
+- Approval sets PayoutRequest.status to APPROVED, approvedBy, approvedAt, paidAt, each item paidAt, and each selected ShiftAttendance.paymentStatus to PAID.
+- For the MVP, paidAt equals approvedAt because approval is the payment-completion event.
+- Future payment processing may separate approvedAt from paidAt.
+- A database uniqueness constraint should prevent an attendance record from appearing in more than one payout request. If future reject/cancel re-request flows are added, replace this with a partial uniqueness rule for active request statuses.
+
+Payroll Rounding
+
+- PayrollRoundingService owns payout rounding and whole-number payout amount calculation.
+- Backend is the source of truth for payroll rounding.
+- Mobile must not calculate salary, rounded payable minutes, or payout amounts.
+- rawPayableMinutes is ShiftAttendance.workedMinutes from the close flow.
+- calculatedSalary remains the exact audit/display amount from rawPayableMinutes and hourlyRate, stored with scale 2 and RoundingMode.HALF_UP.
+- payoutRoundedMinutes = ceil(rawPayableMinutes / 15) * 15.
+- rawPayableMinutes 0 produces payoutRoundedMinutes 0.
+- roundedItemAmountExact = payoutRoundedMinutes / 60 * hourlyRate.
+- payoutAmount is whole-number money with no cents, calculated from roundedItemAmountExact using RoundingMode.CEILING.
+- Because payout values are non-negative, CEILING rounds any fractional currency amount up to the next whole unit.
+- Request totals are sums of item-level rawPayableMinutes, payoutRoundedMinutes, calculatedSalary, and payoutAmount.
+
+Payroll Privacy
+
+- Worker sees only own payroll data.
+- Worker never receives foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary.
+- Foreman sees worker payout requests only for their company and managed shifts.
+- Payroll DTOs must not expose User entities, password hashes, or unrelated company data.
+- Foreman payroll DTOs expose worker identity fields, selected shifts/days, raw hours/minutes, exact calculated amount, rounded payable minutes, and whole-number payout amount needed to approve the request.
 
 Pause System
 
@@ -377,6 +477,11 @@ Concurrency Control
 - Cancel serializes with join, approval, start, and close, preventing worker joins and lifecycle transitions after the shift becomes CANCELLED.
 - Close serializes concurrent lifecycle transitions and prevents duplicate successful close operations.
 - Pause start/end locks ShiftSession first and then active pause intervals so pause operations serialize with close and lifecycle state changes.
+- Payout request preview does not persist changes but still validates against current attendance state.
+- Payout request creation locks selected ShiftAttendance rows before inserting request items and setting paymentStatus to PAYMENT_REQUESTED.
+- Payout request approval locks PayoutRequest first and selected ShiftAttendance rows second before setting paymentStatus to PAID.
+- Concurrent payout request creation for the same attendance serializes so only the first request succeeds.
+- Concurrent approval for the same payout request serializes so only the first PENDING -> APPROVED transition succeeds.
 
 4. Database
 
@@ -431,6 +536,9 @@ WORKER:
 - own shifts
 - join OPEN shifts and ACTIVE shifts in their company
 - pause/resume self on ACTIVE shifts where they have approved attendance
+- list own payable CLOSED attendance
+- create payout requests for own CLOSED, APPROVED, UNPAID attendance
+- list own payout requests
 
 FOREMAN:
 - create own company
@@ -440,10 +548,13 @@ FOREMAN:
 - cancel own OPEN shifts before start
 - pause/resume self and global pause on own ACTIVE shifts
 - see shift summaries
+- list payout requests for their company and managed shifts
+- approve PENDING payout requests for their company and managed shifts
 
 ADMIN:
 - read shift detail, list/approve attendance, and read worker-only shift summaries through REST where implemented
 - no REST/mobile shift create/start/close/cancel/pause access
+- no REST/mobile payout request creation or approval access for the MVP
 - user management after mobile MVP through Vaadin
 - no mobile admin flow
 
@@ -481,7 +592,9 @@ Basic MVP screens:
 LoginScreen
 RegisterScreen
 WorkerDashboardScreen
+WorkerPayrollScreen
 ForemanDashboardScreen
+ForemanPayrollRequestsScreen
 JoinShiftScreen
 CreateShiftScreen
 ShiftDetailsScreen
@@ -537,3 +650,25 @@ Whenever backend API changes, update:
 docs/API.md
 mobile API client
 backend tests
+
+11. Tests Needed For Payroll Implementation
+
+Backend tests should cover:
+
+- close initializes approved CLOSED attendance with paymentStatus UNPAID
+- payable attendance list returns only the current worker's CLOSED, APPROVED, UNPAID attendance
+- worker cannot list or request payout for another worker's attendance
+- worker cannot request attendance outside their company
+- worker cannot request OPEN, ACTIVE, CANCELLED, unapproved, PAID, or PAYMENT_REQUESTED attendance
+- preview and create reject duplicate attendanceIds with 400 Bad Request
+- preview returns selected totals and item calculations without creating requests or mutating attendance
+- worker cannot create a payout request with attendance managed by multiple foremen in the MVP
+- create revalidates and recalculates after preview before persisting
+- payout request creation snapshots exact calculated amount, rounded payable minutes, and whole-number payout amount
+- payout request creation sets selected attendance to PAYMENT_REQUESTED transactionally
+- foreman sees only payout requests for their company and shifts they created
+- foreman cannot approve another foreman's or another company's payout request
+- approval requires PENDING request and PAYMENT_REQUESTED attendance
+- approval sets request status APPROVED, approvedAt, paidAt, item paidAt, and attendance paymentStatus PAID
+- rounding cases: 0 -> 0, exact 15-minute values unchanged, 1 minute -> 15 minutes, 467 minutes -> 480 minutes, fractional money rounded with CEILING
+- concurrent create/approve attempts do not duplicate payout request items or double-pay attendance
