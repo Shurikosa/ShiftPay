@@ -1,6 +1,7 @@
 package com.shiftpay.mvp.dto;
 
 import com.shiftpay.mvp.entity.AttendanceStatus;
+import com.shiftpay.mvp.entity.PaymentStatus;
 import com.shiftpay.mvp.entity.ShiftAttendance;
 import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.ShiftStatus;
@@ -24,6 +25,7 @@ import java.time.OffsetDateTime;
  * @param actualStartTime actual shift start time in UTC, if started
  * @param actualEndTime actual shift end time in UTC, if closed
  * @param attendanceStatus current attendance status for the user
+ * @param paymentStatus current payroll payment status for the attendance
  * @param hourlyRate attendance rate snapshot or override
  * @param breakMinutes break minutes stored on attendance
  * @param payableStartTime effective worker payable start time, or null before it is known
@@ -43,6 +45,7 @@ public record MyShiftHistoryResponse(
 		OffsetDateTime actualStartTime,
 		OffsetDateTime actualEndTime,
 		AttendanceStatus attendanceStatus,
+		PaymentStatus paymentStatus,
 		BigDecimal hourlyRate,
 		Integer breakMinutes,
 		OffsetDateTime payableStartTime,
@@ -98,6 +101,7 @@ public record MyShiftHistoryResponse(
 				shiftSession.getActualStartTime(),
 				shiftSession.getActualEndTime(),
 				attendance.getStatus(),
+				attendance.getPaymentStatus(),
 				attendance.getHourlyRate(),
 				attendance.getBreakMinutes(),
 				payableStartTime,

@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -122,6 +123,97 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 			order by attendance.joinedAt desc, attendance.id desc
 			""")
 	List<ShiftAttendance> findMyShiftHistoryByWorkerId(@Param("workerId") Long workerId);
+
+	/**
+	 * Lists payable closed attendance for the worker payroll screen.
+	 *
+	 * @param workerId current worker id
+	 * @param companyId current worker company id
+	 * @return payable attendance ordered by closed shift end time and id
+	 */
+	@Query("""
+			select attendance
+			from ShiftAttendance attendance
+			join fetch attendance.shiftSession shiftSession
+			join fetch shiftSession.company
+			join fetch shiftSession.createdBy
+			where attendance.worker.id = :workerId
+			  and shiftSession.company.id = :companyId
+			  and attendance.status = com.shiftpay.mvp.entity.AttendanceStatus.APPROVED
+			  and shiftSession.status = com.shiftpay.mvp.entity.ShiftStatus.CLOSED
+			  and attendance.paymentStatus = com.shiftpay.mvp.entity.PaymentStatus.UNPAID
+			  and attendance.workedMinutes is not null
+			  and attendance.calculatedSalary is not null
+			order by shiftSession.actualEndTime desc, attendance.id desc
+			""")
+	List<ShiftAttendance> findPayableByWorkerIdAndCompanyId(
+			@Param("workerId") Long workerId,
+			@Param("companyId") Long companyId
+	);
+
+	/**
+	 * Loads selected attendance rows for a worker payout preview.
+	 *
+	 * @param attendanceIds selected attendance ids
+	 * @param workerId current worker id
+	 * @return selected attendance owned by the worker
+	 */
+	@Query("""
+			select attendance
+			from ShiftAttendance attendance
+			join fetch attendance.worker worker
+			left join fetch worker.company
+			join fetch attendance.shiftSession shiftSession
+			join fetch shiftSession.company
+			join fetch shiftSession.createdBy
+			where attendance.id in :attendanceIds
+			  and worker.id = :workerId
+			""")
+	List<ShiftAttendance> findSelectedByIdsAndWorkerIdWithDetails(
+			@Param("attendanceIds") Collection<Long> attendanceIds,
+			@Param("workerId") Long workerId
+	);
+
+	/**
+	 * Locks selected attendance rows before payout request creation.
+	 *
+	 * @param attendanceIds selected attendance ids
+	 * @param workerId current worker id
+	 * @return locked selected attendance owned by the worker
+	 */
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("""
+			select attendance
+			from ShiftAttendance attendance
+			join fetch attendance.worker worker
+			left join fetch worker.company
+			join fetch attendance.shiftSession shiftSession
+			join fetch shiftSession.company
+			join fetch shiftSession.createdBy
+			where attendance.id in :attendanceIds
+			  and worker.id = :workerId
+			""")
+	List<ShiftAttendance> findSelectedByIdsAndWorkerIdForUpdate(
+			@Param("attendanceIds") Collection<Long> attendanceIds,
+			@Param("workerId") Long workerId
+	);
+
+	/**
+	 * Locks attendance rows selected by a payout request during approval.
+	 *
+	 * @param attendanceIds selected attendance ids
+	 * @return locked attendance rows with shift details
+	 */
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("""
+			select attendance
+			from ShiftAttendance attendance
+			join fetch attendance.shiftSession shiftSession
+			join fetch shiftSession.company
+			join fetch shiftSession.createdBy
+			where attendance.id in :attendanceIds
+			""")
+	List<ShiftAttendance> findAllByIdInForUpdate(@Param("attendanceIds") Collection<Long> attendanceIds);
 
 	/**
 	 * Lists approved attendance for a closed shift summary and fetches worker identity in the same query.

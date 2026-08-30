@@ -3,6 +3,7 @@ package com.shiftpay.mvp.controller;
 import com.shiftpay.mvp.TestDataCleaner;
 import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.Company;
+import com.shiftpay.mvp.entity.PaymentStatus;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftAttendance;
 import com.shiftpay.mvp.entity.ShiftSession;
@@ -1073,7 +1074,7 @@ class ShiftSessionControllerTests {
 	}
 
 	/**
-	 * Leaves attendance in JOINED state, closes the shift, and expects salary fields to remain null.
+	 * Leaves attendance in JOINED state, closes the shift, and expects salary/payment fields to reset.
 	 */
 	@Test
 	void closeLeavesJoinedAttendanceWithoutSalary() throws Exception {
@@ -1081,6 +1082,13 @@ class ShiftSessionControllerTests {
 		long shiftId = createShift(foremanToken, "Joined attendance shift");
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
 		long attendanceId = joinAndGetAttendanceId(workerToken, shiftId);
+		ShiftAttendance attendanceBeforeClose = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		attendanceBeforeClose.setWorkedMinutes(30);
+		attendanceBeforeClose.setPauseMinutes(0);
+		attendanceBeforeClose.setCalculatedSalary(new BigDecimal("7.50"));
+		attendanceBeforeClose.setPaymentStatus(PaymentStatus.PAID);
+		attendanceBeforeClose.setPaidAt(OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(5));
+		shiftAttendanceRepository.saveAndFlush(attendanceBeforeClose);
 		startShift(foremanToken, shiftId).andExpect(status().isOk());
 		setActualStartTime(shiftId, OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(120));
 
@@ -1089,7 +1097,10 @@ class ShiftSessionControllerTests {
 		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
 		assertThat(attendance.getStatus()).isEqualTo(AttendanceStatus.JOINED);
 		assertThat(attendance.getWorkedMinutes()).isNull();
+		assertThat(attendance.getPauseMinutes()).isNull();
 		assertThat(attendance.getCalculatedSalary()).isNull();
+		assertThat(attendance.getPaymentStatus()).isEqualTo(PaymentStatus.UNPAID);
+		assertThat(attendance.getPaidAt()).isNull();
 	}
 
 	/**

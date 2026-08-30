@@ -37,7 +37,7 @@ class OpenApiControllerTests {
 				.andExpect(jsonPath("$.info.version").value("v1"))
 				.andExpect(jsonPath("$.info.description").value("OpenAPI documentation for the ShiftPay backend MVP: "
 						+ "authentication, current user, shift sessions, shift cancellation, active-shift pause tracking, "
-						+ "attendance, salary summary, and personal shift history."))
+						+ "attendance, salary summary, personal shift history, and payroll requests."))
 				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.type").value("http"))
 				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
 				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.bearerFormat").value("JWT"))
@@ -65,6 +65,23 @@ class OpenApiControllerTests {
 				.andExpect(jsonPath("$.paths['/api/v1/shifts/{shiftId}/pauses/me/end'].post").exists())
 				.andExpect(jsonPath("$.paths['/api/v1/shifts/{shiftId}/pauses/all/start'].post").exists())
 				.andExpect(jsonPath("$.paths['/api/v1/shifts/{shiftId}/pauses/all/end'].post").exists());
+	}
+
+	/**
+	 * Reads generated docs and expects payroll request endpoints to be exposed.
+	 */
+	@Test
+	void apiDocsExposeImplementedPayrollEndpoints() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.paths['/api/v1/me/payable-attendances'].get").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/me/payout-requests/preview'].post").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/me/payout-requests'].post").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/me/payout-requests'].get").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/me/managed-payout-requests'].get").exists())
+				.andExpect(jsonPath(
+						"$.paths['/api/v1/me/managed-payout-requests/{requestId}/approve'].post"
+				).exists());
 	}
 
 	/**

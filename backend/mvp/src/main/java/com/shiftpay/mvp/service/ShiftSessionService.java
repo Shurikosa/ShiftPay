@@ -10,6 +10,7 @@ import com.shiftpay.mvp.dto.ShiftSummaryResponse;
 import com.shiftpay.mvp.dto.WorkerSummaryResponse;
 import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.Company;
+import com.shiftpay.mvp.entity.PaymentStatus;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftAttendance;
 import com.shiftpay.mvp.entity.ShiftPauseInterval;
@@ -321,11 +322,15 @@ public class ShiftSessionService {
 				attendance.setPauseMinutes(pauseMinutes);
 				attendance.setWorkedMinutes(salary.workedMinutes());
 				attendance.setCalculatedSalary(salary.calculatedSalary());
+				attendance.setPaymentStatus(PaymentStatus.UNPAID);
+				attendance.setPaidAt(null);
 			}
 			else {
 				attendance.setPauseMinutes(null);
 				attendance.setWorkedMinutes(null);
 				attendance.setCalculatedSalary(null);
+				attendance.setPaymentStatus(PaymentStatus.UNPAID);
+				attendance.setPaidAt(null);
 			}
 		}
 

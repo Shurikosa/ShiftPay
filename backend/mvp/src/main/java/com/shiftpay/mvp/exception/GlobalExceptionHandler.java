@@ -116,6 +116,36 @@ public class GlobalExceptionHandler {
 	}
 
 	/**
+	 * Handles payout request state conflicts.
+	 *
+	 * @param exception payout request conflict exception
+	 * @param request current HTTP request
+	 * @return 409 Conflict error response
+	 */
+	@ExceptionHandler(PayoutRequestConflictException.class)
+	public ResponseEntity<ErrorResponse> handlePayoutRequestConflictException(
+			PayoutRequestConflictException exception,
+			HttpServletRequest request
+	) {
+		return buildError(HttpStatus.CONFLICT, exception.getMessage(), request);
+	}
+
+	/**
+	 * Handles missing payout request rows.
+	 *
+	 * @param exception payout request not found exception
+	 * @param request current HTTP request
+	 * @return 404 Not Found error response
+	 */
+	@ExceptionHandler(PayoutRequestNotFoundException.class)
+	public ResponseEntity<ErrorResponse> handlePayoutRequestNotFoundException(
+			PayoutRequestNotFoundException exception,
+			HttpServletRequest request
+	) {
+		return buildError(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+	}
+
+	/**
 	 * Handles registration attempts with an already registered email.
 	 *
 	 * @param exception duplicate email exception

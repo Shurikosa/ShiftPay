@@ -71,6 +71,15 @@ public class ShiftAttendance {
 	private BigDecimal calculatedSalary;
 
 	@Setter
+	@Enumerated(EnumType.STRING)
+	@Column(name = "payment_status", nullable = false, length = 32)
+	private PaymentStatus paymentStatus = PaymentStatus.UNPAID;
+
+	@Setter
+	@Column(name = "paid_at")
+	private OffsetDateTime paidAt;
+
+	@Setter
 	@Column(name = "joined_at", nullable = false)
 	private OffsetDateTime joinedAt;
 
