@@ -53,6 +53,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
     void signIn({
       email: email.trim(),
       password
+
     })
       .catch((error) => {
         setLocalError(getErrorMessage(error));

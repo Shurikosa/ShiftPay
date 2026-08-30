@@ -37,7 +37,12 @@ import {
   isPaused,
   missingPauseStateMessage
 } from "../utils/pauseDisplay";
-import { getAttendanceStatusTone, getShiftStatusTone } from "../utils/status";
+import {
+  formatStatusLabel,
+  getAttendanceStatusTone,
+  getPaymentStatusTone,
+  getShiftStatusTone
+} from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
 
 type ForemanShiftDetailsScreenProps = NativeStackScreenProps<
@@ -487,6 +492,12 @@ export function ForemanShiftDetailsScreen({
                               label={item.status}
                               tone={getAttendanceStatusTone(item.status)}
                             />
+                            {item.paymentStatus ? (
+                              <StatusBadge
+                                label={formatStatusLabel(item.paymentStatus)}
+                                tone={getPaymentStatusTone(item.paymentStatus)}
+                              />
+                            ) : null}
                             {isPaused(item.pauseState) ? (
                               <StatusBadge label="PAUSED" tone="warning" />
                             ) : null}
@@ -513,6 +524,15 @@ export function ForemanShiftDetailsScreen({
                             label="Calculated salary"
                             value={formatMoney(item.calculatedSalary)}
                           />
+                          {item.paymentStatus ? (
+                            <DetailRow
+                              label="Payment status"
+                              value={formatStatusLabel(item.paymentStatus)}
+                            />
+                          ) : null}
+                          {item.paidAt ? (
+                            <DetailRow label="Paid" value={formatDateTime(item.paidAt)} />
+                          ) : null}
                         </View>
 
                         {canApprove ? (

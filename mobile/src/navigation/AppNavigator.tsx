@@ -6,6 +6,7 @@ import { WorkerShiftHistoryProvider } from "../context/WorkerShiftHistoryContext
 import { CreateCompanyScreen } from "../screens/CreateCompanyScreen";
 import { CreateShiftScreen } from "../screens/CreateShiftScreen";
 import { ForemanDashboardScreen } from "../screens/ForemanDashboardScreen";
+import { ForemanPayrollRequestsScreen } from "../screens/ForemanPayrollRequestsScreen";
 import { ForemanShiftDetailsScreen } from "../screens/ForemanShiftDetailsScreen";
 import { JoinCompanyScreen } from "../screens/JoinCompanyScreen";
 import { JoinShiftScreen } from "../screens/JoinShiftScreen";
@@ -16,6 +17,7 @@ import { RestoreSessionScreen } from "../screens/RestoreSessionScreen";
 import { ShiftSummaryScreen } from "../screens/ShiftSummaryScreen";
 import { UnsupportedRoleScreen } from "../screens/UnsupportedRoleScreen";
 import { WorkerDashboardScreen } from "../screens/WorkerDashboardScreen";
+import { WorkerPayrollScreen } from "../screens/WorkerPayrollScreen";
 import { WorkerShiftDetailsScreen } from "../screens/WorkerShiftDetailsScreen";
 import type {
   AuthStackParamList,
@@ -43,6 +45,7 @@ function WorkerNavigator() {
         <WorkerStack.Screen component={WorkerDashboardScreen} name="WorkerDashboard" />
         <WorkerStack.Screen component={JoinShiftScreen} name="JoinShift" />
         <WorkerStack.Screen component={MyShiftHistoryScreen} name="MyShiftHistory" />
+        <WorkerStack.Screen component={WorkerPayrollScreen} name="WorkerPayroll" />
         <WorkerStack.Screen component={WorkerShiftDetailsScreen} name="WorkerShiftDetails" />
       </WorkerStack.Navigator>
     </WorkerShiftHistoryProvider>
@@ -55,6 +58,10 @@ function ForemanNavigator() {
       <ForemanStack.Navigator screenOptions={{ headerShown: false }}>
         <ForemanStack.Screen component={ForemanDashboardScreen} name="ForemanDashboard" />
         <ForemanStack.Screen component={CreateShiftScreen} name="CreateShift" />
+        <ForemanStack.Screen
+          component={ForemanPayrollRequestsScreen}
+          name="ForemanPayrollRequests"
+        />
         <ForemanStack.Screen
           component={ForemanShiftDetailsScreen}
           name="ForemanShiftDetails"

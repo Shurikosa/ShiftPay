@@ -7,7 +7,12 @@ import {
   formatOptionalLocation
 } from "../utils/format";
 import { getWorkerPauseBadgeLabel } from "../utils/pauseDisplay";
-import { getAttendanceStatusTone, getShiftStatusTone } from "../utils/status";
+import {
+  formatStatusLabel,
+  getAttendanceStatusTone,
+  getPaymentStatusTone,
+  getShiftStatusTone
+} from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
 import { StatusBadge } from "./StatusBadge";
 
@@ -51,6 +56,12 @@ export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
         </View>
         <View style={styles.badges}>
           <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
+          {shift.paymentStatus ? (
+            <StatusBadge
+              label={formatStatusLabel(shift.paymentStatus)}
+              tone={getPaymentStatusTone(shift.paymentStatus)}
+            />
+          ) : null}
           {pauseBadgeLabel ? (
             <StatusBadge label={pauseBadgeLabel} tone="warning" />
           ) : null}
@@ -75,6 +86,9 @@ export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
           ) : null}
           <Text style={styles.metaText}>{workedLabel}</Text>
           <Text style={styles.metaText}>{salaryLabel}</Text>
+          {shift.paidAt ? (
+            <Text style={styles.metaText}>Paid {formatDateTime(shift.paidAt)}</Text>
+          ) : null}
         </View>
       </View>
     </Pressable>

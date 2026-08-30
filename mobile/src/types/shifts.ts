@@ -1,3 +1,5 @@
+import type { PaymentStatus } from "./payroll";
+
 export type ShiftStatus = "CREATED" | "OPEN" | "ACTIVE" | "CLOSED" | "CANCELLED";
 
 export type AttendanceStatus = "JOINED" | "APPROVED" | "REJECTED" | "CANCELLED";
@@ -35,6 +37,8 @@ export interface WorkerShiftHistoryItem {
   actualStartTime: string | null;
   actualEndTime: string | null;
   attendanceStatus: AttendanceStatus;
+  paymentStatus?: PaymentStatus | null;
+  paidAt?: string | null;
   hourlyRate: number;
   breakMinutes: number;
   payableStartTime?: string | null;
@@ -91,6 +95,8 @@ export interface ShiftAttendance {
   firstName: string;
   lastName: string;
   status: AttendanceStatus;
+  paymentStatus?: PaymentStatus | null;
+  paidAt?: string | null;
   hourlyRate: number;
   breakMinutes: number;
   payableStartTime?: string | null;

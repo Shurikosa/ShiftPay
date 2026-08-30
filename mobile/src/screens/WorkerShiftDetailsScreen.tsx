@@ -24,7 +24,12 @@ import {
   getWorkerPauseBadgeLabel,
   missingPauseStateMessage
 } from "../utils/pauseDisplay";
-import { getAttendanceStatusTone, getShiftStatusTone } from "../utils/status";
+import {
+  formatStatusLabel,
+  getAttendanceStatusTone,
+  getPaymentStatusTone,
+  getShiftStatusTone
+} from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
 
 type WorkerShiftDetailsScreenProps = NativeStackScreenProps<
@@ -163,6 +168,12 @@ export function WorkerShiftDetailsScreen({
             label={shift.attendanceStatus}
             tone={getAttendanceStatusTone(shift.attendanceStatus)}
           />
+          {shift.paymentStatus ? (
+            <StatusBadge
+              label={formatStatusLabel(shift.paymentStatus)}
+              tone={getPaymentStatusTone(shift.paymentStatus)}
+            />
+          ) : null}
           {pauseBadgeLabel ? (
             <StatusBadge label={pauseBadgeLabel} tone="warning" />
           ) : null}
@@ -200,6 +211,12 @@ export function WorkerShiftDetailsScreen({
           <DetailRow label="Pause time" value={formatPauseMinutes(shift.pauseMinutes)} />
           <DetailRow label="Worked time" value={formatMinutes(shift.workedMinutes)} />
           <DetailRow label="Calculated salary" value={formatMoney(shift.calculatedSalary)} />
+          {shift.paymentStatus ? (
+            <DetailRow label="Payment status" value={formatStatusLabel(shift.paymentStatus)} />
+          ) : null}
+          {shift.paidAt ? (
+            <DetailRow label="Paid" value={formatDateTime(shift.paidAt)} />
+          ) : null}
         </View>
 
         {canPause ? (
