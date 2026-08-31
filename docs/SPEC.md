@@ -141,13 +141,15 @@ Basic flow:
 19. During the ACTIVE shift, workers with approved attendance can pause and resume themselves.
 20. During the ACTIVE shift, foreman can pause and resume themselves or everyone.
 21. Foreman closes the shift.
-22. System records shift end time as actualEndTime and closes any active pause intervals at actualEndTime.
-23. System calculates worked time for approved worker attendance, subtracting static break minutes and effective pause minutes.
-24. System calculates salary for approved worker attendance.
-25. System calculates the foreman's private salary from ShiftSession.foremanHourlyRate without creating ShiftAttendance for the foreman.
-26. Worker can view their own worker result.
-27. Foreman can view shift summary, including worker salary summary and their own private foreman salary.
-28. Foreman can view the list of shifts they created and manage.
+22. If the backend detects actual duration 0 or less than 15 minutes, the system asks the foreman whether to save or discard the short shift.
+23. If the foreman saves the short shift, system records shift end time as actualEndTime and closes any active pause intervals at actualEndTime.
+24. If the foreman discards the short shift, system marks it DISCARDED for audit and does not calculate salary or payroll.
+25. System calculates worked time for approved worker attendance, subtracting static break minutes and effective pause minutes.
+26. System calculates salary for approved worker attendance.
+27. System calculates the foreman's private salary from ShiftSession.foremanHourlyRate without creating ShiftAttendance for the foreman.
+28. Worker can view their own worker result.
+29. Foreman can view shift summary, including worker salary summary and their own private foreman salary.
+30. Foreman can view the list of shifts they created and manage.
 
 ## 6. Shift Statuses
 
@@ -157,6 +159,9 @@ OPEN
 ACTIVE
 CLOSED
 CANCELLED
+DISCARDED
+
+CANCELLED is for pre-start cancellation. DISCARDED is for an active short shift that the foreman explicitly chooses not to save.
 
 ## 7. Shift Creation Rules
 
@@ -206,7 +211,7 @@ WORKER can join a shift only if they are already a member of that shift's compan
 
 WORKER can join by shift join code when the shift is OPEN or ACTIVE.
 
-WORKER cannot join CLOSED or CANCELLED shifts.
+WORKER cannot join CLOSED, CANCELLED, or DISCARDED shifts.
 
 Company name must be visible in the main menu or dashboard for FOREMAN and WORKER.
 
@@ -226,9 +231,50 @@ Rules:
 - cancelled shift has status CANCELLED
 - cancelled shift does not set actualStartTime or actualEndTime
 - cancelled shift does not calculate salary
-- cancelled shift cannot be started, closed, joined by workers, or summarized
+- cancelled shift cannot be started, closed, joined by workers, paused, resumed, or summarized
 - worker history can show CANCELLED shift/status
 - ADMIN is not allowed to cancel through the REST/mobile API
+
+## 9.1 Short Shift Discard Rules
+
+If FOREMAN tries to close an ACTIVE shift with actual duration 0 or less than
+15 minutes, the backend must require an explicit decision before mutating payroll
+state.
+
+Endpoints:
+
+POST /api/v1/shifts/{shiftId}/close
+
+POST /api/v1/shifts/{shiftId}/discard
+
+Rules:
+
+- Backend is the source of truth for actual duration and the short-shift threshold.
+- shortShiftMinimumMinutes = 15.
+- Closing a short shift without explicit `saveShortShift: true` returns 409
+  Conflict with code SHORT_SHIFT_REQUIRES_DECISION.
+- The 409 warning does not close the shift, end pauses, calculate salary, or
+  change attendance payment status.
+- If the foreman chooses save, mobile calls close with `saveShortShift: true`;
+  the shift becomes CLOSED and salary/payroll are calculated normally.
+- If the foreman chooses not save, mobile calls discard; the shift becomes
+  DISCARDED.
+- DISCARDED must not reuse CANCELLED because CANCELLED is pre-start
+  cancellation.
+- Discard records actualEndTime/discardedAt, discardedBy, and discardReason for
+  audit. MVP discardReason is SHORT_SHIFT_NOT_SAVED.
+- Discard may auto-end active pause intervals at discardedAt for audit, but those
+  pause intervals are not used for salary calculation.
+- DISCARDED shifts do not calculate worker salary, foreman salary, worked
+  minutes, payable minutes, or payout request data.
+- Attendance on DISCARDED shifts is never payable and cannot be previewed,
+  requested, or approved for payout.
+- DISCARDED shifts cannot be started, closed, joined by workers, paused,
+  resumed, or summarized.
+- Worker history may show DISCARDED shift/status as non-payable history with no
+  payroll action.
+- Foreman managed shift history may show DISCARDED shift/status for audit, but it
+  must not appear as normal completed work.
 
 ## 10. Pause Rules
 
@@ -256,7 +302,7 @@ FOREMAN can:
 Rules:
 
 - Pause is available only while shift status is ACTIVE.
-- OPEN, CLOSED, and CANCELLED shifts cannot be paused or resumed.
+- OPEN, CLOSED, CANCELLED, and DISCARDED shifts cannot be paused or resumed.
 - WORKER must already have approved attendance on the ACTIVE shift in their company.
 - FOREMAN must own the shift.
 - ADMIN cannot pause through the REST/mobile API.
@@ -317,7 +363,7 @@ foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
 -Salary must not be negative.
 -Break time and pause time cannot make paid minutes negative; paid minutes clamp to 0.
 -If shift is not closed, final salary should not be calculated.
--Cancelled shifts do not calculate final salary.
+-Cancelled and DISCARDED shifts do not calculate final salary.
 -Hourly rate should be stored for the attendance record, because rates can change later.
 -WORKER never sets an hourly rate.
 -FOREMAN sets one default hourly rate for a shift that they own.
@@ -331,7 +377,7 @@ foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
 -Salary calculation should use precise decimal values, not floating-point double.
 -Salary is calculated when a shift closes successfully.
 -Only APPROVED attendance receives worked minutes and calculated salary.
--JOINED, REJECTED, and CANCELLED attendance keep worked minutes and calculated salary empty.
+-JOINED, REJECTED, CANCELLED, and DISCARDED-shift attendance keep worked minutes and calculated salary empty.
 -Salary calculation uses the attendance hourly rate snapshot or override.
 -Salary calculation subtracts accumulated effective pause minutes.
 -Salary calculation for late approved workers starts from the worker payable start time, not the global shift actualStartTime.
@@ -352,12 +398,16 @@ foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
 ## 13. Payroll Requests MVP
 
 Payroll Requests MVP tracks worker payment separately from the shift lifecycle.
-Do not add PAID or NOT_PAID to ShiftStatus. Shift lifecycle remains:
+Do not add PAID or NOT_PAID to ShiftStatus. Shift lifecycle statuses are:
 
 - OPEN
 - ACTIVE
 - CLOSED
 - CANCELLED
+- DISCARDED
+
+CANCELLED is pre-start cancellation. DISCARDED is an active short shift that the
+foreman explicitly chose not to save.
 
 Payment lifecycle is tracked on worker attendance and payout requests.
 
@@ -390,8 +440,7 @@ Business flow:
 8. Backend revalidates and recalculates the request during creation.
 9. Selected attendance records move to PAYMENT_REQUESTED.
 10. Foreman sees the payout request with worker identity, selected shifts/days,
-   raw hours/minutes, exact calculated amount, rounded payable minutes, and
-   whole-number payout amount.
+   raw hours/minutes, and whole-number payout amount.
 11. Foreman approves the payout request.
 12. Selected attendance records move to PAID.
 
@@ -402,6 +451,7 @@ Validation and conflict rules:
   Request. The backend must not silently de-duplicate IDs.
 - Worker can request payout only for attendance in their current company.
 - Worker can request payout only for APPROVED attendance on CLOSED shifts.
+- Attendance on DISCARDED shifts is never payable.
 - Already PAID attendance cannot be included in a new request.
 - PAYMENT_REQUESTED attendance cannot be included in another pending request.
 - For MVP, one payout request must contain attendance records managed by one
@@ -423,13 +473,30 @@ Rounding rules:
   close flow.
 - calculatedSalary remains the exact audit/display amount from rawPayableMinutes
   and hourlyRate, stored with scale 2 and HALF_UP.
-- payoutRoundedMinutes = ceil(rawPayableMinutes to the nearest 15 minutes).
+- payoutRoundedMinutes is rawPayableMinutes rounded to the nearest 5 minutes
+  with half-up midpoint behavior.
 - If rawPayableMinutes is 0, payoutRoundedMinutes is 0.
+- If rawPayableMinutes is greater than 0 and rounding would otherwise produce 0,
+  payoutRoundedMinutes is 5.
 - roundedItemAmountExact = payoutRoundedMinutes / 60 * hourlyRate.
 - payoutAmount is whole-number money with no cents, rounded from
   roundedItemAmountExact using CEILING.
 - Request totals are sums of item-level rawPayableMinutes,
   payoutRoundedMinutes, calculatedSalary, and payoutAmount.
+- Examples for payoutRoundedMinutes: 0 -> 0, 1 -> 5, 4 -> 5, 5 -> 5, 7 -> 5,
+  8 -> 10, 11 -> 10, 13 -> 15, 25 -> 25, 28 -> 30.
+- If product later wants 25 -> 30, that is not nearest-5 half-up rounding and
+  must be documented as a separate upward-rounding rule.
+
+Display rules:
+
+- Worker and foreman payout request cards show raw worked/payable time, final
+  payoutAmount, status, and selected days/items enough for audit.
+- Payout request cards must not show rounded payable minutes or exact calculated
+  amount.
+- Backend APIs may still return payoutRoundedMinutes and exactCalculatedAmount
+  for audit/internal use; mobile hides them from cards unless a later detailed
+  audit view is added.
 
 Privacy rules:
 

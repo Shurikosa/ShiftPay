@@ -312,7 +312,7 @@ Rules:
 - worker never enters or edits hourly rate
 - worker must already belong to the shift's company
 - backend accepts joins only for `OPEN` and `ACTIVE` shifts
-- show duplicate join, unknown code, forbidden, and `CLOSED`/`CANCELLED` shift errors
+- show duplicate join, unknown code, forbidden, and `CLOSED`/`CANCELLED`/`DISCARDED` shift errors
 
 ### MyShiftHistoryScreen
 
@@ -393,10 +393,8 @@ Content:
 - selectable list or calendar of payable attendance records
 - checkbox beside each unpaid closed day
 - shift title, date, location, raw worked minutes or formatted hours/minutes
-- exact calculated salary for audit/display
-- backend-rounded payable minutes
 - backend-calculated whole-number payout amount
-- selected total raw minutes, rounded minutes, exact amount, and payout amount
+- selected total raw minutes and payout amount from backend preview
 - own payout request history with status badges
 
 Actions:
@@ -418,8 +416,8 @@ Rules:
 - use explicit attendanceIds from selected checkboxes
 - disable submit when no attendance is selected
 - call `POST /api/v1/me/payout-requests/preview` after selection changes before showing selected totals
-- selected total raw minutes, rounded minutes, exact amount, and payout amount must come from the latest backend preview response
-- do not sum selected totals locally
+- selected total raw minutes and payout amount must come from the latest backend preview response
+- do not sum selected totals locally and do not calculate payroll locally
 - preview is non-binding; create can still fail or return changed totals because the backend revalidates and recalculates during creation
 - after successful request creation, refresh payable attendances and payout requests
 - if selected attendanceIds contain duplicates due to UI state bugs, backend returns 400; the UI should refresh selection state instead of trying to de-duplicate silently
@@ -427,7 +425,8 @@ Rules:
 - `PAYMENT_REQUESTED` and `PAID` items are shown only in request/history context, not as selectable payable items
 - mobile may format minutes into hours/minutes for display
 - mobile must not calculate salary, rounded payable minutes, or payout amount
-- backend preview/create `payoutRoundedMinutes`, `calculatedSalary`, and `payoutAmount` are the values shown to the user
+- backend preview/create `payoutAmount` and raw payable time are the payroll values shown on cards and selected-total UI
+- do not show `payoutRoundedMinutes` or exact calculated amount on payout request cards unless a later detailed audit view is added
 - use status badges for `UNPAID`, `PAYMENT_REQUESTED`, `PAID`, `PENDING`, and `APPROVED`
 - if backend returns a conflict because an item was already requested or paid, refresh and show the updated state
 
@@ -444,7 +443,7 @@ Content:
 - primary action to create a shift
 - managed shift list
 - shortcut to payroll requests
-- status labels for `OPEN`, `ACTIVE`, `CLOSED`, and `CANCELLED`
+- status labels for `OPEN`, `ACTIVE`, `CLOSED`, `CANCELLED`, and `DISCARDED`
 - pending payout request count if loaded
 
 API calls:
@@ -537,6 +536,7 @@ API calls:
 - `POST /api/v1/shifts/{shiftId}/pauses/all/start`
 - `POST /api/v1/shifts/{shiftId}/pauses/all/end`
 - `POST /api/v1/shifts/{shiftId}/close`
+- `POST /api/v1/shifts/{shiftId}/discard`
 
 Rules:
 
@@ -550,6 +550,11 @@ Rules:
 - summary is available only after the shift is `CLOSED`
 - actualStartTime and actualEndTime are set by the backend
 - do not calculate worker or foreman salary on the client
+- do not decide whether a shift is shorter than 15 minutes on the client
+- if close returns `SHORT_SHIFT_REQUIRES_DECISION`, show a foreman decision prompt
+- if foreman chooses to save the short shift, call close again with `{ "saveShortShift": true }`
+- if foreman chooses not to save the short shift, call `POST /api/v1/shifts/{shiftId}/discard`
+- discarded shifts should show `DISCARDED` status, no summary action, and no payroll action
 - late worker pay starts from backend `payableStartTime`/approval time, not the global shift start
 - cancelled shifts should show CANCELLED status and no salary summary action
 - use backend `pauseState` and attendance-level pause state; do not derive active pause state locally beyond rendering returned fields
@@ -594,8 +599,6 @@ Content:
 - worker name
 - selected shifts/days per request
 - raw payable minutes with hours/minutes formatting
-- exact calculated amount for audit/display
-- backend-rounded payable minutes
 - backend-calculated whole-number payout amount
 - requestedAt, approvedAt, and paidAt when present
 - status badges for `PENDING` and `APPROVED`
@@ -623,6 +626,7 @@ Rules:
 - show backend conflict errors when a request was already approved or an attendance is no longer payment requested
 - do not show another foreman's private salary fields
 - do not calculate salary, rounded payable minutes, or payout amount on the client
+- do not show exact calculated amount or rounded payable minutes on payout request cards unless a later detailed audit view is added
 
 ## 6. Shared States
 
@@ -736,7 +740,10 @@ Mobile must not calculate pause-adjusted salary. It should display backend persi
 - The mobile app should consume persisted `workedMinutes` and
   `calculatedSalary` values returned by the backend.
 - The mobile app should consume payroll `paymentStatus`,
-  `payoutRoundedMinutes`, and `payoutAmount` values returned by the backend.
+  raw payable time, and `payoutAmount` values returned by the backend for card
+  display.
+- The mobile app must not show `payoutRoundedMinutes` or exact calculated amount
+  on payout request cards unless a later detailed audit view is added.
 - For late workers, the mobile app should treat backend `payableStartTime` as the worker's effective salary start.
 - The mobile app should consume backend `pauseState`, `pauseMinutes`, and
   `foremanPauseMinutes` rather than deriving pause totals locally.

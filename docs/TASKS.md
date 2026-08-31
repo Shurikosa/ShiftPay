@@ -62,6 +62,16 @@ Each Codex session should take one small task from this file.
 - [x] Add validation rules
 - [x] Add tests for shift lifecycle
 
+Short-shift correction tasks:
+
+- [ ] Add `DISCARDED` ShiftStatus for active short shifts the foreman chooses not to save
+- [ ] Update close shift to return `SHORT_SHIFT_REQUIRES_DECISION` when backend actual duration is 0 or less than 15 minutes and `saveShortShift` is not true
+- [ ] Support close shift request body `{ "saveShortShift": true }` so the foreman can explicitly save a short shift
+- [ ] Add `POST /api/v1/shifts/{shiftId}/discard` for owner FOREMAN to discard ACTIVE shifts whose backend actual duration is 0 or less than 15 minutes
+- [ ] Persist discardedAt, discardedBy, discardReason, and audit actualEndTime for DISCARDED shifts
+- [ ] Ensure DISCARDED shifts do not calculate salary, initialize payroll, appear as payable attendance, or return shift summary
+- [ ] Add lifecycle tests for short close warning, explicit save, discard, non-owner/role rejection, non-short discard conflict, pause auto-end audit behavior, and payroll exclusion
+
 ## Milestone 5: Attendance
 
 - [x] Worker joins shift by code
@@ -88,7 +98,7 @@ Backend tasks:
 - [ ] Initialize APPROVED CLOSED attendance as UNPAID during close flow
 - [ ] Add payout_requests table/entity with worker, company, manager foreman, status, totals, requestedAt, approvedAt, paidAt
 - [ ] Add payout_request_items table/entity with attendance snapshots, exact amount, rounded minutes, whole-number payout amount, and paidAt
-- [ ] Add payroll rounding service: ceil raw payable minutes to 15-minute intervals and round item payout amount up to whole money units
+- [ ] Add payroll rounding service: round raw payable minutes to nearest 5 minutes with half-up midpoint behavior and round item payout amount up to whole money units
 - [ ] Implement `GET /api/v1/me/payable-attendances`
 - [ ] Implement `POST /api/v1/me/payout-requests/preview`
 - [ ] Implement `POST /api/v1/me/payout-requests`
@@ -112,8 +122,10 @@ Mobile tasks:
 - [ ] Show worker payout request history with PENDING and APPROVED status badges
 - [ ] Add Foreman Payroll Requests screen for pending/approved requests
 - [ ] Add foreman approve action and refresh behavior
-- [ ] Display backend `paymentStatus`, `payoutRoundedMinutes`, `calculatedSalary`, and whole-number `payoutAmount`
+- [ ] Display backend `paymentStatus`, raw payable time, and whole-number `payoutAmount` on payroll cards
+- [ ] Hide `payoutRoundedMinutes` and exact calculated amount on payout request cards unless a later detailed audit view is added
 - [ ] Ensure mobile formats time only and does not calculate or sum salary, rounded payroll minutes, payout amounts, or selected totals
+- [ ] Add short-shift close decision flow: handle `SHORT_SHIFT_REQUIRES_DECISION`, save with `{ "saveShortShift": true }`, or call discard
 
 ## Milestone 6.5: Backend API Contract Stabilization
 

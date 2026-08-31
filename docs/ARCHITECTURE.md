@@ -135,6 +135,9 @@ foremanHourlyRate
 foremanWorkedMinutes
 foremanPauseMinutes
 foremanCalculatedSalary
+discardedAt
+discardedBy
+discardReason
 createdBy
 createdAt
 updatedAt
@@ -186,9 +189,28 @@ Shift Cancellation
 - Owner FOREMAN can cancel only their own OPEN shift before it starts.
 - ADMIN cannot cancel shifts through the REST/mobile API.
 - CANCELLED shifts do not calculate salary.
-- CANCELLED shifts cannot be started, closed, joined by workers, or summarized.
+- CANCELLED shifts cannot be started, closed, joined by workers, paused, resumed, or summarized.
 - Cancel does not write actualStartTime, actualEndTime, foremanWorkedMinutes, or foremanCalculatedSalary.
 - Worker history can include CANCELLED shifts/status.
+
+Short Shift Discard
+
+- ShiftSession status includes DISCARDED for active short shifts that the foreman explicitly chooses not to save.
+- CANCELLED remains pre-start cancellation only and must not be reused for short active shift discard.
+- Short-shift threshold is actual duration 0 or less than 15 minutes.
+- The backend is the source of truth for actual duration and the threshold decision.
+- `POST /api/v1/shifts/{shiftId}/close` accepts optional `saveShortShift`.
+- Closing a short shift without `saveShortShift: true` returns 409 Conflict with code SHORT_SHIFT_REQUIRES_DECISION and does not mutate shift, attendance, pause, or payroll state.
+- Closing a short shift with `saveShortShift: true` proceeds normally and calculates salary/payroll from the persisted inputs.
+- `POST /api/v1/shifts/{shiftId}/discard` is available only to the owner FOREMAN for ACTIVE shifts whose backend-calculated duration is 0 or less than 15 minutes.
+- Discard sets status DISCARDED, records discardedAt, discardedBy, discardReason, and sets actualEndTime to discardedAt for audit.
+- MVP discardReason is SHORT_SHIFT_NOT_SAVED.
+- Discard auto-ends active pause intervals at discardedAt for audit only.
+- Discard does not calculate worker salary, private foreman salary, worker workedMinutes, worker pauseMinutes, foremanWorkedMinutes, or foremanPauseMinutes.
+- DISCARDED attendance is never payable and cannot be used in payout preview or request creation.
+- DISCARDED shifts cannot be started, closed, joined, paused, resumed, or summarized.
+- Worker history may include DISCARDED shifts as non-payable history with no payroll action.
+- Foreman managed-shift lists may include DISCARDED shifts for audit, but they must not appear as normal completed work.
 
 Hourly Rate Ownership
 
@@ -278,7 +300,7 @@ Attendance Approval
 Attendance Query
 
 - FOREMAN can list attendance only for an owned shift; ADMIN can list attendance for any shift.
-- Attendance can be listed for OPEN, ACTIVE, CLOSED, and CANCELLED shifts.
+- Attendance can be listed for OPEN, ACTIVE, CLOSED, CANCELLED, and DISCARDED shifts.
 - The repository fetches attendance and worker in one query to avoid N+1 loading.
 - Results are ordered by joinedAt ascending and then attendance id ascending.
 - Controllers return attendance DTOs and never expose User entities or password hashes.
@@ -291,9 +313,9 @@ Worker Shift History
 - The endpoint always filters by the current user's worker attendance records.
 - WORKER, FOREMAN, and ADMIN all see only attendance where ShiftAttendance.worker.id equals the current user id.
 - FOREMAN and ADMIN do not receive managed-shift attendance through this endpoint unless they also have their own attendance record.
-- OPEN, ACTIVE, CLOSED, and CANCELLED shifts are included.
+- OPEN, ACTIVE, CLOSED, CANCELLED, and DISCARDED shifts are included.
 - The endpoint reads persisted workedMinutes and calculatedSalary from ShiftAttendance and never recalculates salary.
-- OPEN, ACTIVE, CANCELLED, and unapproved attendance can return null workedMinutes and calculatedSalary.
+- OPEN, ACTIVE, CANCELLED, DISCARDED, and unapproved attendance can return null workedMinutes and calculatedSalary.
 - CLOSED approved attendance exposes paymentStatus so the worker can distinguish UNPAID, PAYMENT_REQUESTED, and PAID.
 - The repository fetches attendance with shift in one query to avoid N+1 loading.
 - Results are ordered by joinedAt descending and then attendance id descending.
@@ -331,7 +353,10 @@ Salary Calculation
 - ShiftSessionService.closeShift invokes SalaryCalculationService after locking the ShiftSession and before setting status CLOSED.
 - Close locks all attendance rows for the shift with PESSIMISTIC_WRITE after locking the ShiftSession.
 - Worker salary is calculated only for APPROVED attendance.
-- JOINED, REJECTED, and CANCELLED attendance keep workedMinutes and calculatedSalary null.
+- JOINED, REJECTED, CANCELLED, and DISCARDED-shift attendance keep workedMinutes and calculatedSalary null.
+- Short-shift close validation runs before salary calculation and before active pauses are auto-ended.
+- A short-shift 409 warning leaves the shift ACTIVE.
+- Discard locks ShiftSession, selected attendance rows for the shift, and active ShiftPauseInterval rows before marking the shift DISCARDED.
 - For attendance approved before shift start, worker payable start is ShiftSession.actualStartTime.
 - For attendance approved while the shift is ACTIVE, worker payable start is ShiftAttendance.payableStartTime/approvedAt.
 - durationMinutes = minutes_between(worker payable start, actualEndTime).
@@ -355,7 +380,7 @@ Salary Calculation
 - Overlapping pause intervals must not be double-counted.
 - Static break minutes, or static break plus effective pause minutes, that exceed the payable duration clamp paid minutes and
 salary to zero for workers and the private foreman salary.
-- CANCELLED shifts do not calculate salary.
+- CANCELLED and DISCARDED shifts do not calculate salary.
 - No client should calculate worker or foreman salary.
 - Close fails with 409 if actualStartTime is missing or salary inputs are negative where request validation normally prevents
 them.
@@ -365,11 +390,13 @@ them.
 Payroll Requests
 
 - Payroll status is separate from ShiftSession.status. Do not add PAID or NOT_PAID to ShiftStatus.
-- ShiftSession.status remains OPEN, ACTIVE, CLOSED, and CANCELLED.
+- ShiftSession.status values are OPEN, ACTIVE, CLOSED, CANCELLED, and DISCARDED.
+- CANCELLED is pre-start cancellation. DISCARDED is an active short shift that the foreman explicitly chose not to save.
 - ShiftAttendance.paymentStatus values are UNPAID, PAYMENT_REQUESTED, and PAID.
 - PayoutRequest.status values for the MVP are PENDING and APPROVED.
 - REJECTED and CANCELLED are future statuses and should not be exposed without a later docs update.
 - Worker payable attendance listing reads only the current worker's APPROVED attendance on CLOSED shifts with paymentStatus UNPAID.
+- DISCARDED shift attendance is never payable.
 - Payout request preview accepts explicit attendanceIds and returns the same total/item calculation shape as create without persistence.
 - Preview uses the same validation and authorization as create, including duplicate attendanceIds returning 400 Bad Request.
 - Preview does not insert PayoutRequest rows, does not insert PayoutRequestItem rows, and does not change ShiftAttendance.paymentStatus.
@@ -402,12 +429,15 @@ Payroll Rounding
 - Mobile must not calculate salary, rounded payable minutes, or payout amounts.
 - rawPayableMinutes is ShiftAttendance.workedMinutes from the close flow.
 - calculatedSalary remains the exact audit/display amount from rawPayableMinutes and hourlyRate, stored with scale 2 and RoundingMode.HALF_UP.
-- payoutRoundedMinutes = ceil(rawPayableMinutes / 15) * 15.
+- payoutRoundedMinutes is rawPayableMinutes rounded to the nearest 5 minutes with half-up midpoint behavior.
 - rawPayableMinutes 0 produces payoutRoundedMinutes 0.
+- Any non-zero rawPayableMinutes that would otherwise round to 0 produces payoutRoundedMinutes 5.
 - roundedItemAmountExact = payoutRoundedMinutes / 60 * hourlyRate.
 - payoutAmount is whole-number money with no cents, calculated from roundedItemAmountExact using RoundingMode.CEILING.
 - Because payout values are non-negative, CEILING rounds any fractional currency amount up to the next whole unit.
 - Request totals are sums of item-level rawPayableMinutes, payoutRoundedMinutes, calculatedSalary, and payoutAmount.
+- Examples for payoutRoundedMinutes: 0 -> 0, 1 -> 5, 4 -> 5, 5 -> 5, 7 -> 5, 8 -> 10, 11 -> 10, 13 -> 15, 25 -> 25, 28 -> 30.
+- If product later requires 25 -> 30, that is a different upward-rounding rule and needs an explicit docs change.
 
 Payroll Privacy
 
@@ -416,6 +446,8 @@ Payroll Privacy
 - Foreman sees worker payout requests only for their company and managed shifts.
 - Payroll DTOs must not expose User entities, password hashes, or unrelated company data.
 - Foreman payroll DTOs expose worker identity fields, selected shifts/days, raw hours/minutes, exact calculated amount, rounded payable minutes, and whole-number payout amount needed to approve the request.
+- Mobile payout request cards for workers and foremen display raw payable time, whole-number payout amount, status, and selected days/items enough for audit.
+- Mobile payout request cards hide exact calculated amount and rounded payable minutes unless a later detailed audit view is added.
 
 Pause System
 
@@ -437,6 +469,7 @@ Pause System
 - Worker views show whether the worker is paused or global pause is active.
 - Foreman views show global pause status, foreman self pause status, and worker pause status.
 - Close auto-ends active pause intervals at actualEndTime before salary calculation.
+- Discard auto-ends active pause intervals at discardedAt for audit only and does not feed those intervals into salary or payroll calculation.
 - Salary calculation merges all applicable pause intervals as a union to avoid double-counting overlaps.
 - Salary calculation consumes backend pause data; clients never calculate pause-adjusted salary.
 
@@ -449,7 +482,7 @@ Shift Summary
 - Summary reads persisted ShiftAttendance.workedMinutes and ShiftAttendance.calculatedSalary.
 - Summary does not recalculate worker or foreman salary.
 - Summary includes only APPROVED attendance.
-- Summary is not available for CANCELLED shifts.
+- Summary is not available for CANCELLED or DISCARDED shifts.
 - The repository fetches approved attendance with worker in one query to avoid N+1 loading.
 - Workers are ordered by worker lastName, firstName, and worker id.
 - totalWorkers is the count of included attendance rows.
@@ -465,8 +498,8 @@ Shift Summary
 
 Concurrency Control
 
-- Company creation, company join, shift join, start, cancel, close, approval, and pause start/end run inside transactions with pessimistic write locks where state can change concurrently.
-- ShiftSession is locked by id for start, cancel, close, and approval.
+- Company creation, company join, shift join, start, cancel, close, discard, approval, and pause start/end run inside transactions with pessimistic write locks where state can change concurrently.
+- ShiftSession is locked by id for start, cancel, close, discard, and approval.
 - ShiftSession is locked by joinCode for worker join.
 - ShiftAttendance is locked by attendance id and shift id for approval.
 - ShiftAttendance is locked by shift id during close before salary fields are updated.
@@ -476,6 +509,7 @@ Concurrency Control
 - Start serializes with join and approval; operations that observe ACTIVE status can still create late joins or approve pending attendance under the ACTIVE rules.
 - Cancel serializes with join, approval, start, and close, preventing worker joins and lifecycle transitions after the shift becomes CANCELLED.
 - Close serializes concurrent lifecycle transitions and prevents duplicate successful close operations.
+- Discard serializes with close, pause start/end, join, and approval; only the first terminal transition can succeed.
 - Pause start/end locks ShiftSession first and then active pause intervals so pause operations serialize with close and lifecycle state changes.
 - Payout request preview does not persist changes but still validates against current attendance state.
 - Payout request creation locks selected ShiftAttendance rows before inserting request items and setting paymentStatus to PAYMENT_REQUESTED.
@@ -546,6 +580,7 @@ FOREMAN:
 - manage own shifts
 - approve attendance
 - cancel own OPEN shifts before start
+- save or discard own short ACTIVE shifts after backend short-shift validation
 - pause/resume self and global pause on own ACTIVE shifts
 - see shift summaries
 - list payout requests for their company and managed shifts
@@ -659,7 +694,7 @@ Backend tests should cover:
 - payable attendance list returns only the current worker's CLOSED, APPROVED, UNPAID attendance
 - worker cannot list or request payout for another worker's attendance
 - worker cannot request attendance outside their company
-- worker cannot request OPEN, ACTIVE, CANCELLED, unapproved, PAID, or PAYMENT_REQUESTED attendance
+- worker cannot request OPEN, ACTIVE, CANCELLED, DISCARDED, unapproved, PAID, or PAYMENT_REQUESTED attendance
 - preview and create reject duplicate attendanceIds with 400 Bad Request
 - preview returns selected totals and item calculations without creating requests or mutating attendance
 - worker cannot create a payout request with attendance managed by multiple foremen in the MVP
@@ -670,5 +705,8 @@ Backend tests should cover:
 - foreman cannot approve another foreman's or another company's payout request
 - approval requires PENDING request and PAYMENT_REQUESTED attendance
 - approval sets request status APPROVED, approvedAt, paidAt, item paidAt, and attendance paymentStatus PAID
-- rounding cases: 0 -> 0, exact 15-minute values unchanged, 1 minute -> 15 minutes, 467 minutes -> 480 minutes, fractional money rounded with CEILING
+- rounding cases: 0 -> 0, 1 -> 5, 4 -> 5, 5 -> 5, 7 -> 5, 8 -> 10, 11 -> 10, 13 -> 15, 25 -> 25, 28 -> 30, fractional money rounded with CEILING
+- short-shift close returns SHORT_SHIFT_REQUIRES_DECISION before mutation when actual duration is 0 or less than 15 minutes
+- saving a short shift with saveShortShift true closes normally and initializes payroll
+- discarding a short shift sets DISCARDED and excludes attendance from salary, summary, payable attendance, preview, and payout requests
 - concurrent create/approve attempts do not duplicate payout request items or double-pay attendance

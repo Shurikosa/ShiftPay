@@ -681,7 +681,7 @@ Access and state rules:
 - The backend sets status to CANCELLED.
 - The backend does not set actualStartTime or actualEndTime.
 - The backend does not calculate worker salary or private foreman salary.
-- CANCELLED shifts cannot be started, closed, joined by workers, or summarized.
+- CANCELLED shifts cannot be started, closed, joined by workers, paused, resumed, or summarized.
 
 Response for owner FOREMAN:
 
@@ -765,7 +765,13 @@ Headers:
 
 Authorization: Bearer <token>
 
-This endpoint does not accept a request body. The backend sets actualEndTime to the current server time in UTC.
+Optional request body:
+
+{
+  "saveShortShift": true
+}
+
+The backend sets actualEndTime to the current server time in UTC when close succeeds. If the request body is omitted, empty, or `saveShortShift` is false, the backend treats the request as a normal close without short-shift override.
 
 Access and state rules:
 
@@ -774,6 +780,12 @@ Access and state rules:
 - WORKER is not allowed.
 - Only a shift with status ACTIVE can be closed.
 - actualStartTime must exist.
+- The backend is the source of truth for the actual duration decision.
+- actualDurationMinutes = minutes_between(actualStartTime, proposed actualEndTime).
+- shortShiftMinimumMinutes = 15.
+- If actualDurationMinutes is 0 or less than 15 and `saveShortShift` is not true, the backend returns 409 Conflict with code SHORT_SHIFT_REQUIRES_DECISION.
+- A short-shift warning response does not mutate the shift, does not close active pause intervals, does not calculate salary, and does not change attendance paymentStatus.
+- If actualDurationMinutes is 0 or less than 15 and `saveShortShift` is true, close proceeds normally and payroll is calculated from the actual persisted inputs.
 - For each APPROVED attendance, the backend calculates and stores workedMinutes and calculatedSalary.
 - For each APPROVED attendance, the backend sets paymentStatus to UNPAID after close.
 - Close auto-ends any active personal or all-participant pause intervals at actualEndTime.
@@ -793,7 +805,7 @@ Access and state rules:
 - foremanSalary = foremanWorkedMinutes / 60 * shift.foremanHourlyRate, rounded to 2 decimal places with HALF_UP.
 - Foreman salary uses ShiftSession.foremanHourlyRate.
 - The backend must not create a ShiftAttendance row for foreman salary.
-- CANCELLED shifts cannot be closed and do not calculate salary.
+- CANCELLED and DISCARDED shifts cannot be closed and do not calculate salary.
 - If static break minutes or static break plus effective pause minutes exceed the payable duration, close still succeeds and persists workedMinutes/foremanWorkedMinutes and salary/foremanSalary as zero.
 
 Response:
@@ -866,6 +878,127 @@ Status: 409 Conflict
   "path": "/api/v1/shifts/100/close"
 }
 
+Short shift requires foreman decision:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T08:12:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Shift duration is less than 15 minutes; confirm whether to save or discard",
+  "path": "/api/v1/shifts/100/close",
+  "code": "SHORT_SHIFT_REQUIRES_DECISION",
+  "actualDurationMinutes": 7,
+  "minimumDurationMinutes": 15
+}
+
+Discard short active shift
+
+POST /api/v1/shifts/{shiftId}/discard
+
+Headers:
+
+Authorization: Bearer <token>
+
+This endpoint does not accept a request body. The backend sets discardedAt to the current server time in UTC.
+
+Access and state rules:
+
+- FOREMAN can discard only a shift created by that FOREMAN.
+- ADMIN is not allowed to discard shifts through the REST/mobile API.
+- WORKER is not allowed.
+- Only a shift with status ACTIVE can be discarded.
+- actualStartTime must exist.
+- The backend is the source of truth for whether a shift is short enough to discard.
+- actualDurationMinutes = minutes_between(actualStartTime, discardedAt).
+- A shift can be discarded only when actualDurationMinutes is 0 or less than 15.
+- If actualDurationMinutes is 15 or greater, the backend returns 409 Conflict and the foreman must close normally instead.
+- The backend sets status to DISCARDED.
+- The backend sets actualEndTime to discardedAt for audit, but DISCARDED is not treated as normal completed work.
+- The backend records discardedAt, discardedBy, and discardReason. The MVP discardReason is SHORT_SHIFT_NOT_SAVED.
+- Discard auto-ends active personal or all-participant pause intervals at discardedAt for audit only.
+- Discard does not calculate worker salary or private foreman salary.
+- Discard does not initialize or change attendance paymentStatus for payroll.
+- JOINED, APPROVED, REJECTED, and CANCELLED attendance on a DISCARDED shift keep workedMinutes, pauseMinutes, and calculatedSalary as null.
+- DISCARDED attendance is never payable and cannot be included in payout preview or payout request creation.
+- DISCARDED shifts cannot be started, closed, joined by workers, paused, resumed, or summarized.
+- Worker history may show DISCARDED shift/status as non-payable history with no payroll action.
+- Foreman managed shifts may show DISCARDED shift/status for audit, but it must not appear as normal completed work.
+
+Response:
+
+Status: 200 OK
+
+{
+  "id": 100,
+  "status": "DISCARDED",
+  "actualEndTime": "2026-07-01T08:12:00Z",
+  "discardedAt": "2026-07-01T08:12:00Z",
+  "discardedBy": 5,
+  "discardReason": "SHORT_SHIFT_NOT_SAVED"
+}
+
+Missing, invalid, or expired token:
+
+Status: 401 Unauthorized
+
+{
+  "timestamp": "2026-07-01T08:12:00Z",
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Unauthorized",
+  "path": "/api/v1/shifts/100/discard"
+}
+
+Forbidden role or non-owner FOREMAN:
+
+Status: 403 Forbidden
+
+{
+  "timestamp": "2026-07-01T08:12:00Z",
+  "status": 403,
+  "error": "Forbidden",
+  "message": "Forbidden",
+  "path": "/api/v1/shifts/100/discard"
+}
+
+Shift not found:
+
+Status: 404 Not Found
+
+{
+  "timestamp": "2026-07-01T08:12:00Z",
+  "status": 404,
+  "error": "Not Found",
+  "message": "Shift not found",
+  "path": "/api/v1/shifts/100/discard"
+}
+
+Shift is not ACTIVE:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T08:12:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Shift can only be discarded when status is ACTIVE",
+  "path": "/api/v1/shifts/100/discard"
+}
+
+Shift is no longer short:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T08:20:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Only shifts shorter than 15 minutes can be discarded",
+  "path": "/api/v1/shifts/100/discard"
+}
+
 5. Shift Join
 Join shift by code
 
@@ -882,7 +1015,7 @@ Rules:
 - joinCode is normalized with trim and uppercase.
 - The shift must have status OPEN or ACTIVE.
 - A WORKER should join an OPEN shift before it starts, or may join an ACTIVE shift as a late worker.
-- CLOSED and CANCELLED shifts cannot be joined and return 409.
+- CLOSED, CANCELLED, and DISCARDED shifts cannot be joined and return 409.
 - The worker must already be a member of the company that owns the shift.
 - A worker can join the same shift only once.
 - A worker never sets hourlyRate.
@@ -1020,7 +1153,7 @@ Rules:
 - FOREMAN can list attendance only for a shift they created.
 - ADMIN can list attendance for any shift.
 - WORKER is not allowed.
-- The endpoint is available while the shift is OPEN, ACTIVE, CLOSED, or CANCELLED.
+- The endpoint is available while the shift is OPEN, ACTIVE, CLOSED, CANCELLED, or DISCARDED.
 - Results are sorted by joinedAt ascending, then attendanceId ascending.
 - Worker data is returned through the attendance DTO; passwordHash and the User entity are never exposed.
 
@@ -1055,7 +1188,7 @@ Status: 200 OK
 ]
 
 For APPROVED attendance after the shift is closed, pauseMinutes, workedMinutes, and calculatedSalary contain the close-time calculation.
-For JOINED, REJECTED, and CANCELLED attendance, pauseMinutes, workedMinutes, and calculatedSalary remain null.
+For JOINED, REJECTED, CANCELLED, and DISCARDED-shift attendance, pauseMinutes, workedMinutes, and calculatedSalary remain null.
 paymentStatus is separate from shift status and attendance approval status. Payroll endpoints are the source of truth for payout request and rounded payout fields.
 payableStartTime is null until the worker has approved attendance and an effective payable start. For a worker approved before the shift starts, the effective payable start is the shift actualStartTime and may be returned after start. For a worker approved during an ACTIVE shift, payableStartTime is the approval time.
 pauseState shows the all-pause state plus the listed worker's personal pause state. It does not expose foreman salary or rate fields.
@@ -1258,7 +1391,7 @@ Access and state rules:
 - `/pauses/all/*` is available only to the owner FOREMAN.
 - ADMIN is not allowed to pause through the REST/mobile API.
 - Pause start/end is allowed only while shift status is ACTIVE.
-- OPEN, CLOSED, and CANCELLED shifts return 409 for pause start/end.
+- OPEN, CLOSED, CANCELLED, and DISCARDED shifts return 409 for pause start/end.
 - Duplicate start for the same active scope/target returns 409.
 - Ending when there is no active pause for that scope/target returns 409.
 - All-pause applies to the foreman and all workers on the shift.
@@ -1417,7 +1550,7 @@ Rules:
 - Worker summary remains limited to APPROVED worker attendance.
 - Salary results subtract static break minutes and effective pause minutes, then clamp paid minutes to zero when unpaid minutes exceed the payable duration.
 - Late approved worker salary starts from the worker payable start time, not the global shift actualStartTime.
-- CANCELLED shifts do not return summary because salary is not calculated.
+- CANCELLED and DISCARDED shifts do not return summary because salary is not calculated.
 - Workers are sorted by lastName ascending, firstName ascending, then workerId ascending.
 - If an APPROVED attendance has null workedMinutes or calculatedSalary, the endpoint returns 409.
 - The owner FOREMAN receives private foreman salary fields separately from workers: foremanWorkedMinutes, foremanPauseMinutes, foremanHourlyRate, and foremanSalary.
@@ -1456,32 +1589,7 @@ Status: 200 OK
 
 Response for ADMIN:
 
-Status: 200 OK
-
-{
-  "shiftId": 100,
-  "status": "CLOSED",
-  "totalWorkers": 2,
-  "totalSalary": 240.00,
-  "foremanWorkedMinutes": 480,
-  "foremanPauseMinutes": 0,
-  "foremanHourlyRate": 25.00,
-  "foremanSalary": 200.00,
-  "workers": [
-    {
-      "attendanceId": 500,
-      "workerId": 1,
-      "firstName": "John",
-      "lastName": "Worker",
-      "workedMinutes": 480,
-      "pauseMinutes": 0,
-      "hourlyRate": 15.00,
-      "salary": 120.00
-    }
-  ]
-}
-
-Response for ADMIN:
+Private foreman salary fields are omitted. ADMIN summary responses contain worker totals and worker rows only.
 
 Status: 200 OK
 
@@ -1490,9 +1598,6 @@ Status: 200 OK
   "status": "CLOSED",
   "totalWorkers": 2,
   "totalSalary": 240.00,
-  "foremanWorkedMinutes": 480,
-  "foremanHourlyRate": 25.00,
-  "foremanSalary": 200.00,
   "workers": [
     {
       "attendanceId": 500,
@@ -1577,9 +1682,9 @@ Rules:
 
 - WORKER sees only attendance records where the current user is the worker.
 - FOREMAN and ADMIN also see only their own worker-attendance records for this endpoint, not shifts they manage.
-- OPEN, ACTIVE, CLOSED, and CANCELLED shifts are included.
+- OPEN, ACTIVE, CLOSED, CANCELLED, and DISCARDED shifts are included.
 - CLOSED shifts return workedMinutes and calculatedSalary when those values were already calculated and stored.
-- OPEN, ACTIVE, CANCELLED, and unapproved attendance may return null workedMinutes and calculatedSalary.
+- OPEN, ACTIVE, CANCELLED, DISCARDED, and unapproved attendance may return null workedMinutes and calculatedSalary.
 - This endpoint reads stored attendance salary fields and does not recalculate salary.
 - CLOSED approved attendance includes paymentStatus so the worker can see whether the payroll item is UNPAID, PAYMENT_REQUESTED, or PAID.
 - The response includes pauseState for active shift display and pauseMinutes after close-time salary calculation.
@@ -1722,14 +1827,16 @@ Status: 403 Forbidden
 
 Payroll Requests MVP adds a payment lifecycle separate from ShiftStatus.
 
-ShiftStatus remains only:
+ShiftStatus values are:
 
 OPEN
 ACTIVE
 CLOSED
 CANCELLED
+DISCARDED
 
 Do not add PAID or NOT_PAID to ShiftStatus.
+Use CANCELLED only for pre-start cancellation. Use DISCARDED for an active short shift that the foreman explicitly chooses not to save.
 
 Attendance payment status:
 
@@ -1737,7 +1844,7 @@ UNPAID
 PAYMENT_REQUESTED
 PAID
 
-paymentStatus is stored on every ShiftAttendance row. New attendance starts as UNPAID, but only CLOSED, APPROVED, UNPAID attendance with persisted workedMinutes and calculatedSalary is payable.
+paymentStatus is stored on every ShiftAttendance row. New attendance starts as UNPAID, but only CLOSED, APPROVED, UNPAID attendance with persisted workedMinutes and calculatedSalary is payable. DISCARDED shift attendance is never payable.
 
 Payout request status for MVP:
 
@@ -1792,21 +1899,23 @@ Payroll rounding:
 
 - rawPayableMinutes is the already persisted ShiftAttendance.workedMinutes from the close flow.
 - calculatedSalary remains the exact audit/display amount from rawPayableMinutes and hourlyRate, stored with scale 2 and HALF_UP.
-- payoutRoundedMinutes is calculated per attendance item as `ceil(rawPayableMinutes / 15) * 15`.
+- payoutRoundedMinutes is calculated per attendance item by rounding rawPayableMinutes to the nearest 5 minutes with half-up midpoint behavior.
 - If rawPayableMinutes is 0, payoutRoundedMinutes is 0.
+- If rawPayableMinutes is greater than 0 and rounding would otherwise produce 0, payoutRoundedMinutes is 5.
 - roundedItemAmountExact is `payoutRoundedMinutes / 60 * hourlyRate`.
 - payoutAmount is a whole-number money amount with no cents, calculated per attendance item from roundedItemAmountExact using RoundingMode.CEILING.
 - Because amounts are non-negative, CEILING means round up to the next whole currency unit when there is any fractional part.
 - Request totals are sums of item-level rawPayableMinutes, payoutRoundedMinutes, calculatedSalary, and payoutAmount.
 - Preview and create use the same backend calculation rules. Preview is non-binding; create always revalidates and recalculates server-side.
+- Examples for payoutRoundedMinutes: 0 -> 0, 1 -> 5, 4 -> 5, 5 -> 5, 7 -> 5, 8 -> 10, 11 -> 10, 13 -> 15, 25 -> 25, 28 -> 30.
 
 Example:
 
 - rawPayableMinutes 467, hourlyRate 15.00
-- payoutRoundedMinutes 480
+- payoutRoundedMinutes 465
 - calculatedSalary from close flow: 116.75
-- roundedItemAmountExact: 120.00
-- payoutAmount: 120
+- roundedItemAmountExact: 116.25
+- payoutAmount: 117
 
 Zero example:
 
@@ -1854,10 +1963,10 @@ Status: 200 OK
     "actualEndTime": "2026-07-01T17:00:00Z",
     "paymentStatus": "UNPAID",
     "rawPayableMinutes": 467,
-    "payoutRoundedMinutes": 480,
+    "payoutRoundedMinutes": 465,
     "hourlyRate": 15.00,
     "calculatedSalary": 116.75,
-    "payoutAmount": 120
+    "payoutAmount": 117
   },
   {
     "attendanceId": 501,
@@ -1925,6 +2034,7 @@ Rules:
 - All selected attendance records must belong to the current worker.
 - All selected attendance records must belong to the worker's current company.
 - All selected attendance records must be APPROVED attendance on CLOSED shifts.
+- DISCARDED shift attendance cannot be previewed because it is not payable.
 - All selected attendance records must have workedMinutes and calculatedSalary already persisted.
 - All selected attendance records must have paymentStatus UNPAID.
 - Attendance with rawPayableMinutes 0 and payoutAmount 0 is allowed when it otherwise satisfies the payable rules.
@@ -1940,9 +2050,9 @@ Status: 200 OK
 
 {
   "rawPayableMinutes": 467,
-  "payoutRoundedMinutes": 480,
+  "payoutRoundedMinutes": 465,
   "exactCalculatedAmount": 116.75,
-  "payoutAmount": 120,
+  "payoutAmount": 117,
   "items": [
     {
       "attendanceId": 500,
@@ -1952,10 +2062,10 @@ Status: 200 OK
       "actualEndTime": "2026-07-01T17:00:00Z",
       "paymentStatus": "UNPAID",
       "rawPayableMinutes": 467,
-      "payoutRoundedMinutes": 480,
+      "payoutRoundedMinutes": 465,
       "hourlyRate": 15.00,
       "calculatedSalary": 116.75,
-      "payoutAmount": 120
+      "payoutAmount": 117
     },
     {
       "attendanceId": 501,
@@ -2105,6 +2215,7 @@ Rules:
 - All selected attendance records must belong to the current worker.
 - All selected attendance records must belong to the worker's current company.
 - All selected attendance records must be APPROVED attendance on CLOSED shifts.
+- DISCARDED shift attendance cannot be requested because it is not payable.
 - All selected attendance records must have workedMinutes and calculatedSalary already persisted.
 - All selected attendance records must have paymentStatus UNPAID.
 - Attendance with rawPayableMinutes 0 and payoutAmount 0 is allowed when it otherwise satisfies the payable rules.
@@ -2129,9 +2240,9 @@ Status: 201 Created
   "workerLastName": "Worker",
   "status": "PENDING",
   "rawPayableMinutes": 467,
-  "payoutRoundedMinutes": 480,
+  "payoutRoundedMinutes": 465,
   "exactCalculatedAmount": 116.75,
-  "payoutAmount": 120,
+  "payoutAmount": 117,
   "requestedAt": "2026-07-06T20:00:00Z",
   "approvedAt": null,
   "paidAt": null,
@@ -2144,10 +2255,10 @@ Status: 201 Created
       "actualEndTime": "2026-07-01T17:00:00Z",
       "paymentStatus": "PAYMENT_REQUESTED",
       "rawPayableMinutes": 467,
-      "payoutRoundedMinutes": 480,
+      "payoutRoundedMinutes": 465,
       "hourlyRate": 15.00,
       "calculatedSalary": 116.75,
-      "payoutAmount": 120
+      "payoutAmount": 117
     },
     {
       "attendanceId": 501,
@@ -2305,9 +2416,9 @@ Status: 200 OK
     "workerLastName": "Worker",
     "status": "PENDING",
     "rawPayableMinutes": 467,
-    "payoutRoundedMinutes": 480,
+    "payoutRoundedMinutes": 465,
     "exactCalculatedAmount": 116.75,
-    "payoutAmount": 120,
+    "payoutAmount": 117,
     "requestedAt": "2026-07-06T20:00:00Z",
     "approvedAt": null,
     "paidAt": null,
@@ -2320,10 +2431,10 @@ Status: 200 OK
         "actualEndTime": "2026-07-01T17:00:00Z",
         "paymentStatus": "PAYMENT_REQUESTED",
         "rawPayableMinutes": 467,
-        "payoutRoundedMinutes": 480,
+        "payoutRoundedMinutes": 465,
         "hourlyRate": 15.00,
         "calculatedSalary": 116.75,
-        "payoutAmount": 120
+        "payoutAmount": 117
       }
     ]
   }
@@ -2370,7 +2481,8 @@ Rules:
 - Default status filter is PENDING if status is omitted.
 - A foreman does not see payout requests for another company.
 - A foreman does not see payout requests containing shifts they do not manage.
-- Worker identity, selected shifts/days, raw hours/minutes, exact calculated amount, rounded payable minutes, and whole-number payout amount are visible to the approving foreman.
+- Worker identity, selected shifts/days, raw hours/minutes, exactCalculatedAmount, payoutRoundedMinutes, and whole-number payoutAmount are available to the approving foreman through payroll DTOs for approval/audit data.
+- Mobile request cards should display only raw payable time, whole-number payoutAmount, status, and selected days/items. They should hide exactCalculatedAmount and payoutRoundedMinutes unless a later detailed audit view is added.
 - Foreman never receives another foreman's private salary or rate fields through payroll request DTOs.
 - Results are sorted by requestedAt ascending, then request id ascending for PENDING requests.
 
@@ -2388,9 +2500,9 @@ Status: 200 OK
     "workerLastName": "Worker",
     "status": "PENDING",
     "rawPayableMinutes": 467,
-    "payoutRoundedMinutes": 480,
+    "payoutRoundedMinutes": 465,
     "exactCalculatedAmount": 116.75,
-    "payoutAmount": 120,
+    "payoutAmount": 117,
     "requestedAt": "2026-07-06T20:00:00Z",
     "approvedAt": null,
     "paidAt": null,
@@ -2403,10 +2515,10 @@ Status: 200 OK
         "actualEndTime": "2026-07-01T17:00:00Z",
         "paymentStatus": "PAYMENT_REQUESTED",
         "rawPayableMinutes": 467,
-        "payoutRoundedMinutes": 480,
+        "payoutRoundedMinutes": 465,
         "hourlyRate": 15.00,
         "calculatedSalary": 116.75,
-        "payoutAmount": 120
+        "payoutAmount": 117
       }
     ]
   }
@@ -2472,9 +2584,9 @@ Status: 200 OK
   "workerLastName": "Worker",
   "status": "APPROVED",
   "rawPayableMinutes": 467,
-  "payoutRoundedMinutes": 480,
+  "payoutRoundedMinutes": 465,
   "exactCalculatedAmount": 116.75,
-  "payoutAmount": 120,
+  "payoutAmount": 117,
   "requestedAt": "2026-07-06T20:00:00Z",
   "approvedAt": "2026-07-07T09:30:00Z",
   "paidAt": "2026-07-07T09:30:00Z",
@@ -2487,10 +2599,10 @@ Status: 200 OK
       "actualEndTime": "2026-07-01T17:00:00Z",
       "paymentStatus": "PAID",
       "rawPayableMinutes": 467,
-      "payoutRoundedMinutes": 480,
+      "payoutRoundedMinutes": 465,
       "hourlyRate": 15.00,
       "calculatedSalary": 116.75,
-      "payoutAmount": 120
+      "payoutAmount": 117
     }
   ]
 }
@@ -2583,6 +2695,7 @@ FOREMAN:
 - can create shift
 - can start shift
 - can close shift
+- can save or discard an own short ACTIVE shift after backend short-shift validation
 - can cancel own OPEN shift before start
 - can approve attendance
 - can see own managed shifts
