@@ -19,7 +19,7 @@ The app should prioritize:
 - fast shift joining for workers
 - clear managed-shift visibility for foremen
 - clear cancellation status
-- readable shift status and salary information
+- readable shift status, salary, and premium pay information
 - clear payroll request status for closed unpaid work
 - simple forms with obvious success and error states
 
@@ -40,6 +40,7 @@ Worker tasks:
 - see current and past joined shifts
 - see company name in the dashboard or main menu
 - see shift status, attendance status, worked minutes, and calculated salary
+- see own read-only pay breakdown after close
 - pause and resume themselves during an active joined shift
 - see closed unpaid attendance records
 - select unpaid work days and create a payout request
@@ -55,6 +56,7 @@ Foreman tasks:
 - register and log in
 - create a company if they do not have one
 - create a shift
+- manage company pay rules
 - see shifts they created and manage
 - see company name in the dashboard or main menu
 - share the join code with workers
@@ -62,6 +64,7 @@ Foreman tasks:
 - start, cancel, and close shifts
 - pause themselves or pause everyone during an active shift
 - see closed-shift summary
+- review worker premium pay breakdowns for managed shifts
 - review worker payout requests for their company and managed shifts
 - approve pending payout requests
 
@@ -126,6 +129,7 @@ Worker payroll navigation is centered on backend-owned payroll data from
 
 - `ForemanDashboardScreen`
 - `CompanyCreateScreen`
+- `ForemanPayRulesScreen`
 - `CreateShiftScreen`
 - `ForemanShiftDetailsScreen`
 - `ShiftSummaryScreen`
@@ -139,6 +143,9 @@ Foreman navigation is centered on managed shifts from
 be routed to company creation before shift creation or shift start.
 Foreman payroll navigation shows payout requests from
 `GET /api/v1/me/managed-payout-requests`.
+Foreman pay rules navigation uses `GET /api/v1/me/pay-policy`,
+`PUT /api/v1/me/pay-policy`, and optionally
+`GET /api/v1/me/pay-policy/versions`.
 
 ## 5. Screens
 
@@ -331,6 +338,7 @@ Content:
 - pause status when active
 - actual date/time when available
 - salary when calculated
+- premium totals indicator when backend returns one
 
 API calls:
 
@@ -361,6 +369,7 @@ Content:
 - persisted pause minutes after close
 - worked minutes
 - calculated salary
+- read-only own pay breakdown after close when returned by the backend
 - payment status when present
 
 API calls:
@@ -377,6 +386,7 @@ Rules:
 - worker pause controls affect only the current worker
 - show whether an all-participant pause is active from `pauseState`
 - do not calculate pause-adjusted salary on the client
+- do not calculate premium pay, overtime, effective rates, or pay breakdown totals on the client
 - do not calculate rounded payroll minutes or payout amount on the client
 - for late workers, display backend persisted `payableStartTime`, `workedMinutes`, `pauseMinutes`, and `calculatedSalary`; do not derive them from `actualStartTime`
 
@@ -442,6 +452,7 @@ Content:
 - company name
 - primary action to create a shift
 - managed shift list
+- shortcut to pay rules
 - shortcut to payroll requests
 - status labels for `OPEN`, `ACTIVE`, `CLOSED`, `CANCELLED`, and `DISCARDED`
 - pending payout request count if loaded
@@ -450,6 +461,7 @@ API calls:
 
 - `GET /api/v1/users/me`
 - `GET /api/v1/me/managed-shifts`
+- `GET /api/v1/me/pay-policy` if showing a pay rules summary
 - `GET /api/v1/me/managed-payout-requests` if showing pending request count or preview
 
 Rules:
@@ -458,6 +470,51 @@ Rules:
 - this screen should not use `GET /api/v1/me/shifts`
 - ADMIN users may use the same route only for shifts they personally created
   during the MVP
+
+### ForemanPayRulesScreen
+
+Purpose:
+
+- let a foreman configure company premium pay policy
+
+Content:
+
+- company name
+- current policy version and company timezone
+- stacking strategy segmented control: `ADD` or `HIGHEST_ONLY`
+- enable/disable rule toggles
+- percentage inputs for each enabled rule
+- time inputs for `TIME_OF_DAY`
+- threshold inputs for `DAILY_OVERTIME` and `WEEKLY_OVERTIME`
+- weekday multi-select for `DAY_OF_WEEK`
+- holiday local date list with manual add/remove and optional labels
+- validation, loading, error, and saved states
+
+API calls:
+
+- `GET /api/v1/me/pay-policy`
+- `PUT /api/v1/me/pay-policy`
+- optional `GET /api/v1/me/pay-policy/versions`
+
+Rules:
+
+- only FOREMAN uses this screen
+- if no company exists, route FOREMAN to `CompanyCreateScreen`
+- saving creates a new immutable policy version in the backend
+- show `Company.timeZone` as the source of day, week, and holiday boundaries
+- use `MONDAY` as the recommended default week start unless backend returns a different value
+- do not hardcode Saturday, Sunday, night, overtime, holiday, country, or legal premium percentages
+- disabled rules do not apply
+- percentage values may include decimals, for example 37.5
+- `premiumPercent` must be from 0.0000 to 1000.0000 inclusive with a maximum of 4 decimal places
+- 0 is allowed for temporary/no-op enabled rules, but the UI may warn before save
+- invalid percentages should be shown as field validation errors
+- `TIME_OF_DAY` start and end cannot be equal and may cross midnight
+- overtime thresholds are shown as hours if useful but sent as backend contract values
+- `DAY_OF_WEEK` supports any weekday combination
+- holidays are manual local dates; do not use country holiday calendars
+- show backend 400 field validation errors next to the relevant control
+- mobile must not calculate premium pay, overtime, effective rates, or pay totals
 
 ### CreateShiftScreen
 
@@ -569,7 +626,9 @@ Content:
 
 - total workers
 - total worker salary
+- worker premium pay totals when returned by the backend
 - worker rows with pause minutes, worked minutes, and calculated salary
+- worker premium pay breakdown with base amount, premium amount, applied rules, effective premium percent, effective hourly rate, and segment amounts when returned by the backend
 - private foreman salary fields for the owner foreman:
   foremanWorkedMinutes, foremanPauseMinutes, foremanHourlyRate, foremanSalary
 
@@ -580,9 +639,10 @@ API calls:
 Rules:
 
 - show a clear message if the shift is not closed yet
-- do not recalculate worker or foreman salary on the client
+- do not recalculate worker salary, foreman salary, premium pay, or pay breakdown totals on the client
 - worker rows are based only on approved worker attendance
 - backend salary subtracts static break minutes and backend-tracked effective pause minutes
+- premium breakdown is read-only backend output and applies only to worker attendance in the initial implementation
 - do not show foreman salary fields to workers
 - ADMIN users are not a mobile MVP target and should not receive foreman salary fields through REST/mobile API
 
@@ -600,6 +660,7 @@ Content:
 - selected shifts/days per request
 - raw payable minutes with hours/minutes formatting
 - backend-calculated whole-number payout amount
+- optional detailed premium breakdown in a separate detail view, not on request cards
 - requestedAt, approvedAt, and paidAt when present
 - status badges for `PENDING` and `APPROVED`
 
@@ -626,7 +687,9 @@ Rules:
 - show backend conflict errors when a request was already approved or an attendance is no longer payment requested
 - do not show another foreman's private salary fields
 - do not calculate salary, rounded payable minutes, or payout amount on the client
+- do not calculate premium pay, overtime, effective rates, or pay breakdown totals on the client
 - do not show exact calculated amount or rounded payable minutes on payout request cards unless a later detailed audit view is added
+- keep payroll cards focused on raw payable time, final payout amount, status, and selected days/items
 
 ## 6. Shared States
 
@@ -661,7 +724,9 @@ Each empty state should include one clear next action when an action is availabl
 Show backend error messages when they are safe and useful, for example validation,
 duplicate email, invalid credentials, duplicate join, forbidden, or shift state
 conflicts. For payroll, show conflicts for already requested or already paid
-attendance and stale approve attempts.
+attendance and stale approve attempts. For pay policies, show field-level
+validation for invalid percentages, time ranges, overtime thresholds, weekdays,
+and holiday dates.
 
 Use a generic fallback for network failures.
 
@@ -682,6 +747,7 @@ Show success feedback for:
 - shift close
 - payout request creation
 - payout request approval
+- pay policy save
 
 ## 7. Basic Visual Direction
 
@@ -710,6 +776,8 @@ Show success feedback for:
 - payment processing
 - accounting integrations
 - chat or messaging
+- country-specific legal premium defaults
+- country-specific holiday calendars
 
 ## 9. Pause UX Contract
 
@@ -736,9 +804,13 @@ Mobile must not calculate pause-adjusted salary. It should display backend persi
 - Do not hardcode backend URLs inside screens.
 - REST API is the source of truth.
 - Do not calculate salary on the client.
+- Do not calculate premium pay, overtime, rule matches, effective rates, or pay
+  breakdown totals on the client.
 - Do not calculate rounded payroll minutes or payout amounts on the client.
 - The mobile app should consume persisted `workedMinutes` and
   `calculatedSalary` values returned by the backend.
+- The mobile app should consume backend `payCalculation` breakdowns as
+  read-only display data after close.
 - The mobile app should consume payroll `paymentStatus`,
   raw payable time, and `payoutAmount` values returned by the backend for card
   display.

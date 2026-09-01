@@ -20,6 +20,7 @@ user management
 shift sessions
 attendance
 salary calculation
+pay policy and premium pay calculation
 payroll request workflow
 reports
 admin dashboard served with Vaadin
@@ -53,6 +54,8 @@ ShiftService
 AttendanceService
 PauseService
 SalaryCalculationService
+PayPolicyService
+PremiumPayCalculationService
 PayrollRoundingService
 PayoutRequestService
 Repositories
@@ -103,6 +106,7 @@ id
 name
 joinCode
 ownerForemanId
+timeZone
 createdAt
 updatedAt
 
@@ -135,6 +139,7 @@ foremanHourlyRate
 foremanWorkedMinutes
 foremanPauseMinutes
 foremanCalculatedSalary
+payPolicyVersionId
 discardedAt
 discardedBy
 discardReason
@@ -162,6 +167,9 @@ Company Ownership and Membership
 - FOREMAN must have a company before creating or starting shifts.
 - The backend must not use Default Company for real MVP shifts.
 - Company has a backend-generated joinCode.
+- Company has a timeZone field using an IANA timezone id, for example `Europe/Berlin`.
+- Company.timeZone is the source of truth for pay policy day, week, and holiday boundaries.
+- Existing companies can default to the backend configured timezone until configurable company timezone UI exists.
 - WORKER joins a company by company join code.
 - WORKER can join a shift only if they are already a member of that shift's company.
 - ShiftSession.companyId is required for real MVP shifts.
@@ -178,6 +186,8 @@ Shift Creation
 - Example generated title format: `Tuesday 10:00 - Acme Construction`.
 - Exact locale and format can be refined during implementation.
 - actualStartTime is set by the backend when the foreman starts the shift.
+- Start resolves and freezes the current company PayPolicy version onto ShiftSession.payPolicyVersionId.
+- Historical CLOSED calculations must keep using the frozen PayPolicy version even if the company's current policy changes later.
 - actualEndTime is set by the backend when the foreman closes the shift.
 - Shift creation keeps optional location, defaultBreakMinutes, defaultHourlyRate, and foremanHourlyRate.
 - defaultBreakMinutes is optional and defaults to 0 when omitted.
@@ -227,6 +237,104 @@ Hourly Rate Ownership
 - ShiftSession.foremanHourlyRate is private to the owner FOREMAN in the REST/mobile MVP.
 - WORKER DTOs never expose ShiftSession.foremanHourlyRate.
 - ADMIN REST/mobile DTOs do not expose ShiftSession.foremanHourlyRate for the MVP; future ADMIN/Vaadin visibility can be decided later.
+
+Pay Policy Model
+
+- PayPolicyVersion is owned by Company.
+- PayPolicyVersion is immutable and versioned.
+- Editing policy creates a new PayPolicyVersion and PayPolicyRule set; old versions are not mutated.
+- Exactly one PayPolicyVersion is current for a company.
+- Company must always have a current default PayPolicy after company creation or migration.
+- Backend creates a default empty PayPolicy version for a company if needed by onboarding or migration.
+- Shift start freezes/resolves the current PayPolicyVersion onto ShiftSession.payPolicyVersionId.
+- If shift start cannot resolve a current PayPolicyVersion because the invariant is broken, start returns 409 Conflict with code PAY_POLICY_REQUIRED.
+- The backend must not silently start a shift without a frozen PayPolicyVersion id.
+- Historical CLOSED worker calculations and PayCalculation snapshots must not change when current policy changes.
+- The initial implementation applies premium rules only to worker attendance payroll.
+- Foreman premium pay is deferred unless a later docs update explicitly specifies it.
+- PayPolicyVersion.weekStartsOn defines the policy week boundary. Recommended default is MONDAY.
+- PayPolicyVersion.stackingStrategy owns premium stacking behavior. Supported values are ADD and HIGHEST_ONLY.
+- PayPolicyRule.type values for MVP are TIME_OF_DAY, DAILY_OVERTIME, WEEKLY_OVERTIME, DAY_OF_WEEK, and HOLIDAY.
+- Future/deferred rule types are fixed amount per hour, site/project rules, worker-specific overrides, travel, on-call, and consecutive-hours rules.
+- MVP supports percentage premiums only.
+- Percentages support decimals such as 37.5 and must use decimal-safe types such as BigDecimal.
+- premiumPercent must be a decimal from 0.0000 to 1000.0000 inclusive.
+- premiumPercent supports a maximum scale of 4 decimal places.
+- Invalid premiumPercent values return 400 validation errors.
+- 0 is allowed to support temporary/no-op enabled rules, but UI may warn.
+- No legal, country, Saturday, Sunday, night, overtime, or holiday premium values are hardcoded.
+- No default premium applies unless explicitly configured in the active company policy.
+- Holiday dates are manual company-configured local dates in the company/policy timezone.
+- No country-specific holiday calendars are included in the MVP.
+- Policy conditionConfig is structured data owned by the backend contract, not ad hoc text.
+
+PayPolicy
+
+Fields:
+
+id
+companyId
+currentVersionId
+createdAt
+updatedAt
+
+PayPolicyVersion
+
+Fields:
+
+id
+companyId
+version
+active
+weekStartsOn
+stackingStrategy
+createdBy
+createdAt
+
+PayPolicyRule
+
+Fields:
+
+id
+payPolicyVersionId
+name
+type
+enabled
+premiumPercent
+conditionConfig
+sortOrder
+createdAt
+
+PayCalculation
+
+Fields:
+
+id
+attendanceId
+shiftSessionId
+payPolicyVersionId
+totalRawMinutes
+totalBaseAmount
+totalPremiumAmount
+totalAmount
+createdAt
+
+PaySegment
+
+Fields:
+
+id
+payCalculationId
+start
+end
+payableMinutes
+baseHourlyRate
+appliedRulesSnapshot
+stackingStrategy
+effectivePremiumPercent
+effectiveHourlyRate
+amount
+
 ShiftAttendance
 
 Fields:
@@ -349,7 +457,8 @@ Admin User Management
 
 Salary Calculation
 
-- SalaryCalculationService owns worked-minute and salary math.
+- SalaryCalculationService owns worked-minute and salary orchestration.
+- PremiumPayCalculationService owns time segmentation, rule evaluation, premium stacking, and pay breakdown creation for worker attendance.
 - ShiftSessionService.closeShift invokes SalaryCalculationService after locking the ShiftSession and before setting status CLOSED.
 - Close locks all attendance rows for the shift with PESSIMISTIC_WRITE after locking the ShiftSession.
 - Worker salary is calculated only for APPROVED attendance.
@@ -362,11 +471,32 @@ Salary Calculation
 - durationMinutes = minutes_between(worker payable start, actualEndTime).
 - unpaidMinutes = attendance.breakMinutes + attendance.pauseMinutes.
 - workedMinutes = max(0, durationMinutes - unpaidMinutes).
-- calculatedSalary = workedMinutes / 60 * attendance.hourlyRate.
+- When no premium rules apply, calculatedSalary = workedMinutes / 60 * attendance.hourlyRate.
+- When a frozen PayPolicy applies, calculatedSalary = PayCalculation.totalAmount.
 - calculatedSalary is stored with scale 2 and RoundingMode.HALF_UP.
 - attendance.pauseMinutes is calculated from the union of all-pause intervals and the worker's personal pause intervals, clipped to the worker payable interval.
 - Salary uses ShiftAttendance.hourlyRate, including any attendance-specific approval override.
+- ShiftAttendance.hourlyRate is the baseHourlyRate for premium pay.
+- Premium rules apply only to payable work time after static break and dynamic pause deductions.
+- The close calculation pipeline is approved payable intervals -> break/pause clipping -> time segmentation -> rule evaluation -> stacking -> pay breakdown -> totals.
+- Segmentation uses real instants/durations and company timezone-local boundaries. It must not subtract naive local hours across DST transitions.
+- Segmentation splits work whenever rules may change: shift/payable interval start/end, midnight/day boundary, week boundary, TIME_OF_DAY start/end including ranges crossing midnight, DAY_OF_WEEK boundary, HOLIDAY date boundary, DAILY_OVERTIME threshold crossing, WEEKLY_OVERTIME threshold crossing, and pause/break-adjusted payable interval boundaries if needed by the implementation.
+- ADD stacking sums all applicable percentage premiums against the base rate.
+- HIGHEST_ONLY stacking applies only the highest applicable premium.
+- DAILY_OVERTIME and WEEKLY_OVERTIME consider all relevant approved payable intervals for the same worker and company in the policy day/week.
+- Authoritative final overtime calculation uses persisted/closing approved intervals. ACTIVE in-progress estimates are deferred and must be marked non-authoritative if added later.
+- Daily and weekly overtime threshold allocation is based on chronological payable interval order in the company/policy timezone.
+- Tie-break order is shift actualStartTime, then attendance/payableStartTime, then stable database id.
+- Previous finalized payable minutes come from CLOSED shifts only. Other ACTIVE shifts are excluded from authoritative final overtime context except the shift currently being closed.
+- For the MVP, overtime calculation for a closing shift uses that shift's frozen PayPolicy version and includes previous finalized payable minutes in the same company timezone period as context.
+- Closing a later shift must not rewrite older finalized PayCalculation rows.
+- Existing finalized closed calculations are not automatically reopened/recalculated in the MVP.
+- Therefore teams should close shifts in chronological order for exact overtime allocation until batch recalculation is added.
+- PayCalculation stores totalRawMinutes, totalBaseAmount, totalPremiumAmount, totalAmount, and PaySegment rows.
+- PaySegment stores start, end, payableMinutes, baseHourlyRate, appliedRules snapshots, stackingStrategy, effectivePremiumPercent, effectiveHourlyRate, and amount.
+- Applied rule snapshots store rule id, name, type, and premium percent so historical explanations survive policy edits.
 - Foreman salary is calculated separately from worker attendance.
+- Foreman salary does not use premium rules in the initial implementation.
 - The backend must not create a ShiftAttendance row for foreman salary.
 - Foreman salary uses ShiftSession.foremanHourlyRate.
 - foremanDurationMinutes = minutes_between(actualStartTime, actualEndTime).
@@ -382,10 +512,27 @@ Salary Calculation
 salary to zero for workers and the private foreman salary.
 - CANCELLED and DISCARDED shifts do not calculate salary.
 - No client should calculate worker or foreman salary.
+- Mobile must not calculate premium pay, rule matches, overtime, or pay breakdown totals.
 - Close fails with 409 if actualStartTime is missing or salary inputs are negative where request validation normally prevents
 them.
 - Close is transactional: when salary validation fails, the shift remains ACTIVE and attendance salary fields are not written.
 - Close initializes approved worker attendance paymentStatus as UNPAID. It does not create payout requests.
+
+Pay Policy Validation
+
+- Enabled PayPolicyRule rows must have valid conditionConfig for their type.
+- Invalid policy configs return 400 Bad Request with field errors.
+- premiumPercent must be a decimal from 0.0000 to 1000.0000 inclusive.
+- premiumPercent supports a maximum scale of 4 decimal places.
+- Invalid premiumPercent values return 400 validation errors.
+- 0 is allowed to support temporary/no-op enabled rules.
+- TIME_OF_DAY requires local start and end times; start and end cannot be equal.
+- TIME_OF_DAY may cross midnight.
+- DAILY_OVERTIME and WEEKLY_OVERTIME thresholds are stored as integer minutes. UI may accept decimal hours and convert to minutes.
+- Overtime thresholds must be greater than 0.
+- DAY_OF_WEEK supports any weekday set, not hardcoded Saturday/Sunday.
+- HOLIDAY requires explicit local dates and may include optional labels.
+- Updating policy creates a new version and does not mutate old versions.
 
 Payroll Requests
 
@@ -411,7 +558,7 @@ Payroll Requests
 - PAYMENT_REQUESTED attendance cannot be included in another pending request.
 - For the MVP, all selected attendance records in one payout request must belong to shifts created by the same foreman.
 - On successful creation, PayoutRequest stores companyId, workerId, managerForemanId, PENDING status, requestedAt, total raw payable minutes, total rounded payable minutes, total exact calculated amount, and total whole-number payout amount.
-- PayoutRequestItem snapshots attendanceId, shiftSessionId, rawPayableMinutes, payoutRoundedMinutes, hourlyRate, calculatedSalary, roundedItemAmountExact, and payoutAmount.
+- PayoutRequestItem snapshots attendanceId, shiftSessionId, rawPayableMinutes, payoutRoundedMinutes, hourlyRate, calculatedSalary, premium totals when exposed, roundedItemAmountExact, payoutAmount, and enough pay calculation reference/snapshot data for audit.
 - Snapshot item fields preserve what the worker requested even if future shift or rate data changes.
 - PayoutRequestService sets selected attendance paymentStatus to PAYMENT_REQUESTED in the same transaction that creates the request and items.
 - Foreman managed payout listing returns only requests for the foreman's current company where managerForemanId equals the current user id.
@@ -426,13 +573,14 @@ Payroll Rounding
 
 - PayrollRoundingService owns payout rounding and whole-number payout amount calculation.
 - Backend is the source of truth for payroll rounding.
-- Mobile must not calculate salary, rounded payable minutes, or payout amounts.
+- Mobile must not calculate salary, premium pay, overtime, rounded payable minutes, or payout amounts.
 - rawPayableMinutes is ShiftAttendance.workedMinutes from the close flow.
-- calculatedSalary remains the exact audit/display amount from rawPayableMinutes and hourlyRate, stored with scale 2 and RoundingMode.HALF_UP.
+- calculatedSalary remains the exact audit/display amount from the close flow, including configured premium pay when a PayPolicy applies, stored with scale 2 and RoundingMode.HALF_UP.
 - payoutRoundedMinutes is rawPayableMinutes rounded to the nearest 5 minutes with half-up midpoint behavior.
 - rawPayableMinutes 0 produces payoutRoundedMinutes 0.
 - Any non-zero rawPayableMinutes that would otherwise round to 0 produces payoutRoundedMinutes 5.
-- roundedItemAmountExact = payoutRoundedMinutes / 60 * hourlyRate.
+- For non-premium attendance, roundedItemAmountExact = payoutRoundedMinutes / 60 * hourlyRate.
+- For premium-aware attendance, roundedItemAmountExact and payoutAmount use backend final pay calculation fields and policy snapshots, not client-side formulas.
 - payoutAmount is whole-number money with no cents, calculated from roundedItemAmountExact using RoundingMode.CEILING.
 - Because payout values are non-negative, CEILING rounds any fractional currency amount up to the next whole unit.
 - Request totals are sums of item-level rawPayableMinutes, payoutRoundedMinutes, calculatedSalary, and payoutAmount.

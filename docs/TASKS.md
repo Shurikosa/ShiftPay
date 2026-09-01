@@ -127,6 +127,56 @@ Mobile tasks:
 - [ ] Ensure mobile formats time only and does not calculate or sum salary, rounded payroll minutes, payout amounts, or selected totals
 - [ ] Add short-shift close decision flow: handle `SHORT_SHIFT_REQUIRES_DECISION`, save with `{ "saveShortShift": true }`, or call discard
 
+## Milestone 6.2: Configurable Pay Rules / Premium Pay
+
+Backend tasks:
+
+- [ ] Add Company.timeZone with IANA timezone validation and configured backend timezone default for existing companies
+- [ ] Add PayPolicy/PayPolicyVersion and PayPolicyRule migrations/entities
+- [ ] Store PayPolicy as immutable company-owned versions; updating policy creates a new version and does not mutate old versions
+- [ ] Add active/default policy initialization with weekStartsOn MONDAY, stackingStrategy ADD, no default premium percentages, and migration/onboarding backfill for companies missing a current policy
+- [ ] Implement `GET /api/v1/me/pay-policy`
+- [ ] Implement `PUT /api/v1/me/pay-policy`
+- [ ] Implement `GET /api/v1/me/pay-policy/versions` for audit if included in the backend scope
+- [ ] Add policy validation for rule condition configs, premiumPercent 0.0000..1000.0000 with max scale 4, time ranges, overtime thresholds, weekdays, and manual holidays
+- [ ] Freeze current PayPolicy version on ShiftSession at shift start and return PAY_POLICY_REQUIRED if the current policy invariant is broken
+- [ ] Add PayCalculation and PaySegment persistence/snapshot model
+- [ ] Build segmentation engine for payable interval start/end, company timezone day/week boundaries, time-of-day ranges, day-of-week, holiday, overtime thresholds, and pause/break-adjusted boundaries
+- [ ] Implement TIME_OF_DAY, DAILY_OVERTIME, WEEKLY_OVERTIME, DAY_OF_WEEK, and HOLIDAY rule evaluation
+- [ ] Implement ADD and HIGHEST_ONLY stacking strategies through PayPolicy.stackingStrategy
+- [ ] Integrate premium calculation into close salary calculation for approved worker attendance only
+- [ ] Keep foreman premium pay deferred; foreman salary remains separate and base-rate only
+- [ ] Implement daily/weekly overtime context across relevant approved payable intervals for the same worker/company and policy timezone period
+- [ ] Use frozen policy version plus previous finalized payable minutes for MVP overtime context when closing a shift
+- [ ] Document and test MVP chronological-close limitation for overtime allocation; teams should close shifts chronologically until batch recalculation exists
+- [ ] Ensure CANCELLED/DISCARDED shifts remain non-payable and excluded from premium/payroll calculations
+- [ ] Ensure short saved CLOSED shifts can persist zero payable, premium, and total amounts
+- [ ] Expose worker pay breakdown in shift summary for owner FOREMAN
+- [ ] Expose own read-only pay breakdown in worker history/details after close
+- [ ] Optionally expose premium totals/breakdown in payout/payable detailed DTOs while keeping cards simple in mobile
+- [ ] Add tests for historical policy snapshot/version immutability
+- [ ] Add tests for DST and company timezone day/week boundaries
+- [ ] Add tests for daily and weekly overtime across multiple sessions
+- [ ] Add future hardening task for batch recalculation/reopening of affected closed pay calculations when out-of-order shift closure would change overtime allocation
+- [ ] Add acceptance scenario tests A-I from SPEC/API
+- [ ] Update OpenAPI/Swagger docs for pay policy and pay breakdown endpoints after implementation
+
+Mobile tasks:
+
+- [ ] Add pay policy API client methods and TypeScript DTOs
+- [ ] Add Foreman Pay Rules settings screen
+- [ ] Add stacking strategy segmented control for ADD/HIGHEST_ONLY
+- [ ] Add enable/disable toggles and percentage inputs for premium rules
+- [ ] Add TIME_OF_DAY start/end inputs
+- [ ] Add DAILY_OVERTIME and WEEKLY_OVERTIME threshold inputs
+- [ ] Add DAY_OF_WEEK multi-select
+- [ ] Add manual HOLIDAY local date list with optional labels
+- [ ] Add pay policy loading, validation, error, and save states
+- [ ] Display read-only worker pay breakdown after close for own attendance
+- [ ] Display foreman-managed worker premium breakdown in summary/detail views
+- [ ] Keep payroll cards limited to raw payable time, final payout amount, status, and selected days/items
+- [ ] Ensure mobile does not calculate premium pay, overtime, effective rates, rule matches, or pay breakdown totals
+
 ## Milestone 6.5: Backend API Contract Stabilization
 
 - [x] Implement worker shift history endpoint
