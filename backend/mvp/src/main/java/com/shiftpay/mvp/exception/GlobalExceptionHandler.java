@@ -1,6 +1,7 @@
 package com.shiftpay.mvp.exception;
 
 import com.shiftpay.mvp.dto.ErrorResponse;
+import com.shiftpay.mvp.dto.ShortShiftConflictResponse;
 import com.shiftpay.mvp.security.JwtAuthenticationException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
@@ -203,6 +204,31 @@ public class GlobalExceptionHandler {
 			HttpServletRequest request
 	) {
 		return buildError(HttpStatus.CONFLICT, exception.getMessage(), request);
+	}
+
+	/**
+	 * Handles short active shifts that require an explicit save/discard decision.
+	 *
+	 * @param exception short-shift decision exception
+	 * @param request current HTTP request
+	 * @return 409 Conflict response with machine-readable decision code and duration data
+	 */
+	@ExceptionHandler(ShortShiftRequiresDecisionException.class)
+	public ResponseEntity<ShortShiftConflictResponse> handleShortShiftRequiresDecisionException(
+			ShortShiftRequiresDecisionException exception,
+			HttpServletRequest request
+	) {
+		return ResponseEntity.status(HttpStatus.CONFLICT)
+				.body(new ShortShiftConflictResponse(
+						Instant.now(),
+						HttpStatus.CONFLICT.value(),
+						HttpStatus.CONFLICT.getReasonPhrase(),
+						exception.getMessage(),
+						request.getRequestURI(),
+						ShortShiftRequiresDecisionException.CODE,
+						exception.getDurationMinutes(),
+						exception.getThresholdMinutes()
+				));
 	}
 
 	/**

@@ -13,7 +13,8 @@ import java.math.RoundingMode;
 @Service
 public class PayrollRoundingService {
 
-	private static final int PAYOUT_MINUTE_INTERVAL = 15;
+	private static final int PAYOUT_MINUTE_INTERVAL = 5;
+	private static final int HALF_UP_THRESHOLD_MINUTES = 3;
 	private static final BigDecimal MINUTES_PER_HOUR = BigDecimal.valueOf(60);
 
 	/**
@@ -48,13 +49,15 @@ public class PayrollRoundingService {
 		);
 	}
 
-	private int roundMinutes(int rawPayableMinutes) {
+	int roundMinutes(int rawPayableMinutes) {
 		if (rawPayableMinutes == 0) {
 			return 0;
 		}
-		return Math.addExact(
-				Math.floorDiv(rawPayableMinutes - 1, PAYOUT_MINUTE_INTERVAL) * PAYOUT_MINUTE_INTERVAL,
-				PAYOUT_MINUTE_INTERVAL
-		);
+		int baseMinutes = Math.floorDiv(rawPayableMinutes, PAYOUT_MINUTE_INTERVAL) * PAYOUT_MINUTE_INTERVAL;
+		int remainder = Math.floorMod(rawPayableMinutes, PAYOUT_MINUTE_INTERVAL);
+		if (remainder >= HALF_UP_THRESHOLD_MINUTES) {
+			return Math.addExact(baseMinutes, PAYOUT_MINUTE_INTERVAL);
+		}
+		return Math.max(PAYOUT_MINUTE_INTERVAL, baseMinutes);
 	}
 }

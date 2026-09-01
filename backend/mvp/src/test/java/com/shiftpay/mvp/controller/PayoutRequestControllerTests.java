@@ -163,10 +163,10 @@ class PayoutRequestControllerTests {
 				.andExpect(jsonPath("$[0].attendanceId").value(payableAttendanceId))
 				.andExpect(jsonPath("$[0].paymentStatus").value("UNPAID"))
 				.andExpect(jsonPath("$[0].rawPayableMinutes").value(467))
-				.andExpect(jsonPath("$[0].payoutRoundedMinutes").value(480))
+				.andExpect(jsonPath("$[0].payoutRoundedMinutes").value(465))
 				.andExpect(jsonPath("$[0].hourlyRate").value(15.00))
 				.andExpect(jsonPath("$[0].calculatedSalary").value(116.75))
-				.andExpect(jsonPath("$[0].payoutAmount").value(120))
+				.andExpect(jsonPath("$[0].payoutAmount").value(117))
 				.andExpect(jsonPath("$[0].title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$[0].foremanHourlyRate").doesNotExist())
 				.andExpect(jsonPath("$[0].foremanSalary").doesNotExist())
@@ -195,14 +195,14 @@ class PayoutRequestControllerTests {
 		previewPayoutRequest(workerToken, attendanceId)
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.rawPayableMinutes").value(467))
-				.andExpect(jsonPath("$.payoutRoundedMinutes").value(480))
+				.andExpect(jsonPath("$.payoutRoundedMinutes").value(465))
 				.andExpect(jsonPath("$.exactCalculatedAmount").value(116.75))
-				.andExpect(jsonPath("$.payoutAmount").value(120))
+				.andExpect(jsonPath("$.payoutAmount").value(117))
 				.andExpect(jsonPath("$.items", hasSize(1)))
 				.andExpect(jsonPath("$.items[0].attendanceId").value(attendanceId))
 				.andExpect(jsonPath("$.items[0].paymentStatus").value("UNPAID"))
-				.andExpect(jsonPath("$.items[0].payoutRoundedMinutes").value(480))
-				.andExpect(jsonPath("$.items[0].payoutAmount").value(120));
+				.andExpect(jsonPath("$.items[0].payoutRoundedMinutes").value(465))
+				.andExpect(jsonPath("$.items[0].payoutAmount").value(117));
 
 		assertThat(payoutRequestRepository.count()).isZero();
 		assertThat(payoutRequestItemRepository.count()).isZero();
@@ -239,9 +239,9 @@ class PayoutRequestControllerTests {
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.status").value("PENDING"))
 				.andExpect(jsonPath("$.rawPayableMinutes").value(467))
-				.andExpect(jsonPath("$.payoutRoundedMinutes").value(480))
+				.andExpect(jsonPath("$.payoutRoundedMinutes").value(465))
 				.andExpect(jsonPath("$.exactCalculatedAmount").value(116.75))
-				.andExpect(jsonPath("$.payoutAmount").value(120))
+				.andExpect(jsonPath("$.payoutAmount").value(117))
 				.andExpect(jsonPath("$.requestedAt").isString())
 				.andExpect(jsonPath("$.approvedAt").value((Object) null))
 				.andExpect(jsonPath("$.paidAt").value((Object) null))
@@ -256,9 +256,9 @@ class PayoutRequestControllerTests {
 		PayoutRequest payoutRequest = payoutRequestRepository.findById(requestId).orElseThrow();
 		assertThat(payoutRequest.getStatus()).isEqualTo(PayoutRequestStatus.PENDING);
 		assertThat(payoutRequest.getRawPayableMinutesTotal()).isEqualTo(467);
-		assertThat(payoutRequest.getPayoutRoundedMinutesTotal()).isEqualTo(480);
+		assertThat(payoutRequest.getPayoutRoundedMinutesTotal()).isEqualTo(465);
 		assertThat(payoutRequest.getExactCalculatedAmountTotal()).isEqualByComparingTo("116.75");
-		assertThat(payoutRequest.getPayoutAmount()).isEqualByComparingTo("120");
+		assertThat(payoutRequest.getPayoutAmount()).isEqualByComparingTo("117");
 		assertThat(payoutRequestItemRepository.findAll()).hasSize(2);
 		assertThat(shiftAttendanceRepository.findById(firstAttendanceId).orElseThrow().getPaymentStatus())
 				.isEqualTo(PaymentStatus.PAYMENT_REQUESTED);
@@ -389,6 +389,16 @@ class PayoutRequestControllerTests {
 				"15.00"
 		);
 		setPaymentStatus(requestedAttendanceId, PaymentStatus.PAYMENT_REQUESTED);
+		long discardedAttendanceId = createAttendance(
+				foremanToken,
+				workerToken,
+				"Discarded shift",
+				ShiftStatus.DISCARDED,
+				AttendanceStatus.APPROVED,
+				null,
+				"15.00",
+				null
+		);
 
 		createPayoutRequest(workerToken, openAttendanceId)
 				.andExpect(status().isConflict())
@@ -403,6 +413,12 @@ class PayoutRequestControllerTests {
 				.andExpect(status().isConflict())
 				.andExpect(jsonPath("$.message")
 						.value("Attendance is already included in a pending payout request"));
+		previewPayoutRequest(workerToken, discardedAttendanceId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.message").value("Attendance is not payable"));
+		createPayoutRequest(workerToken, discardedAttendanceId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.message").value("Attendance is not payable"));
 	}
 
 	/**
@@ -648,69 +664,141 @@ class PayoutRequestControllerTests {
 	}
 
 	/**
-	 * Verifies upward 15-minute rounding boundaries and whole-money CEILING per item with request totals as item sums.
+	 * Verifies nearest-5 half-up rounding boundaries and whole-money CEILING per item with request totals as item sums.
 	 */
 	@Test
-	void payoutRoundingUsesFifteenMinuteCeilingAndWholeMoneyCeilingPerItem() throws Exception {
+	void payoutRoundingUsesNearestFiveHalfUpAndWholeMoneyCeilingPerItem() throws Exception {
 		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long zeroMinuteAttendanceId = createClosedApprovedAttendance(
+				foremanToken,
+				workerToken,
+				"Zero minute shift",
+				0,
+				"12.00",
+				"0.00"
+		);
 		long oneMinuteAttendanceId = createClosedApprovedAttendance(
 				foremanToken,
 				workerToken,
 				"One minute shift",
 				1,
-				"10.00",
-				"0.17"
+				"12.00",
+				"0.20"
 		);
-		long fourteenMinuteAttendanceId = createClosedApprovedAttendance(
+		long fourMinuteAttendanceId = createClosedApprovedAttendance(
 				foremanToken,
 				workerToken,
-				"Fourteen minute shift",
-				14,
-				"10.00",
-				"2.33"
+				"Four minute shift",
+				4,
+				"12.00",
+				"0.80"
 		);
-		long fifteenMinuteAttendanceId = createClosedApprovedAttendance(
+		long fiveMinuteAttendanceId = createClosedApprovedAttendance(
 				foremanToken,
 				workerToken,
-				"Fifteen minute shift",
-				15,
-				"10.00",
-				"2.50"
+				"Five minute shift",
+				5,
+				"12.00",
+				"1.00"
 		);
-		long fractionalAttendanceId = createClosedApprovedAttendance(
+		long sevenMinuteAttendanceId = createClosedApprovedAttendance(
 				foremanToken,
 				workerToken,
-				"Fractional money shift",
-				16,
-				"10.01",
-				"2.67"
+				"Seven minute shift",
+				7,
+				"12.00",
+				"1.40"
+		);
+		long eightMinuteAttendanceId = createClosedApprovedAttendance(
+				foremanToken,
+				workerToken,
+				"Eight minute shift",
+				8,
+				"12.00",
+				"1.60"
+		);
+		long elevenMinuteAttendanceId = createClosedApprovedAttendance(
+				foremanToken,
+				workerToken,
+				"Eleven minute shift",
+				11,
+				"12.00",
+				"2.20"
+		);
+		long thirteenMinuteAttendanceId = createClosedApprovedAttendance(
+				foremanToken,
+				workerToken,
+				"Thirteen minute shift",
+				13,
+				"12.00",
+				"2.60"
+		);
+		long twentyFiveMinuteAttendanceId = createClosedApprovedAttendance(
+				foremanToken,
+				workerToken,
+				"Twenty five minute shift",
+				25,
+				"12.00",
+				"5.00"
+		);
+		long twentyEightMinuteAttendanceId = createClosedApprovedAttendance(
+				foremanToken,
+				workerToken,
+				"Twenty eight minute shift",
+				28,
+				"12.00",
+				"5.60"
 		);
 
 		previewPayoutRequest(
 						workerToken,
+						zeroMinuteAttendanceId,
 						oneMinuteAttendanceId,
-						fourteenMinuteAttendanceId,
-						fifteenMinuteAttendanceId,
-						fractionalAttendanceId
+						fourMinuteAttendanceId,
+						fiveMinuteAttendanceId,
+						sevenMinuteAttendanceId,
+						eightMinuteAttendanceId,
+						elevenMinuteAttendanceId,
+						thirteenMinuteAttendanceId,
+						twentyFiveMinuteAttendanceId,
+						twentyEightMinuteAttendanceId
 				)
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.rawPayableMinutes").value(46))
-				.andExpect(jsonPath("$.payoutRoundedMinutes").value(75))
-				.andExpect(jsonPath("$.exactCalculatedAmount").value(7.67))
-				.andExpect(jsonPath("$.payoutAmount").value(15))
-				.andExpect(jsonPath("$.items[0].rawPayableMinutes").value(1))
-				.andExpect(jsonPath("$.items[0].payoutRoundedMinutes").value(15))
-				.andExpect(jsonPath("$.items[0].payoutAmount").value(3))
-				.andExpect(jsonPath("$.items[1].rawPayableMinutes").value(14))
-				.andExpect(jsonPath("$.items[1].payoutRoundedMinutes").value(15))
-				.andExpect(jsonPath("$.items[1].payoutAmount").value(3))
-				.andExpect(jsonPath("$.items[2].rawPayableMinutes").value(15))
-				.andExpect(jsonPath("$.items[2].payoutRoundedMinutes").value(15))
-				.andExpect(jsonPath("$.items[2].payoutAmount").value(3))
-				.andExpect(jsonPath("$.items[3].rawPayableMinutes").value(16))
-				.andExpect(jsonPath("$.items[3].payoutRoundedMinutes").value(30))
-				.andExpect(jsonPath("$.items[3].payoutAmount").value(6));
+				.andExpect(jsonPath("$.rawPayableMinutes").value(102))
+				.andExpect(jsonPath("$.payoutRoundedMinutes").value(110))
+				.andExpect(jsonPath("$.exactCalculatedAmount").value(20.40))
+				.andExpect(jsonPath("$.payoutAmount").value(22))
+				.andExpect(jsonPath("$.items[0].rawPayableMinutes").value(0))
+				.andExpect(jsonPath("$.items[0].payoutRoundedMinutes").value(0))
+				.andExpect(jsonPath("$.items[0].payoutAmount").value(0))
+				.andExpect(jsonPath("$.items[1].rawPayableMinutes").value(1))
+				.andExpect(jsonPath("$.items[1].payoutRoundedMinutes").value(5))
+				.andExpect(jsonPath("$.items[1].payoutAmount").value(1))
+				.andExpect(jsonPath("$.items[2].rawPayableMinutes").value(4))
+				.andExpect(jsonPath("$.items[2].payoutRoundedMinutes").value(5))
+				.andExpect(jsonPath("$.items[2].payoutAmount").value(1))
+				.andExpect(jsonPath("$.items[3].rawPayableMinutes").value(5))
+				.andExpect(jsonPath("$.items[3].payoutRoundedMinutes").value(5))
+				.andExpect(jsonPath("$.items[3].payoutAmount").value(1))
+				.andExpect(jsonPath("$.items[4].rawPayableMinutes").value(7))
+				.andExpect(jsonPath("$.items[4].payoutRoundedMinutes").value(5))
+				.andExpect(jsonPath("$.items[4].payoutAmount").value(1))
+				.andExpect(jsonPath("$.items[5].rawPayableMinutes").value(8))
+				.andExpect(jsonPath("$.items[5].payoutRoundedMinutes").value(10))
+				.andExpect(jsonPath("$.items[5].payoutAmount").value(2))
+				.andExpect(jsonPath("$.items[6].rawPayableMinutes").value(11))
+				.andExpect(jsonPath("$.items[6].payoutRoundedMinutes").value(10))
+				.andExpect(jsonPath("$.items[6].payoutAmount").value(2))
+				.andExpect(jsonPath("$.items[7].rawPayableMinutes").value(13))
+				.andExpect(jsonPath("$.items[7].payoutRoundedMinutes").value(15))
+				.andExpect(jsonPath("$.items[7].payoutAmount").value(3))
+				.andExpect(jsonPath("$.items[8].rawPayableMinutes").value(25))
+				.andExpect(jsonPath("$.items[8].payoutRoundedMinutes").value(25))
+				.andExpect(jsonPath("$.items[8].payoutAmount").value(5))
+				.andExpect(jsonPath("$.items[9].rawPayableMinutes").value(28))
+				.andExpect(jsonPath("$.items[9].payoutRoundedMinutes").value(30))
+				.andExpect(jsonPath("$.items[9].payoutAmount").value(6));
 	}
 
 	/**
@@ -925,6 +1013,13 @@ class PayoutRequestControllerTests {
 		shiftSession.setActualStartTime(OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(120));
 		if (shiftStatus == ShiftStatus.CLOSED) {
 			shiftSession.setActualEndTime(OffsetDateTime.now(ZoneOffset.UTC));
+		}
+		else if (shiftStatus == ShiftStatus.DISCARDED) {
+			OffsetDateTime discardedAt = OffsetDateTime.now(ZoneOffset.UTC);
+			shiftSession.setActualEndTime(discardedAt);
+			shiftSession.setDiscardedAt(discardedAt);
+			shiftSession.setDiscardedBy(shiftSession.getCreatedBy());
+			shiftSession.setDiscardReason("SHORT_SHIFT_NOT_SAVED");
 		}
 		shiftSessionRepository.saveAndFlush(shiftSession);
 

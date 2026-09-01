@@ -118,6 +118,7 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 				com.shiftpay.mvp.entity.ShiftStatus.OPEN,
 				com.shiftpay.mvp.entity.ShiftStatus.ACTIVE,
 				com.shiftpay.mvp.entity.ShiftStatus.CLOSED,
+				com.shiftpay.mvp.entity.ShiftStatus.DISCARDED,
 				com.shiftpay.mvp.entity.ShiftStatus.CANCELLED
 			  )
 			order by attendance.joinedAt desc, attendance.id desc

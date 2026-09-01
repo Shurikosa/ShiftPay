@@ -2,6 +2,7 @@ package com.shiftpay.mvp.service;
 
 import com.shiftpay.mvp.dto.CreateShiftRequest;
 import com.shiftpay.mvp.dto.PauseStateResponse;
+import com.shiftpay.mvp.dto.ShiftCloseRequest;
 import com.shiftpay.mvp.dto.ShiftCloseResponse;
 import com.shiftpay.mvp.dto.ShiftCreateResponse;
 import com.shiftpay.mvp.dto.ShiftResponse;
@@ -19,6 +20,7 @@ import com.shiftpay.mvp.entity.ShiftStatus;
 import com.shiftpay.mvp.entity.User;
 import com.shiftpay.mvp.exception.CompanyConflictException;
 import com.shiftpay.mvp.exception.ForbiddenException;
+import com.shiftpay.mvp.exception.ShortShiftRequiresDecisionException;
 import com.shiftpay.mvp.exception.ShiftNotFoundException;
 import com.shiftpay.mvp.exception.ShiftStateConflictException;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
@@ -57,6 +59,8 @@ public class ShiftSessionService {
 			Locale.ENGLISH
 	);
 	private static final char[] JOIN_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".toCharArray();
+	private static final int SHORT_SHIFT_MINIMUM_MINUTES = 15;
+	private static final String SHORT_SHIFT_DISCARD_REASON = "SHORT_SHIFT_NOT_SAVED";
 	private static final int JOIN_CODE_LENGTH = 6;
 	private static final int JOIN_CODE_MAX_ATTEMPTS = 20;
 
@@ -253,6 +257,50 @@ public class ShiftSessionService {
 	}
 
 	/**
+	 * Discards an ACTIVE short shift after the owner foreman chooses not to save it.
+	 *
+	 * @param shiftId shift session id
+	 * @param principal authenticated owner foreman principal
+	 * @return discarded shift response
+	 */
+	@Transactional
+	public ShiftResponse discardShift(Long shiftId, AuthenticatedUserPrincipal principal) {
+		ShiftSession shiftSession = shiftSessionRepository.findByIdForUpdate(shiftId)
+				.orElseThrow(ShiftNotFoundException::new);
+
+		validateOwnerForemanAccess(shiftSession, principal);
+		validateForemanCompanyConsistency(shiftSession, principal);
+		if (shiftSession.getStatus() != ShiftStatus.ACTIVE) {
+			throw new ShiftStateConflictException("Shift can only be discarded when status is ACTIVE");
+		}
+
+		OffsetDateTime discardedAt = OffsetDateTime.now(ZoneOffset.UTC);
+		long durationMinutes = salaryCalculationService.calculateDurationMinutes(
+				shiftSession.getActualStartTime(),
+				discardedAt
+		);
+		if (!isShortShift(durationMinutes)) {
+			throw new ShiftStateConflictException("Only shifts shorter than 15 minutes can be discarded");
+		}
+
+		User discardedBy = userRepository.findById(principal.id())
+				.orElseThrow(() -> new JwtAuthenticationException("Authenticated user not found"));
+		List<ShiftPauseInterval> pauseIntervals = shiftPauseIntervalRepository.findAllByShiftSessionIdForUpdate(shiftId);
+		for (ShiftPauseInterval pauseInterval : pauseIntervals) {
+			if (pauseInterval.getEndedAt() == null) {
+				pauseInterval.setEndedAt(discardedAt);
+			}
+		}
+		clearPayrollForDiscardedShift(shiftSession);
+		shiftSession.setStatus(ShiftStatus.DISCARDED);
+		shiftSession.setActualEndTime(discardedAt);
+		shiftSession.setDiscardedAt(discardedAt);
+		shiftSession.setDiscardedBy(discardedBy);
+		shiftSession.setDiscardReason(SHORT_SHIFT_DISCARD_REASON);
+		return ShiftResponse.from(shiftSession, shouldIncludePrivateForemanFields(shiftSession, principal));
+	}
+
+	/**
 	 * Closes an ACTIVE shift, records actual end time, and persists salary results.
 	 *
 	 * <p>The method locks the shift and all attendance rows. Only APPROVED attendance receives worked minutes and
@@ -260,11 +308,16 @@ public class ShiftSessionService {
 	 * failure rolls back the transaction so the shift remains ACTIVE.</p>
 	 *
 	 * @param shiftId shift session id
+	 * @param request optional close request with short-shift save decision
 	 * @param principal authenticated owner foreman principal
 	 * @return close response with actual end time
 	 */
 	@Transactional
-	public ShiftCloseResponse closeShift(Long shiftId, AuthenticatedUserPrincipal principal) {
+	public ShiftCloseResponse closeShift(
+			Long shiftId,
+			ShiftCloseRequest request,
+			AuthenticatedUserPrincipal principal
+	) {
 		ShiftSession shiftSession = shiftSessionRepository.findByIdForUpdate(shiftId)
 				.orElseThrow(ShiftNotFoundException::new);
 
@@ -279,6 +332,10 @@ public class ShiftSessionService {
 				shiftSession.getActualStartTime(),
 				actualEndTime
 		);
+		boolean shouldSaveShortShift = request != null && request.shouldSaveShortShift();
+		if (isShortShift(durationMinutes) && !shouldSaveShortShift) {
+			throw new ShortShiftRequiresDecisionException(durationMinutes, SHORT_SHIFT_MINIMUM_MINUTES);
+		}
 		List<ShiftAttendance> attendanceRows = shiftAttendanceRepository.findAllByShiftSessionIdForUpdate(shiftId);
 		List<ShiftPauseInterval> pauseIntervals = shiftPauseIntervalRepository.findAllByShiftSessionIdForUpdate(shiftId);
 		for (ShiftPauseInterval pauseInterval : pauseIntervals) {
@@ -340,6 +397,17 @@ public class ShiftSessionService {
 		shiftSession.setStatus(ShiftStatus.CLOSED);
 		shiftSession.setActualEndTime(actualEndTime);
 		return ShiftCloseResponse.from(shiftSession);
+	}
+
+	/**
+	 * Closes an ACTIVE shift without a short-shift override.
+	 *
+	 * @param shiftId shift session id
+	 * @param principal authenticated owner foreman principal
+	 * @return close response with actual end time
+	 */
+	public ShiftCloseResponse closeShift(Long shiftId, AuthenticatedUserPrincipal principal) {
+		return closeShift(shiftId, null, principal);
 	}
 
 	/**
@@ -408,6 +476,24 @@ public class ShiftSessionService {
 				attendance.getHourlyRate(),
 				attendance.getCalculatedSalary().setScale(2, RoundingMode.HALF_UP)
 		);
+	}
+
+	private void clearPayrollForDiscardedShift(ShiftSession shiftSession) {
+		shiftSession.setForemanWorkedMinutes(null);
+		shiftSession.setForemanPauseMinutes(null);
+		shiftSession.setForemanCalculatedSalary(null);
+		for (ShiftAttendance attendance : shiftAttendanceRepository.findAllByShiftSessionIdForUpdate(shiftSession.getId())) {
+			attendance.setPayableStartTime(null);
+			attendance.setPauseMinutes(null);
+			attendance.setWorkedMinutes(null);
+			attendance.setCalculatedSalary(null);
+			attendance.setPaymentStatus(PaymentStatus.UNPAID);
+			attendance.setPaidAt(null);
+		}
+	}
+
+	private boolean isShortShift(long durationMinutes) {
+		return durationMinutes >= 0 && durationMinutes < SHORT_SHIFT_MINIMUM_MINUTES;
 	}
 
 	/**

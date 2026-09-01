@@ -875,6 +875,73 @@ class AttendanceControllerTests {
 	}
 
 	/**
+	 * Keeps legacy CLOSED approved attendance renderable by falling back to shift actualStartTime when payableStartTime
+	 * was never stored.
+	 */
+	@Test
+	void closedApprovedHistoryAndAttendanceFallbackToActualStartWhenPayableStartIsNull() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Closed legacy payable start shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), attendanceId, "{}").andExpect(status().isOk());
+		startShift(foremanToken, shift.id());
+		OffsetDateTime actualStartTime = OffsetDateTime.parse("2026-07-06T08:00:00Z");
+		setActualStartTime(shift.id(), actualStartTime);
+		mockMvc.perform(post(CREATE_SHIFT_URL + "/" + shift.id() + "/close")
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
+				.andExpect(status().isOk());
+		setPayableStartTime(attendanceId, null);
+
+		getMyShiftHistory(workerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].shiftId").value(shift.id()))
+				.andExpect(jsonPath("$[0].status").value("CLOSED"))
+				.andExpect(jsonPath("$[0].attendanceStatus").value("APPROVED"))
+				.andExpect(jsonPath("$[0].payableStartTime").value("2026-07-06T08:00:00Z"));
+		mockMvc.perform(get(attendanceUrl(shift.id()))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].attendanceId").value(attendanceId))
+				.andExpect(jsonPath("$[0].payableStartTime").value("2026-07-06T08:00:00Z"));
+	}
+
+	/**
+	 * Keeps discarded approved attendance from exposing a derived payable start in worker history or foreman
+	 * attendance responses after discard cleared payroll fields.
+	 */
+	@Test
+	void discardedApprovedHistoryAndAttendanceKeepPayableStartNull() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Discarded payable start shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), attendanceId, "{}").andExpect(status().isOk());
+		startShift(foremanToken, shift.id());
+		OffsetDateTime actualStartTime = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(10);
+		setActualStartTime(shift.id(), actualStartTime);
+		discardShift(foremanToken, shift.id());
+
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		assertThat(attendance.getStatus()).isEqualTo(AttendanceStatus.APPROVED);
+		assertThat(attendance.getPayableStartTime()).isNull();
+
+		getMyShiftHistory(workerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].shiftId").value(shift.id()))
+				.andExpect(jsonPath("$[0].status").value("DISCARDED"))
+				.andExpect(jsonPath("$[0].attendanceStatus").value("APPROVED"))
+				.andExpect(jsonPath("$[0].actualStartTime").isString())
+				.andExpect(jsonPath("$[0].payableStartTime").value((Object) null));
+		mockMvc.perform(get(attendanceUrl(shift.id()))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].attendanceId").value(attendanceId))
+				.andExpect(jsonPath("$[0].status").value("APPROVED"))
+				.andExpect(jsonPath("$[0].payableStartTime").value((Object) null));
+	}
+
+	/**
 	 * Closes a shift before approval and expects the OPEN/ACTIVE approval rule to reject the request.
 	 */
 	@Test
@@ -1448,6 +1515,18 @@ class AttendanceControllerTests {
 	}
 
 	/**
+	 * Discards a short active shift through the API and asserts success for setup scenarios.
+	 *
+	 * @param accessToken JWT for the owner foreman
+	 * @param shiftId target shift id
+	 */
+	private void discardShift(String accessToken, long shiftId) throws Exception {
+		mockMvc.perform(post(CREATE_SHIFT_URL + "/" + shiftId + "/discard")
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+				.andExpect(status().isOk());
+	}
+
+	/**
 	 * Sends a worker join request with a supplied join code.
 	 *
 	 * @param accessToken JWT for the caller
@@ -1573,6 +1652,18 @@ class AttendanceControllerTests {
 		ShiftSession shiftSession = shiftSessionRepository.findById(shiftId).orElseThrow();
 		shiftSession.setActualStartTime(actualStartTime);
 		shiftSessionRepository.saveAndFlush(shiftSession);
+	}
+
+	/**
+	 * Overrides payableStartTime so response mapping tests can exercise legacy/null storage.
+	 *
+	 * @param attendanceId attendance row to update
+	 * @param payableStartTime effective worker payable start to persist
+	 */
+	private void setPayableStartTime(long attendanceId, OffsetDateTime payableStartTime) {
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		attendance.setPayableStartTime(payableStartTime);
+		shiftAttendanceRepository.saveAndFlush(attendance);
 	}
 
 	/**

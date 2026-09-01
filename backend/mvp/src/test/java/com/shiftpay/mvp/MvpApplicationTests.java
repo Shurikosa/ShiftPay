@@ -67,13 +67,16 @@ class MvpApplicationTests {
 		assertThat(countColumn("shift_sessions", "foreman_worked_minutes")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "foreman_pause_minutes")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "foreman_calculated_salary")).isEqualTo(1);
+		assertThat(countColumn("shift_sessions", "discarded_at")).isEqualTo(1);
+		assertThat(countColumn("shift_sessions", "discarded_by")).isEqualTo(1);
+		assertThat(countColumn("shift_sessions", "discard_reason")).isEqualTo(1);
 		assertThat(countColumn("shift_attendance", "pause_minutes")).isEqualTo(1);
 		assertThat(countColumn("shift_attendance", "payable_start_time")).isEqualTo(1);
 		assertThat(countColumn("shift_attendance", "payment_status")).isEqualTo(1);
 		assertThat(countColumn("shift_attendance", "paid_at")).isEqualTo(1);
 		assertThat(countColumn("payout_requests", "manager_foreman_id")).isEqualTo(1);
 		assertThat(countColumn("payout_request_items", "rounded_item_amount_exact")).isEqualTo(1);
-		assertThat(latestFlywayVersion()).isEqualTo("10");
+		assertThat(latestFlywayVersion()).isEqualTo("11");
 	}
 
 	/**

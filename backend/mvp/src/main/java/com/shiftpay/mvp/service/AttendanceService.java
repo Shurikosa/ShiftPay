@@ -253,7 +253,8 @@ public class AttendanceService {
 	}
 
 	private OffsetDateTime workerPayableWindowStart(ShiftSession shiftSession, ShiftAttendance attendance) {
-		if (attendance.getStatus() != AttendanceStatus.APPROVED) {
+		if (attendance.getStatus() != AttendanceStatus.APPROVED
+				|| shiftSession.getStatus() == ShiftStatus.DISCARDED) {
 			return null;
 		}
 		OffsetDateTime actualStartTime = shiftSession.getActualStartTime();

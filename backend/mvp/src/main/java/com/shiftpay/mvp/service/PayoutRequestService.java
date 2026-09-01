@@ -349,6 +349,9 @@ public class PayoutRequestService {
 					"Attendance is already included in a pending payout request"
 			);
 		}
+		if (shiftSession.getStatus() == ShiftStatus.DISCARDED) {
+			throw new PayoutRequestConflictException("Attendance is not payable");
+		}
 		if (attendance.getPaymentStatus() != PaymentStatus.UNPAID
 				|| attendance.getStatus() != AttendanceStatus.APPROVED
 				|| shiftSession.getStatus() != ShiftStatus.CLOSED

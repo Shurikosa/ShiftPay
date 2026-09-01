@@ -74,6 +74,19 @@ public class ShiftSession {
 	private OffsetDateTime actualEndTime;
 
 	@Setter
+	@Column(name = "discarded_at")
+	private OffsetDateTime discardedAt;
+
+	@Setter
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "discarded_by")
+	private User discardedBy;
+
+	@Setter
+	@Column(name = "discard_reason", length = 64)
+	private String discardReason;
+
+	@Setter
 	@Column(name = "default_break_minutes", nullable = false)
 	private Integer defaultBreakMinutes;
 

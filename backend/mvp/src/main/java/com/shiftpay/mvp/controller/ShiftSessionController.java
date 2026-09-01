@@ -2,6 +2,7 @@ package com.shiftpay.mvp.controller;
 
 import com.shiftpay.mvp.dto.CreateShiftRequest;
 import com.shiftpay.mvp.dto.PauseResponse;
+import com.shiftpay.mvp.dto.ShiftCloseRequest;
 import com.shiftpay.mvp.dto.ShiftCloseResponse;
 import com.shiftpay.mvp.dto.ShiftCreateResponse;
 import com.shiftpay.mvp.dto.ShiftResponse;
@@ -109,6 +110,21 @@ public class ShiftSessionController {
 	}
 
 	/**
+	 * Handles {@code POST /api/v1/shifts/{shiftId}/discard}.
+	 *
+	 * @param shiftId shift id from the URL
+	 * @param principal authenticated owner foreman principal
+	 * @return discarded shift details response
+	 */
+	@PostMapping("/{shiftId}/discard")
+	public ShiftResponse discardShift(
+			@PathVariable Long shiftId,
+			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
+	) {
+		return shiftSessionService.discardShift(shiftId, principal);
+	}
+
+	/**
 	 * Handles {@code POST /api/v1/shifts/{shiftId}/pauses/me/start}.
 	 *
 	 * @param shiftId shift id from the URL
@@ -193,8 +209,9 @@ public class ShiftSessionController {
 	@PostMapping("/{shiftId}/close")
 	public ShiftCloseResponse closeShift(
 			@PathVariable Long shiftId,
+			@RequestBody(required = false) ShiftCloseRequest request,
 			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
 	) {
-		return shiftSessionService.closeShift(shiftId, principal);
+		return shiftSessionService.closeShift(shiftId, request, principal);
 	}
 }

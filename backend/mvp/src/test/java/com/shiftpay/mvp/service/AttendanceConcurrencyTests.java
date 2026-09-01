@@ -2,6 +2,7 @@ package com.shiftpay.mvp.service;
 
 import com.shiftpay.mvp.TestDataCleaner;
 import com.shiftpay.mvp.dto.ApproveAttendanceRequest;
+import com.shiftpay.mvp.dto.ShiftCloseRequest;
 import com.shiftpay.mvp.dto.JoinShiftRequest;
 import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.Company;
@@ -199,14 +200,16 @@ class AttendanceConcurrencyTests {
 
 		ConcurrentResults<?, ?> results = runWithFirstTransactionHeld(
 				() -> shiftSessionService.closeShift(
-						scenario.shift().getId(),
-						scenario.foremanPrincipal()
-				),
+							scenario.shift().getId(),
+							new ShiftCloseRequest(true),
+							scenario.foremanPrincipal()
+					),
 				() -> shiftSessionService.closeShift(
-						scenario.shift().getId(),
-						scenario.foremanPrincipal()
-				)
-		);
+							scenario.shift().getId(),
+							new ShiftCloseRequest(true),
+							scenario.foremanPrincipal()
+					)
+			);
 
 		assertThat(results.first().error()).isNull();
 		assertThat(results.second().error()).isInstanceOf(ShiftStateConflictException.class);
@@ -337,7 +340,7 @@ class AttendanceConcurrencyTests {
 		shift.setForemanHourlyRate(new BigDecimal("25.00"));
 		shift.setCreatedBy(foreman);
 		if (shiftStatus == ShiftStatus.ACTIVE) {
-			shift.setActualStartTime(OffsetDateTime.now(ZoneOffset.UTC).minusHours(1));
+			shift.setActualStartTime(OffsetDateTime.now(ZoneOffset.UTC).minusHours(2));
 		}
 		shift = shiftSessionRepository.save(shift);
 
