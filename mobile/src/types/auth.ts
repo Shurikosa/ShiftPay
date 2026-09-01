@@ -42,6 +42,9 @@ export interface ApiErrorResponse {
   error: string;
   message: string;
   path?: string;
+  code?: string;
+  actualDurationMinutes?: number;
+  minimumDurationMinutes?: number;
 }
 
 export interface Session {

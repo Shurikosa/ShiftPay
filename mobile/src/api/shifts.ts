@@ -1,6 +1,7 @@
 import type {
   ApproveAttendanceRequest,
   ApproveAttendanceResponse,
+  CloseShiftRequest,
   CreateShiftRequest,
   CreateShiftResponse,
   JoinShiftRequest,
@@ -8,6 +9,7 @@ import type {
   ManagedShift,
   ShiftAttendance,
   ShiftCloseResponse,
+  ShiftDiscardResponse,
   ShiftPauseResponse,
   ShiftStartResponse,
   ShiftSummary,
@@ -87,15 +89,30 @@ export function startShift(token: string, shiftId: number): Promise<ShiftStartRe
   });
 }
 
-export function closeShift(token: string, shiftId: number): Promise<ShiftCloseResponse> {
+export function closeShift(
+  token: string,
+  shiftId: number,
+  payload?: CloseShiftRequest
+): Promise<ShiftCloseResponse> {
   return apiRequest<ShiftCloseResponse>(`/api/v1/shifts/${shiftId}/close`, {
     method: "POST",
-    token
+    token,
+    body: payload
   });
 }
 
 export function cancelShift(token: string, shiftId: number): Promise<ManagedShift> {
   return apiRequest<ManagedShift>(`/api/v1/shifts/${shiftId}/cancel`, {
+    method: "POST",
+    token
+  });
+}
+
+export function discardShift(
+  token: string,
+  shiftId: number
+): Promise<ShiftDiscardResponse> {
+  return apiRequest<ShiftDiscardResponse>(`/api/v1/shifts/${shiftId}/discard`, {
     method: "POST",
     token
   });

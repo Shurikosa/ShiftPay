@@ -12,6 +12,8 @@ type ManagedShiftCardProps = {
 };
 
 export function ManagedShiftCard({ shift, onPress }: ManagedShiftCardProps) {
+  const isDiscarded = shift.status === "DISCARDED";
+
   return (
     <Pressable
       accessibilityRole={onPress ? "button" : undefined}
@@ -36,7 +38,7 @@ export function ManagedShiftCard({ shift, onPress }: ManagedShiftCardProps) {
         </View>
         <View style={styles.badges}>
           <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
-          {isPaused(shift.pauseState) ? (
+          {isPaused(shift.pauseState) && !isDiscarded ? (
             <StatusBadge label="PAUSED" tone="warning" />
           ) : null}
         </View>
@@ -63,6 +65,12 @@ export function ManagedShiftCard({ shift, onPress }: ManagedShiftCardProps) {
           <Text style={styles.metaLabel}>Default rate</Text>
           <Text style={styles.metaValue}>{formatRate(shift.defaultHourlyRate)}</Text>
         </View>
+        {isDiscarded ? (
+          <View style={styles.metaItem}>
+            <Text style={styles.metaLabel}>Payroll</Text>
+            <Text style={styles.metaValue}>Discarded, not payable</Text>
+          </View>
+        ) : null}
         {shift.foremanHourlyRate !== undefined ? (
           <View style={styles.metaItem}>
             <Text style={styles.metaLabel}>Foreman rate</Text>

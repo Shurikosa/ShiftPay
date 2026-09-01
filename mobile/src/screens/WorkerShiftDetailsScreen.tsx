@@ -140,6 +140,7 @@ export function WorkerShiftDetailsScreen({
   };
 
   const isMutating = mutation !== null;
+  const isDiscarded = shift.status === "DISCARDED";
   const isActiveWorkerShift =
     shift.status === "ACTIVE" &&
     shift.attendanceStatus !== "REJECTED" &&
@@ -149,7 +150,7 @@ export function WorkerShiftDetailsScreen({
   const isPendingActiveJoin =
     shift.status === "ACTIVE" && shift.attendanceStatus === "JOINED";
   const isAllPaused = Boolean(shift.pauseState?.allPaused);
-  const pauseBadgeLabel = getWorkerPauseBadgeLabel(shift.pauseState);
+  const pauseBadgeLabel = isDiscarded ? null : getWorkerPauseBadgeLabel(shift.pauseState);
   const canPause = isApprovedActiveShift && Boolean(shift.pauseState) && !isAllPaused;
   const needsPauseStateRefresh = isApprovedActiveShift && !shift.pauseState;
 
@@ -168,7 +169,7 @@ export function WorkerShiftDetailsScreen({
             label={shift.attendanceStatus}
             tone={getAttendanceStatusTone(shift.attendanceStatus)}
           />
-          {shift.paymentStatus ? (
+          {shift.paymentStatus && !isDiscarded ? (
             <StatusBadge
               label={formatStatusLabel(shift.paymentStatus)}
               tone={getPaymentStatusTone(shift.paymentStatus)}
@@ -195,28 +196,46 @@ export function WorkerShiftDetailsScreen({
             message={allPauseActiveMessage}
           />
         ) : null}
+        {isDiscarded ? (
+          <StateMessage
+            title="Discarded shift"
+            message="This short shift was not saved for payroll and is not payable."
+          />
+        ) : null}
 
         <View style={styles.panel}>
           <DetailRow label="Company" value={shift.companyName} />
           <DetailRow label="Actual start" value={formatDateTime(shift.actualStartTime)} />
           <DetailRow label="Actual end" value={formatDateTime(shift.actualEndTime)} />
-          {shift.payableStartTime !== undefined ? (
-            <DetailRow
-              label="Payable start"
-              value={formatDateTime(shift.payableStartTime)}
-            />
-          ) : null}
           <DetailRow label="Hourly rate" value={formatRate(shift.hourlyRate)} />
           <DetailRow label="Break" value={`${shift.breakMinutes} min`} />
-          <DetailRow label="Pause time" value={formatPauseMinutes(shift.pauseMinutes)} />
-          <DetailRow label="Worked time" value={formatMinutes(shift.workedMinutes)} />
-          <DetailRow label="Calculated salary" value={formatMoney(shift.calculatedSalary)} />
-          {shift.paymentStatus ? (
-            <DetailRow label="Payment status" value={formatStatusLabel(shift.paymentStatus)} />
-          ) : null}
-          {shift.paidAt ? (
-            <DetailRow label="Paid" value={formatDateTime(shift.paidAt)} />
-          ) : null}
+          {isDiscarded ? (
+            <DetailRow label="Payroll" value="Not payable" />
+          ) : (
+            <>
+              {shift.payableStartTime !== undefined ? (
+                <DetailRow
+                  label="Payable start"
+                  value={formatDateTime(shift.payableStartTime)}
+                />
+              ) : null}
+              <DetailRow label="Pause time" value={formatPauseMinutes(shift.pauseMinutes)} />
+              <DetailRow label="Worked time" value={formatMinutes(shift.workedMinutes)} />
+              <DetailRow
+                label="Calculated salary"
+                value={formatMoney(shift.calculatedSalary)}
+              />
+              {shift.paymentStatus ? (
+                <DetailRow
+                  label="Payment status"
+                  value={formatStatusLabel(shift.paymentStatus)}
+                />
+              ) : null}
+              {shift.paidAt ? (
+                <DetailRow label="Paid" value={formatDateTime(shift.paidAt)} />
+              ) : null}
+            </>
+          )}
         </View>
 
         {canPause ? (

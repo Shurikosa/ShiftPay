@@ -15,6 +15,8 @@ export function getShiftStatusTone(status: ShiftStatus): StatusTone {
       return "success";
     case "CANCELLED":
       return "error";
+    case "DISCARDED":
+      return "warning";
   }
 }
 
@@ -51,6 +53,6 @@ export function getPayoutRequestStatusTone(status: PayoutRequestStatus): StatusT
   }
 }
 
-export function formatStatusLabel(status: PaymentStatus | PayoutRequestStatus): string {
+export function formatStatusLabel(status: string): string {
   return status.replace(/_/g, " ");
 }

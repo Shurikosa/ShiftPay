@@ -4,7 +4,6 @@ import type { PayoutRequest } from "../types/payroll";
 import {
   formatDateTime,
   formatMinutes,
-  formatMoney,
   formatWholeMoney
 } from "../utils/format";
 import {
@@ -55,15 +54,7 @@ export function PayoutRequestCard({
           value={formatMinutes(request.rawPayableMinutes)}
         />
         <DetailRow
-          label="Rounded payable time"
-          value={formatMinutes(request.payoutRoundedMinutes)}
-        />
-        <DetailRow
-          label="Exact calculated amount"
-          value={formatMoney(request.exactCalculatedAmount)}
-        />
-        <DetailRow
-          label="Whole payout amount"
+          label="Final payout amount"
           value={formatWholeMoney(request.payoutAmount)}
         />
       </View>
@@ -92,15 +83,7 @@ export function PayoutRequestCard({
                 value={formatMinutes(item.rawPayableMinutes)}
               />
               <DetailRow
-                label="Rounded time"
-                value={formatMinutes(item.payoutRoundedMinutes)}
-              />
-              <DetailRow
-                label="Exact amount"
-                value={formatMoney(item.calculatedSalary)}
-              />
-              <DetailRow
-                label="Payout"
+                label="Final payout"
                 value={formatWholeMoney(item.payoutAmount)}
               />
             </View>

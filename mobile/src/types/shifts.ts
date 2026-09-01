@@ -1,6 +1,12 @@
 import type { PaymentStatus } from "./payroll";
 
-export type ShiftStatus = "CREATED" | "OPEN" | "ACTIVE" | "CLOSED" | "CANCELLED";
+export type ShiftStatus =
+  | "CREATED"
+  | "OPEN"
+  | "ACTIVE"
+  | "CLOSED"
+  | "CANCELLED"
+  | "DISCARDED";
 
 export type AttendanceStatus = "JOINED" | "APPROVED" | "REJECTED" | "CANCELLED";
 
@@ -36,6 +42,9 @@ export interface WorkerShiftHistoryItem {
   status: ShiftStatus;
   actualStartTime: string | null;
   actualEndTime: string | null;
+  discardedAt?: string | null;
+  discardedBy?: number | null;
+  discardReason?: string | null;
   attendanceStatus: AttendanceStatus;
   paymentStatus?: PaymentStatus | null;
   paidAt?: string | null;
@@ -58,6 +67,9 @@ export interface ManagedShift {
   joinCode: string;
   actualStartTime: string | null;
   actualEndTime: string | null;
+  discardedAt?: string | null;
+  discardedBy?: number | null;
+  discardReason?: string | null;
   defaultBreakMinutes: number;
   defaultHourlyRate: number;
   foremanHourlyRate?: number;
@@ -82,11 +94,18 @@ export interface CreateShiftResponse {
   status: ShiftStatus;
   actualStartTime: string | null;
   actualEndTime: string | null;
+  discardedAt?: string | null;
+  discardedBy?: number | null;
+  discardReason?: string | null;
   defaultBreakMinutes: number;
   defaultHourlyRate: number;
   foremanHourlyRate?: number;
   pauseState?: PauseState;
   createdBy: number;
+}
+
+export interface CloseShiftRequest {
+  saveShortShift?: boolean;
 }
 
 export interface ShiftAttendance {
@@ -129,6 +148,15 @@ export interface ShiftCloseResponse {
   id: number;
   status: ShiftStatus;
   actualEndTime: string;
+}
+
+export interface ShiftDiscardResponse {
+  id: number;
+  status: ShiftStatus;
+  actualEndTime: string;
+  discardedAt?: string | null;
+  discardedBy?: number | null;
+  discardReason?: string | null;
 }
 
 export interface ShiftPauseResponse {

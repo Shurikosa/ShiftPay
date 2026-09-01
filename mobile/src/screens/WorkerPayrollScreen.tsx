@@ -24,7 +24,6 @@ import type {
 import {
   formatDateTime,
   formatMinutes,
-  formatMoney,
   formatOptionalLocation,
   formatRate,
   formatWholeMoney
@@ -360,16 +359,12 @@ export function WorkerPayrollScreen({ navigation }: WorkerPayrollScreenProps) {
                         value={formatMinutes(attendance.rawPayableMinutes)}
                       />
                       <DetailRow
-                        label="Rounded payable time"
-                        value={formatMinutes(attendance.payoutRoundedMinutes)}
+                        label="Payable end"
+                        value={formatDateTime(attendance.actualEndTime)}
                       />
                       <DetailRow label="Hourly rate" value={formatRate(attendance.hourlyRate)} />
                       <DetailRow
-                        label="Exact calculated amount"
-                        value={formatMoney(attendance.calculatedSalary)}
-                      />
-                      <DetailRow
-                        label="Whole payout amount"
+                        label="Final payout amount"
                         value={formatWholeMoney(attendance.payoutAmount)}
                       />
                     </View>
@@ -394,15 +389,7 @@ export function WorkerPayrollScreen({ navigation }: WorkerPayrollScreenProps) {
                 value={formatMinutes(preview.rawPayableMinutes)}
               />
               <DetailRow
-                label="Rounded payable time"
-                value={formatMinutes(preview.payoutRoundedMinutes)}
-              />
-              <DetailRow
-                label="Exact calculated amount"
-                value={formatMoney(preview.exactCalculatedAmount)}
-              />
-              <DetailRow
-                label="Whole payout amount"
+                label="Final payout amount"
                 value={formatWholeMoney(preview.payoutAmount)}
               />
             </View>
