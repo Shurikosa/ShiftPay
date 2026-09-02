@@ -129,42 +129,82 @@ Mobile tasks:
 
 ## Milestone 6.2: Configurable Pay Rules / Premium Pay
 
-Backend tasks:
+Phase dependencies:
+
+- Phase 1 must finish and pass review before Phase 2A starts.
+- Phase 2A must finish and pass review before Phase 2B starts.
+- Phase 2B must finish and pass review before Phase 2C starts.
+- Phase 2C backend work must finish and pass review before Phase 2D starts.
+- Backend/mobile agents must not redefine business rules. If a phase exposes a spec gap, report "docs change required".
+
+Phase 1 - Pay policy configuration foundation:
 
 - [ ] Add Company.timeZone with IANA timezone validation and configured backend timezone default for existing companies
+- [ ] Add default/current PayPolicy initialization for every company after creation and migration
 - [ ] Add PayPolicy/PayPolicyVersion and PayPolicyRule migrations/entities
 - [ ] Store PayPolicy as immutable company-owned versions; updating policy creates a new version and does not mutate old versions
 - [ ] Add active/default policy initialization with weekStartsOn MONDAY, stackingStrategy ADD, no default premium percentages, and migration/onboarding backfill for companies missing a current policy
+- [ ] Add PayPolicy rule persistence
+- [ ] Add PayPolicy validation for rule condition configs, premiumPercent 0.0000..1000.0000 with max scale 4, time ranges, overtime thresholds, weekdays, and manual holidays
 - [ ] Implement `GET /api/v1/me/pay-policy`
 - [ ] Implement `PUT /api/v1/me/pay-policy`
 - [ ] Implement `GET /api/v1/me/pay-policy/versions` for audit if included in the backend scope
-- [ ] Add policy validation for rule condition configs, premiumPercent 0.0000..1000.0000 with max scale 4, time ranges, overtime thresholds, weekdays, and manual holidays
-- [ ] Freeze current PayPolicy version on ShiftSession at shift start and return PAY_POLICY_REQUIRED if the current policy invariant is broken
-- [ ] Add PayCalculation and PaySegment persistence/snapshot model
-- [ ] Build segmentation engine for payable interval start/end, company timezone day/week boundaries, time-of-day ranges, day-of-week, holiday, overtime thresholds, and pause/break-adjusted boundaries
-- [ ] Implement TIME_OF_DAY, DAILY_OVERTIME, WEEKLY_OVERTIME, DAY_OF_WEEK, and HOLIDAY rule evaluation
+- [ ] Freeze current PayPolicyVersion id on ShiftSession at shift start and return PAY_POLICY_REQUIRED if the current policy invariant is broken
+- [ ] Do not integrate premium calculation into closeShift in Phase 1
+- [ ] Do not change calculatedSalary or payout behavior in Phase 1
+- [ ] Update OpenAPI/Swagger docs for pay policy endpoints after implementation
+
+Phase 2A - Premium calculation foundation, no production salary change:
+
+- [ ] Add internal premium calculation service
+- [ ] Add explainable PayCalculation/PaySegment result objects without production persistence
+- [ ] Implement TIME_OF_DAY rule evaluation
+- [ ] Implement DAY_OF_WEEK rule evaluation
+- [ ] Implement HOLIDAY rule evaluation
 - [ ] Implement ADD and HIGHEST_ONLY stacking strategies through PayPolicy.stackingStrategy
-- [ ] Integrate premium calculation into close salary calculation for approved worker attendance only
-- [ ] Keep foreman premium pay deferred; foreman salary remains separate and base-rate only
-- [ ] Implement daily/weekly overtime context across relevant approved payable intervals for the same worker/company and policy timezone period
+- [ ] Build segmentation for payable interval start/end, company timezone day boundaries, midnight, TIME_OF_DAY boundaries, DAY_OF_WEEK boundaries, HOLIDAY boundaries, and DST-safe real instants/durations
+- [ ] Add unit tests for acceptance scenarios A, B, C, F, G, and H from SPEC/API
+- [ ] Add unit tests for holiday and day-of-week rule evaluation
+- [ ] Do not integrate the premium calculation service with closeShift in Phase 2A
+- [ ] Do not change calculatedSalary or payout behavior in Phase 2A
+
+Phase 2B - Overtime calculation context:
+
+- [ ] Implement DAILY_OVERTIME rule evaluation
+- [ ] Implement WEEKLY_OVERTIME rule evaluation
+- [ ] Add previous finalized payable intervals context for the same worker/company and policy timezone period
 - [ ] Use frozen policy version plus previous finalized payable minutes for MVP overtime context when closing a shift
+- [ ] Implement deterministic chronological overtime allocation by company/policy timezone payable interval order
+- [ ] Tie-break chronological allocation by shift actualStartTime, then attendance/payableStartTime, then stable database id
 - [ ] Document and test MVP chronological-close limitation for overtime allocation; teams should close shifts chronologically until batch recalculation exists
+- [ ] Add tests for acceptance scenarios D and E from SPEC/API
+- [ ] Add tests for weekly overtime boundary behavior
+- [ ] Do not integrate overtime premium calculation into production closeShift in Phase 2B unless the phase is explicitly promoted to Phase 2C
+- [ ] Do not change calculatedSalary or payout behavior in Phase 2B unless the phase is explicitly promoted to Phase 2C
+
+Phase 2C - Production salary integration and persisted breakdown:
+
+- [ ] Add PayCalculation and PaySegment persistence/snapshot model
+- [ ] Integrate premium calculation into closeShift using the frozen PayPolicyVersion
+- [ ] Make worker calculatedSalary the premium-included worker total for approved attendance
+- [ ] Persist calculation breakdown/snapshot data needed to explain historical calculations after policy changes
+- [ ] Keep foreman premium pay deferred; foreman salary remains separate and base-rate only
 - [ ] Ensure CANCELLED/DISCARDED shifts remain non-payable and excluded from premium/payroll calculations
 - [ ] Ensure short saved CLOSED shifts can persist zero payable, premium, and total amounts
 - [ ] Expose worker pay breakdown in shift summary for owner FOREMAN
 - [ ] Expose own read-only pay breakdown in worker history/details after close
-- [ ] Optionally expose premium totals/breakdown in payout/payable detailed DTOs while keeping cards simple in mobile
+- [ ] Expose premium totals/breakdown in payout/payable detailed DTOs according to API docs while keeping mobile cards simple
+- [ ] Ensure payout requests use stored premium-included salary and backend-owned payout fields
+- [ ] Add regression tests for static breaks, dynamic pauses, late join payableStartTime, discard, cancellation, and privacy
 - [ ] Add tests for historical policy snapshot/version immutability
-- [ ] Add tests for DST and company timezone day/week boundaries
-- [ ] Add tests for daily and weekly overtime across multiple sessions
-- [ ] Add future hardening task for batch recalculation/reopening of affected closed pay calculations when out-of-order shift closure would change overtime allocation
-- [ ] Add acceptance scenario tests A-I from SPEC/API
-- [ ] Update OpenAPI/Swagger docs for pay policy and pay breakdown endpoints after implementation
+- [ ] Add acceptance scenario tests A-I from SPEC/API against production close salary behavior
+- [ ] Update OpenAPI/Swagger docs for pay breakdown DTOs after implementation
 
-Mobile tasks:
+Phase 2D - Mobile pay rules and breakdown UI:
 
 - [ ] Add pay policy API client methods and TypeScript DTOs
 - [ ] Add Foreman Pay Rules settings screen
+- [ ] Add policy API integration for load/save/version display
 - [ ] Add stacking strategy segmented control for ADD/HIGHEST_ONLY
 - [ ] Add enable/disable toggles and percentage inputs for premium rules
 - [ ] Add TIME_OF_DAY start/end inputs
@@ -175,7 +215,11 @@ Mobile tasks:
 - [ ] Display read-only worker pay breakdown after close for own attendance
 - [ ] Display foreman-managed worker premium breakdown in summary/detail views
 - [ ] Keep payroll cards limited to raw payable time, final payout amount, status, and selected days/items
-- [ ] Ensure mobile does not calculate premium pay, overtime, effective rates, rule matches, or pay breakdown totals
+- [ ] Ensure mobile does not calculate premium pay, overtime, effective rates, rule matches, payroll totals, or pay breakdown totals
+
+Future hardening:
+
+- [ ] Add batch recalculation/reopening of affected closed pay calculations when out-of-order shift closure would change overtime allocation
 
 ## Milestone 6.5: Backend API Contract Stabilization
 
