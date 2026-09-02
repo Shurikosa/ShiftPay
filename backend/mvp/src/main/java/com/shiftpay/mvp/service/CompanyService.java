@@ -34,6 +34,8 @@ public class CompanyService {
 	private static final int JOIN_CODE_MAX_ATTEMPTS = 20;
 
 	private final CompanyRepository companyRepository;
+	private final CompanyTimeZoneService companyTimeZoneService;
+	private final PayPolicyService payPolicyService;
 	private final UserRepository userRepository;
 	private final SecureRandom secureRandom;
 
@@ -41,10 +43,19 @@ public class CompanyService {
 	 * Creates the service with repositories and secure join code generation.
 	 *
 	 * @param companyRepository company repository
+	 * @param companyTimeZoneService timezone resolver
+	 * @param payPolicyService pay policy service used for default policy creation
 	 * @param userRepository user repository used for company assignment
 	 */
-	public CompanyService(CompanyRepository companyRepository, UserRepository userRepository) {
+	public CompanyService(
+			CompanyRepository companyRepository,
+			CompanyTimeZoneService companyTimeZoneService,
+			PayPolicyService payPolicyService,
+			UserRepository userRepository
+	) {
 		this.companyRepository = companyRepository;
+		this.companyTimeZoneService = companyTimeZoneService;
+		this.payPolicyService = payPolicyService;
 		this.userRepository = userRepository;
 		this.secureRandom = new SecureRandom();
 	}
@@ -74,9 +85,11 @@ public class CompanyService {
 		Company company = new Company();
 		company.setName(request.name().trim());
 		company.setJoinCode(generateUniqueJoinCode());
+		company.setTimeZone(companyTimeZoneService.resolveForCreate(request.timeZone()));
 
 		try {
 			Company savedCompany = companyRepository.saveAndFlush(company);
+			payPolicyService.initializeDefaultPolicy(savedCompany, foreman);
 			foreman.setCompany(savedCompany);
 			userRepository.save(foreman);
 			return CreateCompanyResponse.from(savedCompany);

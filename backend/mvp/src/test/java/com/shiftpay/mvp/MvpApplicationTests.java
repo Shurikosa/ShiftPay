@@ -60,13 +60,18 @@ class MvpApplicationTests {
 		assertThat(countRows("shift_pause_intervals")).isNotNegative();
 		assertThat(countRows("payout_requests")).isNotNegative();
 		assertThat(countRows("payout_request_items")).isNotNegative();
+		assertThat(countRows("pay_policies")).isNotNegative();
+		assertThat(countRows("pay_policy_versions")).isNotNegative();
+		assertThat(countRows("pay_policy_rules")).isNotNegative();
 		assertThat(countColumn("companies", "join_code")).isEqualTo(1);
+		assertThat(countColumn("companies", "time_zone")).isEqualTo(1);
 		assertThat(countColumn("users", "company_id")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "default_hourly_rate")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "foreman_hourly_rate")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "foreman_worked_minutes")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "foreman_pause_minutes")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "foreman_calculated_salary")).isEqualTo(1);
+		assertThat(countColumn("shift_sessions", "pay_policy_version_id")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "discarded_at")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "discarded_by")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "discard_reason")).isEqualTo(1);
@@ -76,7 +81,7 @@ class MvpApplicationTests {
 		assertThat(countColumn("shift_attendance", "paid_at")).isEqualTo(1);
 		assertThat(countColumn("payout_requests", "manager_foreman_id")).isEqualTo(1);
 		assertThat(countColumn("payout_request_items", "rounded_item_amount_exact")).isEqualTo(1);
-		assertThat(latestFlywayVersion()).isEqualTo("11");
+		assertThat(latestFlywayVersion()).isEqualTo("12");
 	}
 
 	/**

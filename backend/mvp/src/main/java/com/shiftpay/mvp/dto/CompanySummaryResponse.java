@@ -9,12 +9,14 @@ import com.shiftpay.mvp.entity.Company;
  * @param id company id
  * @param name company display name
  * @param joinCode shareable company join code, included only where allowed
+ * @param timeZone company IANA timezone id
  */
 public record CompanySummaryResponse(
 		Long id,
 		String name,
 		@JsonInclude(JsonInclude.Include.NON_NULL)
-		String joinCode
+		String joinCode,
+		String timeZone
 ) {
 
 	/**
@@ -31,7 +33,8 @@ public record CompanySummaryResponse(
 		return new CompanySummaryResponse(
 				company.getId(),
 				company.getName(),
-				includeJoinCode ? company.getJoinCode() : null
+				includeJoinCode ? company.getJoinCode() : null,
+				company.getTimeZone()
 		);
 	}
 }

@@ -83,7 +83,8 @@ class CompanyControllerTests {
 				.andExpect(jsonPath("$.id").isNumber())
 				.andExpect(jsonPath("$.name").value("Acme Construction"))
 				.andExpect(jsonPath("$.joinCode").value(matchesPattern("[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}")))
-				.andExpect(jsonPath("$.*", hasSize(3)))
+				.andExpect(jsonPath("$.timeZone").value("Europe/Berlin"))
+				.andExpect(jsonPath("$.*", hasSize(4)))
 				.andReturn();
 
 		String joinCode = extractJoinCode(result);
@@ -91,6 +92,42 @@ class CompanyControllerTests {
 		assertThat(foreman.getCompany()).isNotNull();
 		assertThat(foreman.getCompany().getName()).isEqualTo("Acme Construction");
 		assertThat(foreman.getCompany().getJoinCode()).isEqualTo(joinCode);
+	}
+
+	/**
+	 * Accepts explicit IANA timezone ids and persists them as the company timezone.
+	 */
+	@Test
+	void foremanCreatesCompanyWithValidIanaTimezone() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		createCompany(foremanToken, "Acme Construction", "America/New_York")
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.timeZone").value("America/New_York"));
+
+		Company company = companyRepository.findAll().getFirst();
+		assertThat(company.getTimeZone()).isEqualTo("America/New_York");
+	}
+
+	/**
+	 * Rejects fixed-offset and GMT-style ids that Java can parse but are not IANA zone ids.
+	 */
+	@Test
+	void foremanCompanyTimezoneRejectsNonIanaZoneIds() throws Exception {
+		String offsetForemanToken = registerAndLogin("offset.foreman@example.com", "FOREMAN");
+		createCompany(offsetForemanToken, "Offset Company", "+02:00")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message").value("timeZone: must be a valid IANA timezone id"));
+
+		String zForemanToken = registerAndLogin("z.foreman@example.com", "FOREMAN");
+		createCompany(zForemanToken, "Z Company", "Z")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message").value("timeZone: must be a valid IANA timezone id"));
+
+		String gmtOffsetForemanToken = registerAndLogin("gmt.foreman@example.com", "FOREMAN");
+		createCompany(gmtOffsetForemanToken, "GMT Offset Company", "GMT+02:00")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message").value("timeZone: must be a valid IANA timezone id"));
 	}
 
 	/**
@@ -122,8 +159,9 @@ class CompanyControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.id").isNumber())
 				.andExpect(jsonPath("$.name").value("Acme Construction"))
+				.andExpect(jsonPath("$.timeZone").value("Europe/Berlin"))
 				.andExpect(jsonPath("$.joinCode").doesNotExist())
-				.andExpect(jsonPath("$.*", hasSize(2)));
+				.andExpect(jsonPath("$.*", hasSize(3)));
 
 		User worker = userRepository.findWithCompanyByEmail("worker@example.com").orElseThrow();
 		assertThat(worker.getCompany()).isNotNull();
@@ -183,7 +221,8 @@ class CompanyControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.company.id").isNumber())
 				.andExpect(jsonPath("$.company.name").value("Acme Construction"))
-				.andExpect(jsonPath("$.company.joinCode").value(joinCode));
+				.andExpect(jsonPath("$.company.joinCode").value(joinCode))
+				.andExpect(jsonPath("$.company.timeZone").value("Europe/Berlin"));
 
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
 		joinCompany(workerToken, joinCode).andExpect(status().isOk());
@@ -192,6 +231,7 @@ class CompanyControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.company.id").isNumber())
 				.andExpect(jsonPath("$.company.name").value("Acme Construction"))
+				.andExpect(jsonPath("$.company.timeZone").value("Europe/Berlin"))
 				.andExpect(jsonPath("$.company.joinCode").doesNotExist());
 	}
 
@@ -282,14 +322,34 @@ class CompanyControllerTests {
 			String accessToken,
 			String companyName
 	) throws Exception {
+		return createCompany(accessToken, companyName, null);
+	}
+
+	/**
+	 * Sends the create company request with an optional timezone.
+	 *
+	 * @param accessToken JWT for the caller
+	 * @param companyName company name
+	 * @param timeZone optional timezone id
+	 * @return MockMvc result actions
+	 */
+	private org.springframework.test.web.servlet.ResultActions createCompany(
+			String accessToken,
+			String companyName,
+			String timeZone
+	) throws Exception {
+		String timezoneJson = timeZone == null ? "" : """
+				,
+						  "timeZone": "%s"
+				""".formatted(timeZone);
 		return mockMvc.perform(post(CREATE_COMPANY_URL)
 				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
 						{
-						  "name": "%s"
+						  "name": "%s"%s
 						}
-						""".formatted(companyName)));
+						""".formatted(companyName, timezoneJson)));
 	}
 
 	/**

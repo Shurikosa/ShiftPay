@@ -5,10 +5,14 @@ import com.shiftpay.mvp.dto.PayoutAttendanceResponse;
 import com.shiftpay.mvp.dto.PayoutRequestPreviewResponse;
 import com.shiftpay.mvp.dto.PayoutRequestResponse;
 import com.shiftpay.mvp.dto.PayoutSelectionRequest;
+import com.shiftpay.mvp.dto.PayPolicyResponse;
+import com.shiftpay.mvp.dto.PayPolicyUpdateRequest;
+import com.shiftpay.mvp.dto.PayPolicyVersionSummaryResponse;
 import com.shiftpay.mvp.dto.ShiftResponse;
 import com.shiftpay.mvp.entity.PayoutRequestStatus;
 import com.shiftpay.mvp.security.AuthenticatedUserPrincipal;
 import com.shiftpay.mvp.service.AttendanceService;
+import com.shiftpay.mvp.service.PayPolicyService;
 import com.shiftpay.mvp.service.PayoutRequestService;
 import com.shiftpay.mvp.service.ShiftSessionService;
 import jakarta.validation.Valid;
@@ -17,6 +21,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -37,6 +42,7 @@ import java.util.List;
 public class MeController {
 
 	private final AttendanceService attendanceService;
+	private final PayPolicyService payPolicyService;
 	private final PayoutRequestService payoutRequestService;
 	private final ShiftSessionService shiftSessionService;
 
@@ -44,15 +50,18 @@ public class MeController {
 	 * Creates the controller with services used for personal history and managed shift lookup.
 	 *
 	 * @param attendanceService service that reads current-user attendance history
+	 * @param payPolicyService service that owns pay policy management
 	 * @param payoutRequestService service that owns payroll request workflows
 	 * @param shiftSessionService service that reads shifts created by the current user
 	 */
 	public MeController(
 			AttendanceService attendanceService,
+			PayPolicyService payPolicyService,
 			PayoutRequestService payoutRequestService,
 			ShiftSessionService shiftSessionService
 	) {
 		this.attendanceService = attendanceService;
+		this.payPolicyService = payPolicyService;
 		this.payoutRequestService = payoutRequestService;
 		this.shiftSessionService = shiftSessionService;
 	}
@@ -85,6 +94,47 @@ public class MeController {
 			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
 	) {
 		return shiftSessionService.getMyManagedShifts(principal);
+	}
+
+	/**
+	 * Handles {@code GET /api/v1/me/pay-policy}.
+	 *
+	 * @param principal authenticated foreman principal
+	 * @return current company pay policy version
+	 */
+	@GetMapping("/pay-policy")
+	public PayPolicyResponse getMyPayPolicy(
+			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
+	) {
+		return payPolicyService.getMyPayPolicy(principal);
+	}
+
+	/**
+	 * Handles {@code PUT /api/v1/me/pay-policy}.
+	 *
+	 * @param request replacement policy request
+	 * @param principal authenticated foreman principal
+	 * @return newly current policy version
+	 */
+	@PutMapping("/pay-policy")
+	public PayPolicyResponse updateMyPayPolicy(
+			@Valid @RequestBody PayPolicyUpdateRequest request,
+			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
+	) {
+		return payPolicyService.updateMyPayPolicy(request, principal);
+	}
+
+	/**
+	 * Handles {@code GET /api/v1/me/pay-policy/versions}.
+	 *
+	 * @param principal authenticated foreman principal
+	 * @return current company policy versions, newest first
+	 */
+	@GetMapping("/pay-policy/versions")
+	public List<PayPolicyVersionSummaryResponse> getMyPayPolicyVersions(
+			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
+	) {
+		return payPolicyService.getMyPayPolicyVersions(principal);
 	}
 
 	/**

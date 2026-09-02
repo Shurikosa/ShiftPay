@@ -13,6 +13,8 @@ spring:
     locations: classpath:db/migration
     user: shiftpay
     password: shiftpay
+    placeholders:
+      default_timezone: ${shiftpay.default-time-zone}
 
   jpa:
     database: POSTGRESQL
@@ -30,3 +32,6 @@ security:
   jwt:
     secret: ${JWT_SECRET:shiftpay-dev-secret-change-me}
     expiration-seconds: ${JWT_EXPIRATION_SECONDS:3600}
+
+shiftpay:
+  default-time-zone: ${SHIFTPAY_DEFAULT_TIME_ZONE:Europe/Berlin}

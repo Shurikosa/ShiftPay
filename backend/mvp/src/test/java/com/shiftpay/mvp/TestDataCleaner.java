@@ -28,6 +28,10 @@ public final class TestDataCleaner {
 		jdbcTemplate.update("delete from shift_pause_intervals");
 		jdbcTemplate.update("delete from shift_attendance");
 		jdbcTemplate.update("delete from shift_sessions");
+		jdbcTemplate.update("delete from pay_policy_rules");
+		jdbcTemplate.update("update pay_policies set current_version_id = null");
+		jdbcTemplate.update("delete from pay_policy_versions");
+		jdbcTemplate.update("delete from pay_policies");
 		jdbcTemplate.update("delete from users");
 		jdbcTemplate.update("delete from companies");
 	}

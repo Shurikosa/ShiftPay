@@ -32,7 +32,8 @@ public class OpenApiConfig {
 						.version("v1")
 						.description("OpenAPI documentation for the ShiftPay backend MVP: authentication, "
 								+ "current user, shift sessions, shift cancellation/discard, active-shift pause "
-								+ "tracking, attendance, salary summary, personal shift history, and payroll requests."))
+								+ "tracking, attendance, salary summary, personal shift history, payroll requests, "
+								+ "and company pay policies."))
 				.components(new Components()
 						.addSecuritySchemes(BEARER_AUTH_SCHEME, new SecurityScheme()
 								.name(BEARER_AUTH_SCHEME)

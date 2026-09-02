@@ -130,10 +130,11 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.defaultBreakMinutes").value(60))
 				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25))
 				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
+				.andExpect(jsonPath("$.payPolicyVersionId").value((Object) null))
 				.andExpect(jsonPath("$.createdBy").isNumber())
 				.andExpect(jsonPath("$.plannedStartTime").doesNotExist())
 				.andExpect(jsonPath("$.plannedEndTime").doesNotExist())
-				.andExpect(jsonPath("$.*", hasSize(13)));
+				.andExpect(jsonPath("$.*", hasSize(14)));
 
 		assertThat(shiftSessionRepository.count()).isEqualTo(1);
 		ShiftSession createdShift = shiftSessionRepository.findAll().getFirst();
@@ -331,12 +332,13 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.defaultBreakMinutes").value(60))
 				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25))
 				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
+				.andExpect(jsonPath("$.payPolicyVersionId").value((Object) null))
 				.andExpect(jsonPath("$.pauseState.allPaused").value(false))
 				.andExpect(jsonPath("$.pauseState.personallyPaused").value(false))
 				.andExpect(jsonPath("$.createdBy").isNumber())
 				.andExpect(jsonPath("$.plannedStartTime").doesNotExist())
 				.andExpect(jsonPath("$.plannedEndTime").doesNotExist())
-				.andExpect(jsonPath("$.*", hasSize(17)))
+				.andExpect(jsonPath("$.*", hasSize(18)))
 				.andExpect(jsonPath("$.company").doesNotExist())
 				.andExpect(jsonPath("$.createdAt").doesNotExist())
 				.andExpect(jsonPath("$.updatedAt").doesNotExist());
@@ -380,7 +382,8 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.discardedAt").value(nullValue()))
 				.andExpect(jsonPath("$.discardedBy").value(nullValue()))
 				.andExpect(jsonPath("$.discardReason").value(nullValue()))
-				.andExpect(jsonPath("$.*", hasSize(16)));
+				.andExpect(jsonPath("$.payPolicyVersionId").value((Object) null))
+				.andExpect(jsonPath("$.*", hasSize(17)));
 	}
 
 	/**
@@ -458,7 +461,8 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.id").value(shiftId))
 				.andExpect(jsonPath("$.status").value("ACTIVE"))
 				.andExpect(jsonPath("$.actualStartTime").isString())
-				.andExpect(jsonPath("$.*", hasSize(3)));
+				.andExpect(jsonPath("$.payPolicyVersionId").isNumber())
+				.andExpect(jsonPath("$.*", hasSize(4)));
 	}
 
 	/**
@@ -615,8 +619,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.discardedBy").value(nullValue()))
 				.andExpect(jsonPath("$.discardReason").value(nullValue()))
 				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
+				.andExpect(jsonPath("$.payPolicyVersionId").value((Object) null))
 				.andExpect(jsonPath("$.pauseState.allPaused").value(false))
-				.andExpect(jsonPath("$.*", hasSize(17)));
+				.andExpect(jsonPath("$.*", hasSize(18)));
 
 		ShiftSession persistedShift = shiftSessionRepository.findById(shiftId).orElseThrow();
 		assertThat(persistedShift.getStatus()).isEqualTo(ShiftStatus.CANCELLED);
@@ -807,7 +812,8 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.id").value(shiftId))
 				.andExpect(jsonPath("$.status").value("CLOSED"))
 				.andExpect(jsonPath("$.actualEndTime").isString())
-				.andExpect(jsonPath("$.*", hasSize(3)));
+				.andExpect(jsonPath("$.payPolicyVersionId").isNumber())
+				.andExpect(jsonPath("$.*", hasSize(4)));
 	}
 
 	/**

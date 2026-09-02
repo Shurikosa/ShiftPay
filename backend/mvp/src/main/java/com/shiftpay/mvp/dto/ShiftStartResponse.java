@@ -11,11 +11,13 @@ import java.time.OffsetDateTime;
  * @param id shift session id
  * @param status resulting shift status, normally {@code ACTIVE}
  * @param actualStartTime UTC timestamp recorded by the backend when the shift started
+ * @param payPolicyVersionId frozen pay policy version id used for worker premium pay
  */
 public record ShiftStartResponse(
 		Long id,
 		ShiftStatus status,
-		OffsetDateTime actualStartTime
+		OffsetDateTime actualStartTime,
+		Long payPolicyVersionId
 ) {
 
 	/**
@@ -28,7 +30,8 @@ public record ShiftStartResponse(
 		return new ShiftStartResponse(
 				shiftSession.getId(),
 				shiftSession.getStatus(),
-				shiftSession.getActualStartTime()
+				shiftSession.getActualStartTime(),
+				shiftSession.getPayPolicyVersion() == null ? null : shiftSession.getPayPolicyVersion().getId()
 		);
 	}
 }

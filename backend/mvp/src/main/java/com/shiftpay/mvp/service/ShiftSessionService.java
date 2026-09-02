@@ -12,6 +12,7 @@ import com.shiftpay.mvp.dto.WorkerSummaryResponse;
 import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.Company;
 import com.shiftpay.mvp.entity.PaymentStatus;
+import com.shiftpay.mvp.entity.PayPolicyVersion;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftAttendance;
 import com.shiftpay.mvp.entity.ShiftPauseInterval;
@@ -70,6 +71,7 @@ public class ShiftSessionService {
 	private final UserRepository userRepository;
 	private final PauseCalculationService pauseCalculationService;
 	private final PauseViewFactory pauseViewFactory;
+	private final PayPolicyService payPolicyService;
 	private final SalaryCalculationService salaryCalculationService;
 	private final SecureRandom secureRandom;
 
@@ -82,6 +84,7 @@ public class ShiftSessionService {
 	 * @param userRepository user repository used to resolve the authenticated creator
 	 * @param pauseCalculationService service used to calculate union pause minutes
 	 * @param pauseViewFactory factory used to build mobile pause state fragments
+	 * @param payPolicyService service used to freeze current policy at shift start
 	 * @param salaryCalculationService salary calculation service used on close
 	 */
 	public ShiftSessionService(
@@ -91,6 +94,7 @@ public class ShiftSessionService {
 			UserRepository userRepository,
 			PauseCalculationService pauseCalculationService,
 			PauseViewFactory pauseViewFactory,
+			PayPolicyService payPolicyService,
 			SalaryCalculationService salaryCalculationService
 	) {
 		this.shiftAttendanceRepository = shiftAttendanceRepository;
@@ -99,6 +103,7 @@ public class ShiftSessionService {
 		this.userRepository = userRepository;
 		this.pauseCalculationService = pauseCalculationService;
 		this.pauseViewFactory = pauseViewFactory;
+		this.payPolicyService = payPolicyService;
 		this.salaryCalculationService = salaryCalculationService;
 		this.secureRandom = new SecureRandom();
 	}
@@ -226,6 +231,8 @@ public class ShiftSessionService {
 			throw new ShiftStateConflictException("Shift can only be started when status is OPEN");
 		}
 
+		PayPolicyVersion payPolicyVersion = payPolicyService.resolveCurrentPolicyForShiftStart(shiftSession.getCompany());
+		shiftSession.setPayPolicyVersion(payPolicyVersion);
 		shiftSession.setStatus(ShiftStatus.ACTIVE);
 		shiftSession.setActualStartTime(OffsetDateTime.now(ZoneOffset.UTC));
 		return ShiftStartResponse.from(shiftSession);

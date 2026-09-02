@@ -8,11 +8,13 @@ import com.shiftpay.mvp.entity.Company;
  * @param id company id
  * @param name company display name
  * @param joinCode generated code workers use to join the company
+ * @param timeZone company IANA timezone id
  */
 public record CreateCompanyResponse(
 		Long id,
 		String name,
-		String joinCode
+		String joinCode,
+		String timeZone
 ) {
 
 	/**
@@ -25,7 +27,8 @@ public record CreateCompanyResponse(
 		return new CreateCompanyResponse(
 				company.getId(),
 				company.getName(),
-				company.getJoinCode()
+				company.getJoinCode(),
+				company.getTimeZone()
 		);
 	}
 }

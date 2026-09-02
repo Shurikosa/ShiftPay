@@ -37,7 +37,10 @@ class OpenApiControllerTests {
 				.andExpect(jsonPath("$.info.version").value("v1"))
 				.andExpect(jsonPath("$.info.description").value("OpenAPI documentation for the ShiftPay backend MVP: "
 						+ "authentication, current user, shift sessions, shift cancellation/discard, active-shift pause "
-						+ "tracking, attendance, salary summary, personal shift history, and payroll requests."))
+						+ "tracking, attendance, salary summary, personal shift history, payroll requests, and company pay policies."))
+				.andExpect(jsonPath("$.paths['/api/v1/me/pay-policy'].get").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/me/pay-policy'].put").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/me/pay-policy/versions'].get").exists())
 				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.type").value("http"))
 				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
 				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.bearerFormat").value("JWT"))

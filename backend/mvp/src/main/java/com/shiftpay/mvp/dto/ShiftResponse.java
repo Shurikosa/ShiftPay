@@ -26,6 +26,7 @@ import java.time.OffsetDateTime;
  * @param defaultBreakMinutes default break minutes copied to attendance
  * @param defaultHourlyRate default hourly rate copied to attendance
  * @param foremanHourlyRate private owner-foreman rate, omitted for admins
+ * @param payPolicyVersionId frozen pay policy version id, null until start for new shifts
  * @param pauseState pause state for the current user's shift-detail perspective
  * @param createdBy user id of the creator
  */
@@ -46,6 +47,7 @@ public record ShiftResponse(
 		BigDecimal defaultHourlyRate,
 		@JsonInclude(JsonInclude.Include.NON_NULL)
 		BigDecimal foremanHourlyRate,
+		Long payPolicyVersionId,
 		PauseStateResponse pauseState,
 		Long createdBy
 ) {
@@ -90,6 +92,7 @@ public record ShiftResponse(
 				shiftSession.getDefaultBreakMinutes(),
 				shiftSession.getDefaultHourlyRate(),
 				includePrivateForemanFields ? shiftSession.getForemanHourlyRate() : null,
+				shiftSession.getPayPolicyVersion() == null ? null : shiftSession.getPayPolicyVersion().getId(),
 				pauseState,
 				shiftSession.getCreatedBy().getId()
 		);

@@ -11,11 +11,13 @@ import java.time.OffsetDateTime;
  * @param id shift session id
  * @param status resulting shift status, normally {@code CLOSED}
  * @param actualEndTime UTC timestamp recorded by the backend when the shift closed
+ * @param payPolicyVersionId frozen pay policy version id used for worker premium pay
  */
 public record ShiftCloseResponse(
 		Long id,
 		ShiftStatus status,
-		OffsetDateTime actualEndTime
+		OffsetDateTime actualEndTime,
+		Long payPolicyVersionId
 ) {
 
 	/**
@@ -28,7 +30,8 @@ public record ShiftCloseResponse(
 		return new ShiftCloseResponse(
 				shiftSession.getId(),
 				shiftSession.getStatus(),
-				shiftSession.getActualEndTime()
+				shiftSession.getActualEndTime(),
+				shiftSession.getPayPolicyVersion() == null ? null : shiftSession.getPayPolicyVersion().getId()
 		);
 	}
 }

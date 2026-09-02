@@ -2,9 +2,12 @@ package com.shiftpay.mvp.entity;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -14,28 +17,28 @@ import lombok.Setter;
 import java.time.Instant;
 
 /**
- * Company entity used to group users and shift sessions.
+ * Company-owned pay policy root.
+ *
+ * <p>The mutable pointer is {@code currentVersion}. Individual policy versions and rules are immutable snapshots.</p>
  */
 @Getter
 @Entity
-@Table(name = "companies")
-public class Company {
+@Table(name = "pay_policies")
+public class PayPolicy {
 
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	private Long id;
 
 	@Setter
-	@Column(nullable = false, length = 255)
-	private String name;
+	@OneToOne(fetch = FetchType.LAZY, optional = false)
+	@JoinColumn(name = "company_id", nullable = false)
+	private Company company;
 
 	@Setter
-	@Column(name = "join_code", nullable = false, unique = true, length = 32)
-	private String joinCode;
-
-	@Setter
-	@Column(name = "time_zone", nullable = false, length = 64)
-	private String timeZone;
+	@OneToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "current_version_id")
+	private PayPolicyVersion currentVersion;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;
@@ -44,7 +47,7 @@ public class Company {
 	private Instant updatedAt;
 
 	/**
-	 * Sets creation and update timestamps before the company is first persisted.
+	 * Sets creation and update timestamps before the policy root is first persisted.
 	 */
 	@PrePersist
 	void prePersist() {
@@ -54,7 +57,7 @@ public class Company {
 	}
 
 	/**
-	 * Refreshes the update timestamp before an existing company is stored.
+	 * Refreshes the update timestamp before storing current-version changes.
 	 */
 	@PreUpdate
 	void preUpdate() {

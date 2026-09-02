@@ -111,6 +111,11 @@ public class ShiftSession {
 	private BigDecimal foremanCalculatedSalary;
 
 	@Setter
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "pay_policy_version_id")
+	private PayPolicyVersion payPolicyVersion;
+
+	@Setter
 	@ManyToOne(fetch = FetchType.LAZY, optional = false)
 	@JoinColumn(name = "created_by", nullable = false)
 	private User createdBy;

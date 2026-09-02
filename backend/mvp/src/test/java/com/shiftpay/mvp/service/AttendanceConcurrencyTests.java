@@ -6,6 +6,9 @@ import com.shiftpay.mvp.dto.ShiftCloseRequest;
 import com.shiftpay.mvp.dto.JoinShiftRequest;
 import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.Company;
+import com.shiftpay.mvp.entity.PayPolicy;
+import com.shiftpay.mvp.entity.PayPolicyStackingStrategy;
+import com.shiftpay.mvp.entity.PayPolicyVersion;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftAttendance;
 import com.shiftpay.mvp.entity.ShiftSession;
@@ -14,6 +17,8 @@ import com.shiftpay.mvp.entity.User;
 import com.shiftpay.mvp.exception.AttendanceConflictException;
 import com.shiftpay.mvp.exception.ShiftStateConflictException;
 import com.shiftpay.mvp.repository.CompanyRepository;
+import com.shiftpay.mvp.repository.PayPolicyRepository;
+import com.shiftpay.mvp.repository.PayPolicyVersionRepository;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
@@ -27,6 +32,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
+import java.time.DayOfWeek;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -60,6 +66,12 @@ class AttendanceConcurrencyTests {
 
 	@Autowired
 	private CompanyRepository companyRepository;
+
+	@Autowired
+	private PayPolicyRepository payPolicyRepository;
+
+	@Autowired
+	private PayPolicyVersionRepository payPolicyVersionRepository;
 
 	@Autowired
 	private ShiftAttendanceRepository shiftAttendanceRepository;
@@ -322,6 +334,7 @@ class AttendanceConcurrencyTests {
 		Company company = new Company();
 		company.setName("Concurrent Company");
 		company.setJoinCode("LOCKCO");
+		company.setTimeZone("Europe/Berlin");
 		company = companyRepository.save(company);
 
 		User foreman = createUser("foreman@example.com", Role.FOREMAN);
@@ -329,6 +342,7 @@ class AttendanceConcurrencyTests {
 		foreman.setCompany(company);
 		worker.setCompany(company);
 		userRepository.saveAll(List.of(foreman, worker));
+		PayPolicyVersion policyVersion = createDefaultPayPolicy(company, foreman);
 
 		ShiftSession shift = new ShiftSession();
 		shift.setCompany(company);
@@ -341,6 +355,7 @@ class AttendanceConcurrencyTests {
 		shift.setCreatedBy(foreman);
 		if (shiftStatus == ShiftStatus.ACTIVE) {
 			shift.setActualStartTime(OffsetDateTime.now(ZoneOffset.UTC).minusHours(2));
+			shift.setPayPolicyVersion(policyVersion);
 		}
 		shift = shiftSessionRepository.save(shift);
 
@@ -354,6 +369,25 @@ class AttendanceConcurrencyTests {
 		attendance = shiftAttendanceRepository.save(attendance);
 
 		return new Scenario(shift, attendance, principal(foreman));
+	}
+
+	private PayPolicyVersion createDefaultPayPolicy(Company company, User foreman) {
+		PayPolicy policy = new PayPolicy();
+		policy.setCompany(company);
+		policy = payPolicyRepository.saveAndFlush(policy);
+
+		PayPolicyVersion version = new PayPolicyVersion();
+		version.setPayPolicy(policy);
+		version.setCompany(company);
+		version.setVersion(1);
+		version.setWeekStartsOn(DayOfWeek.MONDAY);
+		version.setStackingStrategy(PayPolicyStackingStrategy.ADD);
+		version.setCreatedBy(foreman);
+		version = payPolicyVersionRepository.saveAndFlush(version);
+
+		policy.setCurrentVersion(version);
+		payPolicyRepository.saveAndFlush(policy);
+		return version;
 	}
 
 	/**
