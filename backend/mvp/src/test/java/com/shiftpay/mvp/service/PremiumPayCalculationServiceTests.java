@@ -9,6 +9,7 @@ import com.shiftpay.mvp.entity.PayPolicyVersion;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -20,15 +21,19 @@ import java.time.ZonedDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Unit tests for the internal Phase 2A premium pay calculation foundation.
+ * Unit tests for the internal Phase 2A/2B premium pay calculation foundation.
  */
 class PremiumPayCalculationServiceTests {
 
 	private static final ZoneId BERLIN = ZoneId.of("Europe/Berlin");
 	private static final BigDecimal BASE_20 = new BigDecimal("20.00");
+	private static final BigDecimal BASE_36 = new BigDecimal("36.00");
 	private static final BigDecimal BASE_60 = new BigDecimal("60.00");
+	private static final long WORKER_ID = 10L;
+	private static final long COMPANY_ID = 20L;
 
 	private final PremiumPayCalculationService service = new PremiumPayCalculationService();
 
@@ -432,13 +437,13 @@ class PremiumPayCalculationServiceTests {
 	}
 
 	/**
-	 * Overtime rules are intentionally deferred in Phase 2A.
+	 * Overtime rules are evaluated in Phase 2B without production close integration.
 	 */
 	@Test
-	void overtimeRulesAreDeferredAndDoNotAffectPremiums() {
+	void overtimeRulesApplyInsideCalculationFoundation() {
 		PayPolicyVersion policy = policy(
 				PayPolicyStackingStrategy.ADD,
-				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "100.0000", 480),
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 480),
 				overtimeRule("Weekly overtime", PayPolicyRuleType.WEEKLY_OVERTIME, "200.0000", 2400)
 		);
 
@@ -448,12 +453,622 @@ class PremiumPayCalculationServiceTests {
 				localInstant(2026, 7, 6, 18, 0)
 		);
 
+		assertThat(result.segments()).hasSize(2);
+		assertThat(result.segments().get(0).payableMinutes()).isEqualTo(480);
+		assertThat(result.segments().get(0).appliedRules()).isEmpty();
+		assertThat(result.segments().get(1).payableMinutes()).isEqualTo(120);
+		assertThat(result.segments().get(1).appliedRules()).extracting(AppliedPremiumRule::type)
+				.containsExactly(PayPolicyRuleType.DAILY_OVERTIME);
+		assertMoney(result.totalBaseAmount(), "200.00000000");
+		assertMoney(result.totalPremiumAmount(), "20.00000000");
+		assertMoney(result.totalAmount(), "220.00000000");
+	}
+
+	/**
+	 * Scenario D: one 12h day applies daily overtime only after the first 8 elapsed hours.
+	 */
+	@Test
+	void dailyOvertimeScenarioDStartsAfterEightHours() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 480)
+		);
+		Instant start = localInstant(2026, 7, 6, 8, 0);
+		Instant end = localInstant(2026, 7, 6, 20, 0);
+
+		PremiumPayCalculationResult result = calculate(policy, start, end);
+
+		assertContiguousCoverage(result, start, end, "43200.000000000");
+		assertThat(result.segments()).hasSize(2);
+		assertSegment(result.segments().get(0), start, localInstant(2026, 7, 6, 16, 0), "28800.000000000");
+		assertThat(result.segments().get(0).appliedRules()).isEmpty();
+		assertSegment(result.segments().get(1), localInstant(2026, 7, 6, 16, 0), end, "14400.000000000");
+		assertThat(result.segments().get(1).appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Daily overtime");
+		assertMoney(result.totalBaseAmount(), "240.00000000");
+		assertMoney(result.totalPremiumAmount(), "40.00000000");
+		assertMoney(result.totalAmount(), "280.00000000");
+	}
+
+	/**
+	 * Scenario E: previous finalized payable context pushes the current interval into overtime.
+	 */
+	@Test
+	void dailyOvertimeScenarioEUsesPreviousFinalizedContext() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 480)
+		);
+		Instant previousStart = localInstant(2026, 7, 6, 8, 0);
+		Instant previousEnd = localInstant(2026, 7, 6, 12, 0);
+		Instant currentStart = localInstant(2026, 7, 6, 14, 0);
+		Instant currentEnd = localInstant(2026, 7, 6, 20, 0);
+
+		PremiumPayCalculationResult result = calculateWithContext(
+				policy,
+				currentStart,
+				currentEnd,
+				previous(previousStart, previousEnd)
+		);
+
+		assertContiguousCoverage(result, currentStart, currentEnd, "21600.000000000");
+		assertThat(result.segments()).hasSize(2);
+		assertSegment(result.segments().get(0), currentStart, localInstant(2026, 7, 6, 18, 0), "14400.000000000");
+		assertThat(result.segments().get(0).appliedRules()).isEmpty();
+		assertSegment(result.segments().get(1), localInstant(2026, 7, 6, 18, 0), currentEnd, "7200.000000000");
+		assertThat(result.segments().get(1).appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Daily overtime");
+		assertMoney(result.totalBaseAmount(), "120.00000000");
+		assertMoney(result.totalPremiumAmount(), "20.00000000");
+		assertMoney(result.totalAmount(), "140.00000000");
+	}
+
+	/**
+	 * Overtime context is scoped to the current worker/company when those ids are provided.
+	 */
+	@Test
+	void overtimeContextIgnoresDifferentWorkerAndCompanyIntervals() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 480)
+		);
+		Instant currentStart = localInstant(2026, 7, 6, 16, 0);
+		Instant currentEnd = localInstant(2026, 7, 6, 18, 0);
+
+		PremiumPayCalculationResult result = calculateWithContext(
+				policy,
+				currentStart,
+				currentEnd,
+				previousFor(WORKER_ID + 1, COMPANY_ID, localInstant(2026, 7, 6, 8, 0), currentStart),
+				previousFor(WORKER_ID, COMPANY_ID + 1, localInstant(2026, 7, 6, 8, 0), currentStart)
+		);
+
+		assertContiguousCoverage(result, currentStart, currentEnd, "7200.000000000");
 		assertThat(result.segments()).hasSize(1);
 		assertThat(result.segments().getFirst().appliedRules()).isEmpty();
-		assertThat(result.segments().getFirst().effectivePremiumPercent()).isEqualByComparingTo("0.0000");
-		assertMoney(result.totalBaseAmount(), "200.00000000");
+		assertMoney(result.totalBaseAmount(), "40.00000000");
 		assertMoney(result.totalPremiumAmount(), "0.00000000");
-		assertMoney(result.totalAmount(), "200.00000000");
+	}
+
+	/**
+	 * Weekly overtime uses previous finalized intervals from the same local policy week.
+	 */
+	@Test
+	void weeklyOvertimeUsesPreviousFinalizedContext() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Weekly overtime", PayPolicyRuleType.WEEKLY_OVERTIME, "50.0000", 2400)
+		);
+		Instant currentStart = localInstant(2026, 7, 10, 8, 0);
+		Instant currentEnd = localInstant(2026, 7, 10, 12, 0);
+
+		PremiumPayCalculationResult result = calculateWithContext(
+				policy,
+				currentStart,
+				currentEnd,
+				previous(localInstant(2026, 7, 6, 8, 0), localInstant(2026, 7, 6, 18, 0)),
+				previous(localInstant(2026, 7, 7, 8, 0), localInstant(2026, 7, 7, 18, 0)),
+				previous(localInstant(2026, 7, 8, 8, 0), localInstant(2026, 7, 8, 18, 0)),
+				previous(localInstant(2026, 7, 9, 8, 0), localInstant(2026, 7, 9, 18, 0))
+		);
+
+		assertContiguousCoverage(result, currentStart, currentEnd, "14400.000000000");
+		assertThat(result.segments()).hasSize(1);
+		assertThat(result.segments().getFirst().appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Weekly overtime");
+		assertMoney(result.totalBaseAmount(), "80.00000000");
+		assertMoney(result.totalPremiumAmount(), "40.00000000");
+		assertMoney(result.totalAmount(), "120.00000000");
+	}
+
+	/**
+	 * PayPolicy.weekStartsOn changes which previous intervals count toward weekly overtime.
+	 */
+	@Test
+	void weekStartsOnBoundaryControlsWeeklyOvertimePeriod() {
+		PayPolicyVersion mondayPolicy = policyWithWeekStart(
+				DayOfWeek.MONDAY,
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Weekly overtime", PayPolicyRuleType.WEEKLY_OVERTIME, "50.0000", 600)
+		);
+		PayPolicyVersion sundayPolicy = policyWithWeekStart(
+				DayOfWeek.SUNDAY,
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Weekly overtime", PayPolicyRuleType.WEEKLY_OVERTIME, "50.0000", 600)
+		);
+		Instant previousStart = localInstant(2026, 7, 5, 8, 0);
+		Instant previousEnd = localInstant(2026, 7, 5, 18, 0);
+		Instant currentStart = localInstant(2026, 7, 6, 8, 0);
+		Instant currentEnd = localInstant(2026, 7, 6, 10, 0);
+
+		PremiumPayCalculationResult mondayResult = calculateWithContext(
+				mondayPolicy,
+				currentStart,
+				currentEnd,
+				previous(previousStart, previousEnd)
+		);
+		PremiumPayCalculationResult sundayResult = calculateWithContext(
+				sundayPolicy,
+				currentStart,
+				currentEnd,
+				previous(previousStart, previousEnd)
+		);
+
+		assertThat(mondayResult.segments()).hasSize(1);
+		assertThat(mondayResult.segments().getFirst().appliedRules()).isEmpty();
+		assertMoney(mondayResult.totalPremiumAmount(), "0.00000000");
+		assertThat(sundayResult.segments()).hasSize(1);
+		assertThat(sundayResult.segments().getFirst().appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Weekly overtime");
+		assertMoney(sundayResult.totalPremiumAmount(), "20.00000000");
+	}
+
+	/**
+	 * Daily overtime resets at local midnight in the company timezone.
+	 */
+	@Test
+	void dailyOvertimeResetsAtLocalDayBoundary() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 480)
+		);
+		Instant start = localInstant(2026, 7, 6, 22, 0);
+		Instant end = localInstant(2026, 7, 7, 2, 0);
+
+		PremiumPayCalculationResult result = calculateWithContext(
+				policy,
+				start,
+				end,
+				previous(localInstant(2026, 7, 6, 8, 0), localInstant(2026, 7, 6, 16, 0))
+		);
+
+		assertContiguousCoverage(result, start, end, "14400.000000000");
+		assertThat(result.segments()).hasSize(2);
+		assertThat(result.segments().get(0).appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Daily overtime");
+		assertThat(result.segments().get(1).appliedRules()).isEmpty();
+		assertMoney(result.totalPremiumAmount(), "20.00000000");
+	}
+
+	/**
+	 * Weekly overtime resets at the configured local week boundary.
+	 */
+	@Test
+	void weeklyOvertimeResetsAtConfiguredWeekBoundary() {
+		PayPolicyVersion policy = policyWithWeekStart(
+				DayOfWeek.MONDAY,
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Weekly overtime", PayPolicyRuleType.WEEKLY_OVERTIME, "50.0000", 2400)
+		);
+		Instant start = localInstant(2026, 7, 5, 22, 0);
+		Instant end = localInstant(2026, 7, 6, 2, 0);
+
+		PremiumPayCalculationResult result = calculateWithContext(
+				policy,
+				start,
+				end,
+				previous(localInstant(2026, 6, 29, 8, 0), localInstant(2026, 6, 29, 18, 0)),
+				previous(localInstant(2026, 6, 30, 8, 0), localInstant(2026, 6, 30, 18, 0)),
+				previous(localInstant(2026, 7, 1, 8, 0), localInstant(2026, 7, 1, 18, 0)),
+				previous(localInstant(2026, 7, 2, 8, 0), localInstant(2026, 7, 2, 18, 0))
+		);
+
+		assertContiguousCoverage(result, start, end, "14400.000000000");
+		assertThat(result.segments()).hasSize(2);
+		assertThat(result.segments().get(0).appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Weekly overtime");
+		assertThat(result.segments().get(1).appliedRules()).isEmpty();
+		assertMoney(result.totalPremiumAmount(), "20.00000000");
+	}
+
+	/**
+	 * Overtime across midnight splits by local day before applying per-day thresholds.
+	 */
+	@Test
+	void dailyOvertimeAcrossMidnightUsesLocalDaySegments() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 120)
+		);
+		Instant start = localInstant(2026, 7, 6, 21, 0);
+		Instant end = localInstant(2026, 7, 7, 3, 0);
+
+		PremiumPayCalculationResult result = calculate(policy, start, end);
+
+		assertContiguousCoverage(result, start, end, "21600.000000000");
+		assertThat(result.segments()).hasSize(4);
+		assertThat(result.segments().get(0).appliedRules()).isEmpty();
+		assertThat(result.segments().get(1).appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Daily overtime");
+		assertThat(result.segments().get(2).appliedRules()).isEmpty();
+		assertThat(result.segments().get(3).appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Daily overtime");
+		assertMoney(result.totalPremiumAmount(), "20.00000000");
+	}
+
+	/**
+	 * ADD stacking sums daily overtime, night, and day-of-week percentages on the same segment.
+	 */
+	@Test
+	void dailyOvertimeNightAndDayOfWeekAddStacking() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 480),
+				timeOfDayRule("Night", "25.0000", LocalTime.of(22, 0), LocalTime.of(6, 0), true),
+				dayOfWeekRule("Sunday", "50.0000", List.of(DayOfWeek.SUNDAY), true)
+		);
+
+		PremiumPayCalculationResult result = calculate(
+				policy,
+				localInstant(2026, 7, 5, 14, 0),
+				localInstant(2026, 7, 5, 23, 0)
+		);
+
+		PremiumPaySegment stacked = result.segments().getLast();
+		assertThat(stacked.appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Daily overtime", "Night", "Sunday");
+		assertThat(stacked.effectivePremiumPercent()).isEqualByComparingTo("125.0000");
+		assertMoney(stacked.effectiveHourlyRate(), "45.00000000");
+		assertMoney(stacked.premiumAmount(), "25.00000000");
+	}
+
+	/**
+	 * HIGHEST_ONLY stacking keeps only the largest premium among overtime, night, and day-of-week rules.
+	 */
+	@Test
+	void dailyOvertimeNightAndDayOfWeekHighestOnlyStacking() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.HIGHEST_ONLY,
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 480),
+				timeOfDayRule("Night", "25.0000", LocalTime.of(22, 0), LocalTime.of(6, 0), true),
+				dayOfWeekRule("Sunday", "75.0000", List.of(DayOfWeek.SUNDAY), true)
+		);
+
+		PremiumPayCalculationResult result = calculate(
+				policy,
+				localInstant(2026, 7, 5, 14, 0),
+				localInstant(2026, 7, 5, 23, 0)
+		);
+
+		PremiumPaySegment stacked = result.segments().getLast();
+		assertThat(stacked.appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Sunday");
+		assertThat(stacked.effectivePremiumPercent()).isEqualByComparingTo("75.0000");
+		assertMoney(stacked.effectiveHourlyRate(), "35.00000000");
+		assertMoney(stacked.premiumAmount(), "15.00000000");
+	}
+
+	/**
+	 * Daily and weekly overtime are both applicable rules; stacking decides the effective premium.
+	 */
+	@Test
+	void dailyAndWeeklyOvertimeCanApplyToSameSegment() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 480),
+				overtimeRule("Weekly overtime", PayPolicyRuleType.WEEKLY_OVERTIME, "25.0000", 2400)
+		);
+		Instant start = localInstant(2026, 7, 10, 8, 0);
+		Instant end = localInstant(2026, 7, 10, 18, 0);
+
+		PremiumPayCalculationResult result = calculateWithContext(
+				policy,
+				start,
+				end,
+				previous(localInstant(2026, 7, 6, 8, 0), localInstant(2026, 7, 6, 18, 0)),
+				previous(localInstant(2026, 7, 7, 8, 0), localInstant(2026, 7, 7, 18, 0)),
+				previous(localInstant(2026, 7, 8, 8, 0), localInstant(2026, 7, 8, 18, 0)),
+				previous(localInstant(2026, 7, 9, 8, 0), localInstant(2026, 7, 9, 18, 0))
+		);
+
+		assertThat(result.segments()).hasSize(2);
+		assertThat(result.segments().get(0).appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Weekly overtime");
+		assertThat(result.segments().get(1).appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Daily overtime", "Weekly overtime");
+		assertThat(result.segments().get(1).effectivePremiumPercent()).isEqualByComparingTo("75.0000");
+		assertMoney(result.totalPremiumAmount(), "70.00000000");
+	}
+
+	/**
+	 * Disabled overtime rules are ignored even when threshold conditions match.
+	 */
+	@Test
+	void disabledOvertimeRulesAreIgnored() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Disabled daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 480, false)
+		);
+
+		PremiumPayCalculationResult result = calculate(
+				policy,
+				localInstant(2026, 7, 6, 8, 0),
+				localInstant(2026, 7, 6, 20, 0)
+		);
+
+		assertThat(result.segments()).hasSize(1);
+		assertThat(result.segments().getFirst().appliedRules()).isEmpty();
+		assertMoney(result.totalPremiumAmount(), "0.00000000");
+		assertMoney(result.totalAmount(), "240.00000000");
+	}
+
+	/**
+	 * Exact threshold boundary is regular before the threshold and overtime after it.
+	 */
+	@Test
+	void overtimeStartsExactlyAfterThresholdBoundary() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 480)
+		);
+		Instant start = localInstant(2026, 7, 6, 8, 0);
+		Instant threshold = localInstant(2026, 7, 6, 16, 0);
+		Instant end = localInstant(2026, 7, 6, 17, 0);
+
+		PremiumPayCalculationResult exactThreshold = calculate(policy, start, threshold);
+		PremiumPayCalculationResult afterThreshold = calculate(policy, start, end);
+
+		assertThat(exactThreshold.segments()).hasSize(1);
+		assertThat(exactThreshold.segments().getFirst().appliedRules()).isEmpty();
+		assertMoney(exactThreshold.totalPremiumAmount(), "0.00000000");
+		assertThat(afterThreshold.segments()).hasSize(2);
+		assertThat(afterThreshold.segments().get(1).start()).isEqualTo(threshold);
+		assertThat(afterThreshold.segments().get(1).appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Daily overtime");
+		assertMoney(afterThreshold.totalPremiumAmount(), "10.00000000");
+	}
+
+	/**
+	 * Sub-minute threshold crossing keeps both exact regular and overtime seconds.
+	 */
+	@Test
+	void subMinuteOvertimeThresholdDoesNotLoseSeconds() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 1)
+		);
+		Instant start = localInstant(2026, 7, 6, 8, 0, 30);
+		Instant end = localInstant(2026, 7, 6, 8, 1, 30);
+
+		PremiumPayCalculationResult result = calculate(policy, start, end, BASE_36);
+
+		assertContiguousCoverage(result, start, end, "60.000000000");
+		assertThat(result.segments()).hasSize(1);
+		assertExactDecimal(result.segments().getFirst().payableSeconds(), "60.000000000");
+		assertThat(result.segments().getFirst().appliedRules()).isEmpty();
+		assertMoney(result.totalBaseAmount(), "0.60000000");
+		assertMoney(result.totalPremiumAmount(), "0.00000000");
+
+		PremiumPayCalculationResult crossed = calculate(
+				policy,
+				start,
+				localInstant(2026, 7, 6, 8, 1, 31),
+				BASE_36
+		);
+
+		assertContiguousCoverage(crossed, start, localInstant(2026, 7, 6, 8, 1, 31), "61.000000000");
+		assertThat(crossed.segments()).hasSize(2);
+		assertExactDecimal(crossed.segments().get(0).payableSeconds(), "60.000000000");
+		assertExactDecimal(crossed.segments().get(1).payableSeconds(), "1.000000000");
+		assertThat(crossed.segments().get(1).appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Daily overtime");
+		assertMoney(crossed.totalBaseAmount(), "0.61000000");
+		assertMoney(crossed.totalPremiumAmount(), "0.00500000");
+		assertMoney(crossed.totalAmount(), "0.61500000");
+	}
+
+	/**
+	 * DST transition overtime allocation uses elapsed instants, not naive local-hour subtraction.
+	 */
+	@Test
+	void dstTransitionOvertimeContextUsesElapsedDuration() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 30)
+		);
+		Instant start = localInstant(2026, 3, 29, 1, 30);
+		Instant end = localInstant(2026, 3, 29, 3, 30);
+
+		PremiumPayCalculationResult result = calculate(policy, start, end);
+
+		assertContiguousCoverage(result, start, end, "3600.000000000");
+		assertThat(result.segments()).hasSize(2);
+		assertThat(result.segments().get(0).appliedRules()).isEmpty();
+		assertExactDecimal(result.segments().get(0).payableSeconds(), "1800.000000000");
+		assertExactDecimal(result.segments().get(1).payableSeconds(), "1800.000000000");
+		assertThat(result.segments().get(1).appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Daily overtime");
+		assertMoney(result.totalBaseAmount(), "20.00000000");
+		assertMoney(result.totalPremiumAmount(), "5.00000000");
+	}
+
+	/**
+	 * The context models MVP close-order limitations without querying or rewriting prior finalized shifts.
+	 */
+	@Test
+	void closeOrderLimitationIsRepresentedByExplicitContext() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 480)
+		);
+		Instant earlyStart = localInstant(2026, 7, 6, 8, 0);
+		Instant earlyEnd = localInstant(2026, 7, 6, 16, 0);
+		Instant lateStart = localInstant(2026, 7, 6, 16, 0);
+		Instant lateEnd = localInstant(2026, 7, 6, 20, 0);
+
+		PremiumPayCalculationResult lateClosedFirst = calculate(policy, lateStart, lateEnd);
+		PremiumPayCalculationResult lateWithEarlierContext = calculateWithContext(
+				policy,
+				lateStart,
+				lateEnd,
+				previous(earlyStart, earlyEnd)
+		);
+
+		assertThat(lateClosedFirst.segments()).hasSize(1);
+		assertThat(lateClosedFirst.segments().getFirst().appliedRules()).isEmpty();
+		assertMoney(lateClosedFirst.totalPremiumAmount(), "0.00000000");
+		assertThat(lateWithEarlierContext.segments()).hasSize(1);
+		assertThat(lateWithEarlierContext.segments().getFirst().appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Daily overtime");
+		assertMoney(lateWithEarlierContext.totalPremiumAmount(), "40.00000000");
+	}
+
+	/**
+	 * Overtime ties use payable start, attendance/payable start, and stable id; shift start cannot win the tie.
+	 */
+	@Test
+	void samePayableStartAllocatesOvertimeByStableIdBeforeShiftActualStart() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 60)
+		);
+		Instant payableStart = localInstant(2026, 7, 6, 8, 0);
+		Instant payableEnd = localInstant(2026, 7, 6, 9, 0);
+		PremiumPayableInterval previousLowerStableId = previousWithStableId(
+				10L,
+				localInstant(2026, 7, 6, 8, 30),
+				payableStart,
+				payableStart,
+				payableEnd
+		);
+		PremiumPayableInterval currentHigherStableId = currentWithStableId(
+				20L,
+				localInstant(2026, 7, 6, 7, 0),
+				payableStart,
+				payableStart,
+				payableEnd
+		);
+
+		PremiumPayCalculationResult result = calculateWithExplicitContext(
+				policy,
+				payableStart,
+				payableEnd,
+				currentHigherStableId,
+				List.of(previousLowerStableId)
+		);
+
+		assertThat(result.segments()).hasSize(1);
+		assertThat(result.segments().getFirst().appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Daily overtime");
+		assertMoney(result.totalBaseAmount(), "20.00000000");
+		assertMoney(result.totalPremiumAmount(), "10.00000000");
+		assertMoney(result.totalAmount(), "30.00000000");
+	}
+
+	/**
+	 * Equal payable-start ties are deterministic regardless of previous interval input order.
+	 */
+	@Test
+	void samePayableStartStableIdOrderingIsIndependentOfInputOrder() {
+		PayPolicyVersion policy = policy(
+				PayPolicyStackingStrategy.ADD,
+				overtimeRule("Daily overtime", PayPolicyRuleType.DAILY_OVERTIME, "50.0000", 90)
+		);
+		Instant payableStart = localInstant(2026, 7, 6, 8, 0);
+		Instant payableEnd = localInstant(2026, 7, 6, 9, 0);
+		PremiumPayableInterval lowerPrevious = previousWithStableId(
+				10L,
+				payableStart,
+				payableStart,
+				payableStart,
+				payableEnd
+		);
+		PremiumPayableInterval higherPrevious = previousWithStableId(
+				30L,
+				payableStart,
+				payableStart,
+				payableStart,
+				payableEnd
+		);
+		PremiumPayableInterval current = currentWithStableId(
+				20L,
+				payableStart,
+				payableStart,
+				payableStart,
+				payableEnd
+		);
+
+		PremiumPayCalculationResult ordered = calculateWithExplicitContext(
+				policy,
+				payableStart,
+				payableEnd,
+				current,
+				List.of(lowerPrevious, higherPrevious)
+		);
+		PremiumPayCalculationResult reversed = calculateWithExplicitContext(
+				policy,
+				payableStart,
+				payableEnd,
+				current,
+				List.of(higherPrevious, lowerPrevious)
+		);
+
+		assertThat(reversed).isEqualTo(ordered);
+		assertThat(ordered.segments()).hasSize(2);
+		assertExactDecimal(ordered.segments().get(0).payableSeconds(), "1800.000000000");
+		assertThat(ordered.segments().get(0).appliedRules()).isEmpty();
+		assertExactDecimal(ordered.segments().get(1).payableSeconds(), "1800.000000000");
+		assertThat(ordered.segments().get(1).appliedRules()).extracting(AppliedPremiumRule::name)
+				.containsExactly("Daily overtime");
+		assertMoney(ordered.totalBaseAmount(), "20.00000000");
+		assertMoney(ordered.totalPremiumAmount(), "5.00000000");
+		assertMoney(ordered.totalAmount(), "25.00000000");
+	}
+
+	/**
+	 * Overtime context intervals require a stable id so ordering cannot fall back to stream order.
+	 */
+	@Test
+	void nullStableIdInOvertimeContextFailsFast() {
+		Instant start = localInstant(2026, 7, 6, 8, 0);
+		Instant end = localInstant(2026, 7, 6, 9, 0);
+
+		assertThatThrownBy(() -> PremiumPayableInterval.previousFinalized(
+				WORKER_ID,
+				COMPANY_ID,
+				null,
+				start,
+				start,
+				start,
+				end
+		))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessage("stableId is required for overtime context ordering");
+	}
+
+	/**
+	 * Stable ids must be unique across the context to provide a complete deterministic tie-break.
+	 */
+	@Test
+	void duplicateStableIdInOvertimeContextFailsFast() {
+		Instant start = localInstant(2026, 7, 6, 8, 0);
+		Instant end = localInstant(2026, 7, 6, 9, 0);
+		PremiumPayableInterval previous = previousWithStableId(10L, start, start, start, end);
+		PremiumPayableInterval current = currentWithStableId(10L, start, start, start, end);
+
+		assertThatThrownBy(() -> PremiumPayCalculationContext.of(List.of(previous), current))
+				.isInstanceOf(IllegalArgumentException.class)
+				.hasMessage("stableId must be unique across calculation context");
 	}
 
 	/**
@@ -517,7 +1132,55 @@ class PremiumPayCalculationServiceTests {
 		return service.calculate(start, end, baseHourlyRate, policy);
 	}
 
+	private PremiumPayCalculationResult calculateWithContext(
+			PayPolicyVersion policy,
+			Instant start,
+			Instant end,
+			PremiumPayableInterval... previousFinalizedIntervals
+	) {
+		PremiumPayableInterval currentInterval = PremiumPayableInterval.current(
+				WORKER_ID,
+				COMPANY_ID,
+				999_999L,
+				start,
+				start,
+				start,
+				end
+		);
+		return service.calculate(
+				start,
+				end,
+				BASE_20,
+				policy,
+				PremiumPayCalculationContext.of(List.of(previousFinalizedIntervals), currentInterval)
+		);
+	}
+
+	private PremiumPayCalculationResult calculateWithExplicitContext(
+			PayPolicyVersion policy,
+			Instant start,
+			Instant end,
+			PremiumPayableInterval currentInterval,
+			List<PremiumPayableInterval> previousFinalizedIntervals
+	) {
+		return service.calculate(
+				start,
+				end,
+				BASE_20,
+				policy,
+				PremiumPayCalculationContext.of(previousFinalizedIntervals, currentInterval)
+		);
+	}
+
 	private PayPolicyVersion policy(PayPolicyStackingStrategy stackingStrategy, PayPolicyRule... rules) {
+		return policyWithWeekStart(DayOfWeek.MONDAY, stackingStrategy, rules);
+	}
+
+	private PayPolicyVersion policyWithWeekStart(
+			DayOfWeek weekStartsOn,
+			PayPolicyStackingStrategy stackingStrategy,
+			PayPolicyRule... rules
+	) {
 		Company company = new Company();
 		company.setName("Acme");
 		company.setJoinCode("ACME123");
@@ -526,7 +1189,7 @@ class PremiumPayCalculationServiceTests {
 		PayPolicyVersion policy = new PayPolicyVersion();
 		policy.setCompany(company);
 		policy.setVersion(1);
-		policy.setWeekStartsOn(DayOfWeek.MONDAY);
+		policy.setWeekStartsOn(weekStartsOn);
 		policy.setStackingStrategy(stackingStrategy);
 		for (int index = 0; index < rules.length; index++) {
 			rules[index].setSortOrder(index);
@@ -572,7 +1235,17 @@ class PremiumPayCalculationServiceTests {
 			String premiumPercent,
 			int thresholdMinutes
 	) {
-		PayPolicyRule rule = baseRule(name, type, premiumPercent, true);
+		return overtimeRule(name, type, premiumPercent, thresholdMinutes, true);
+	}
+
+	private PayPolicyRule overtimeRule(
+			String name,
+			PayPolicyRuleType type,
+			String premiumPercent,
+			int thresholdMinutes,
+			boolean enabled
+	) {
+		PayPolicyRule rule = baseRule(name, type, premiumPercent, enabled);
 		rule.setConditionConfig(PayPolicyConditionJson.write(PayPolicyConditionJson.overtime(thresholdMinutes)));
 		return rule;
 	}
@@ -611,6 +1284,64 @@ class PremiumPayCalculationServiceTests {
 		return ZonedDateTime.ofLocal(localDateTime, BERLIN, ZoneOffset.of(offset)).toInstant();
 	}
 
+	private PremiumPayableInterval previous(Instant start, Instant end) {
+		return previousFor(WORKER_ID, COMPANY_ID, start, end);
+	}
+
+	private PremiumPayableInterval previousFor(long workerId, long companyId, Instant start, Instant end) {
+		return PremiumPayableInterval.previousFinalized(
+				workerId,
+				companyId,
+				stableIdFor(workerId, companyId, start),
+				start,
+				start,
+				start,
+				end
+		);
+	}
+
+	private PremiumPayableInterval previousWithStableId(
+			long stableId,
+			Instant shiftActualStartTime,
+			Instant attendancePayableStartTime,
+			Instant start,
+			Instant end
+	) {
+		return PremiumPayableInterval.previousFinalized(
+				WORKER_ID,
+				COMPANY_ID,
+				stableId,
+				shiftActualStartTime,
+				attendancePayableStartTime,
+				start,
+				end
+		);
+	}
+
+	private PremiumPayableInterval currentWithStableId(
+			long stableId,
+			Instant shiftActualStartTime,
+			Instant attendancePayableStartTime,
+			Instant start,
+			Instant end
+	) {
+		return PremiumPayableInterval.current(
+				WORKER_ID,
+				COMPANY_ID,
+				stableId,
+				shiftActualStartTime,
+				attendancePayableStartTime,
+				start,
+				end
+		);
+	}
+
+	private long stableIdFor(long workerId, long companyId, Instant start) {
+		return workerId * 1_000_000_000_000L
+				+ companyId * 1_000_000L
+				+ Math.floorMod(start.toEpochMilli(), 1_000_000L);
+	}
+
 	private void assertMoney(BigDecimal actual, String expected) {
 		assertThat(actual).isEqualByComparingTo(new BigDecimal(expected));
 		assertThat(actual.toPlainString()).isEqualTo(expected);
@@ -619,6 +1350,20 @@ class PremiumPayCalculationServiceTests {
 	private void assertExactDecimal(BigDecimal actual, String expected) {
 		assertThat(actual).isEqualByComparingTo(new BigDecimal(expected));
 		assertThat(actual.toPlainString()).isEqualTo(expected);
+	}
+
+	private void assertSegment(
+			PremiumPaySegment segment,
+			Instant expectedStart,
+			Instant expectedEnd,
+			String expectedSeconds
+	) {
+		assertThat(segment.start()).isEqualTo(expectedStart);
+		assertThat(segment.end()).isEqualTo(expectedEnd);
+		assertExactDecimal(segment.payableSeconds(), expectedSeconds);
+		BigDecimal expectedMinutes = new BigDecimal(expectedSeconds)
+				.divide(new BigDecimal("60"), 8, RoundingMode.HALF_UP);
+		assertExactDecimal(segment.payableMinutesExact(), expectedMinutes.toPlainString());
 	}
 
 	private void assertContiguousCoverage(
