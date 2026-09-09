@@ -478,7 +478,14 @@ Salary Calculation
 - Salary uses ShiftAttendance.hourlyRate, including any attendance-specific approval override.
 - ShiftAttendance.hourlyRate is the baseHourlyRate for premium pay.
 - Premium rules apply only to payable work time after static break and dynamic pause deductions.
-- The close calculation pipeline is approved payable intervals -> break/pause clipping -> time segmentation -> rule evaluation -> stacking -> pay breakdown -> totals.
+- Static break is applied after clipping the worker payable interval to payableStartTime/actualEndTime.
+- Dynamic pause intervals are removed according to their actual timestamps first.
+- Static break minutes are then deducted from the remaining payable intervals in chronological order, earliest to latest.
+- Premium rules apply only to the remaining payable intervals after dynamic pause and static break removal.
+- If static break exceeds the remaining payable duration, all payable intervals are removed and workedMinutes/calculatedSalary clamp to zero.
+- This rule is deterministic and auditable.
+- Future timed/manual breaks may replace aggregate earliest-first deduction, but the MVP uses earliest-first static break deduction.
+- The close calculation pipeline is approved payable intervals -> payableStartTime/actualEndTime clipping -> dynamic pause removal by timestamp -> earliest-first static break deduction -> time segmentation -> rule evaluation -> stacking -> pay breakdown -> totals.
 - Segmentation uses real instants/durations and company timezone-local boundaries. It must not subtract naive local hours across DST transitions.
 - Segmentation splits work whenever rules may change: shift/payable interval start/end, midnight/day boundary, week boundary, TIME_OF_DAY start/end including ranges crossing midnight, DAY_OF_WEEK boundary, HOLIDAY date boundary, DAILY_OVERTIME threshold crossing, WEEKLY_OVERTIME threshold crossing, and pause/break-adjusted payable interval boundaries if needed by the implementation.
 - ADD stacking sums all applicable percentage premiums against the base rate.
@@ -495,6 +502,8 @@ Salary Calculation
 - PayCalculation stores totalRawMinutes, totalBaseAmount, totalPremiumAmount, totalAmount, and PaySegment rows.
 - PaySegment stores start, end, payableMinutes, baseHourlyRate, appliedRules snapshots, stackingStrategy, effectivePremiumPercent, effectiveHourlyRate, and amount.
 - Applied rule snapshots store rule id, name, type, and premium percent so historical explanations survive policy edits.
+- Static break example with no pauses: for a 20:00-04:00 local shift and static break 60, remove 20:00-21:00 local payable time before premium rule evaluation.
+- Static break example with a pause: for a 20:00-04:00 local shift, dynamic pause 22:00-22:30, and static break 60, remove 22:00-22:30 first, then remove 60 minutes from the earliest remaining payable time.
 - Foreman salary is calculated separately from worker attendance.
 - Foreman salary does not use premium rules in the initial implementation.
 - The backend must not create a ShiftAttendance row for foreman salary.

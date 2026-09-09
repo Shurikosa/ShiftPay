@@ -363,6 +363,16 @@ worker_unpaid_minutes = attendance.breakMinutes + attendance.pauseMinutes
 worker_worked_minutes = max(0, worker_duration_minutes - worker_unpaid_minutes)
 worker_salary = worker_worked_minutes / 60 * attendance.hourlyRate when no premium rules apply
 
+Static break placement:
+
+- Static break is applied after clipping the worker payable interval to payableStartTime/actualEndTime.
+- Dynamic pause intervals are removed according to their actual timestamps first.
+- Static break minutes are then deducted from the remaining payable intervals in chronological order, earliest to latest.
+- Premium rules apply only to the remaining payable intervals after dynamic pause and static break removal.
+- If static break exceeds the remaining payable duration, all payable intervals are removed and workedMinutes/calculatedSalary clamp to zero.
+- This rule is deterministic and auditable.
+- Future timed/manual breaks may replace aggregate earliest-first deduction, but the MVP uses earliest-first static break deduction.
+
 With configurable pay rules, worker_salary is PayCalculation.totalAmount:
 
 totalBaseAmount = sum(segment payable minutes / 60 * baseHourlyRate)
@@ -481,14 +491,21 @@ Timezone and boundaries:
 Calculation pipeline:
 
 1. Load approved payable intervals for worker attendance.
-2. Clip and subtract static breaks and dynamic pauses.
-3. Segment payable work time wherever applicable rules may change.
-4. Evaluate enabled PayPolicy rules on each segment.
-5. Apply PayPolicy.stackingStrategy.
-6. Persist PayCalculation/PaySegment snapshot data.
-7. Store worker totals on attendance and expose backend-owned results.
+2. Clip worker payable intervals to payableStartTime/actualEndTime.
+3. Remove dynamic pause intervals according to their actual timestamps.
+4. Deduct static break minutes from the remaining payable intervals in chronological order, earliest to latest.
+5. Segment payable work time wherever applicable rules may change.
+6. Evaluate enabled PayPolicy rules on each segment.
+7. Apply PayPolicy.stackingStrategy.
+8. Persist PayCalculation/PaySegment snapshot data.
+9. Store worker totals on attendance and expose backend-owned results.
 
 Premium rules apply only to payable work time after unpaid deductions. Static breaks and dynamic pauses remain unpaid. Late workers use backend payableStartTime. CANCELLED and DISCARDED shifts are non-payable and excluded. Short saved CLOSED shifts can still produce zero payable minutes, zero premium amount, and zero total amount.
+
+Static break examples:
+
+- Shift 20:00-04:00 local time with static break 60 and no pauses: the break removes 20:00-21:00 local payable time. Premiums start applying only to the remaining payable intervals.
+- Shift 20:00-04:00 local time with dynamic pause 22:00-22:30 and static break 60: remove 22:00-22:30 first, then remove 60 minutes from the earliest remaining payable time.
 
 Segmentation boundaries:
 

@@ -641,7 +641,7 @@ Rules:
 - show a clear message if the shift is not closed yet
 - do not recalculate worker salary, foreman salary, premium pay, or pay breakdown totals on the client
 - worker rows are based only on approved worker attendance
-- backend salary subtracts static break minutes and backend-tracked effective pause minutes
+- backend salary subtracts backend-tracked dynamic pause minutes first, then static break minutes from earliest remaining payable worker time
 - premium breakdown is read-only backend output and applies only to worker attendance in the initial implementation
 - do not show foreman salary fields to workers
 - ADMIN users are not a mobile MVP target and should not receive foreman salary fields through REST/mobile API

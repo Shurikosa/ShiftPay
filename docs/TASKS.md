@@ -162,9 +162,10 @@ Phase 2A - Premium calculation foundation, no production salary change:
 - [ ] Implement DAY_OF_WEEK rule evaluation
 - [ ] Implement HOLIDAY rule evaluation
 - [ ] Implement ADD and HIGHEST_ONLY stacking strategies through PayPolicy.stackingStrategy
-- [ ] Build segmentation for payable interval start/end, company timezone day boundaries, midnight, TIME_OF_DAY boundaries, DAY_OF_WEEK boundaries, HOLIDAY boundaries, and DST-safe real instants/durations
+- [ ] Build segmentation for payable interval start/end, dynamic pause removal by timestamp, earliest-first static break deduction, company timezone day boundaries, midnight, TIME_OF_DAY boundaries, DAY_OF_WEEK boundaries, HOLIDAY boundaries, and DST-safe real instants/durations
 - [ ] Add unit tests for acceptance scenarios A, B, C, F, G, and H from SPEC/API
 - [ ] Add unit tests for holiday and day-of-week rule evaluation
+- [ ] Add unit tests for static break placement: 20:00-04:00 with static break 60 removes 20:00-21:00, and dynamic pause 22:00-22:30 is removed before earliest-first static break deduction
 - [ ] Do not integrate the premium calculation service with closeShift in Phase 2A
 - [ ] Do not change calculatedSalary or payout behavior in Phase 2A
 
@@ -195,7 +196,7 @@ Phase 2C - Production salary integration and persisted breakdown:
 - [ ] Expose own read-only pay breakdown in worker history/details after close
 - [ ] Expose premium totals/breakdown in payout/payable detailed DTOs according to API docs while keeping mobile cards simple
 - [ ] Ensure payout requests use stored premium-included salary and backend-owned payout fields
-- [ ] Add regression tests for static breaks, dynamic pauses, late join payableStartTime, discard, cancellation, and privacy
+- [ ] Add regression tests for earliest-first static break placement, dynamic pauses, late join payableStartTime, discard, cancellation, and privacy
 - [ ] Add tests for historical policy snapshot/version immutability
 - [ ] Add acceptance scenario tests A-I from SPEC/API against production close salary behavior
 - [ ] Update OpenAPI/Swagger docs for pay breakdown DTOs after implementation
