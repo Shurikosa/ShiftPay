@@ -375,9 +375,11 @@ Static break placement:
 
 With configurable pay rules, worker_salary is PayCalculation.totalAmount:
 
-totalBaseAmount = sum(segment payable minutes / 60 * baseHourlyRate)
-totalPremiumAmount = sum(segment premium amount)
+totalBaseAmount = sum(segment payableSeconds / 3600 * baseHourlyRate)
+totalPremiumAmount = sum(segment premiumAmount)
 totalAmount = totalBaseAmount + totalPremiumAmount
+
+Amount math uses backend-calculated seconds/exact duration. Integer payableMinutes is display-oriented and must not drive premium amount math.
 
 Foreman salary:
 
@@ -434,6 +436,7 @@ Domain rules:
 - Editing a policy creates a new version instead of mutating the existing version.
 - Company must always have a current default PayPolicy after company creation or migration.
 - Backend creates a default empty PayPolicy version for a company if needed by onboarding or migration.
+- Shift creation should not fail solely because a PayPolicy is missing.
 - Starting a shift freezes/resolves the current company PayPolicy version onto the ShiftSession.
 - If shift start cannot resolve a current PayPolicy version because the invariant is broken, the backend returns 409 Conflict with code PAY_POLICY_REQUIRED.
 - The backend must not silently start a shift without a frozen PayPolicy version.
@@ -523,7 +526,8 @@ Overtime context:
 
 - DAILY_OVERTIME and WEEKLY_OVERTIME consider all relevant approved payable intervals for the same worker and company in the policy day/week.
 - Daily and weekly overtime threshold allocation is based on chronological payable interval order in the company/policy timezone.
-- Tie-break order is shift actualStartTime, then attendance/payableStartTime, then stable database id.
+- Ordering keys are payable interval/piece start, then attendancePayableStartTime falling back to payable interval start, then required stable DB/test id, then current flag only as the final deterministic fallback.
+- shiftActualStartTime may be included as metadata, but it must not drive overtime allocation before payable interval ordering.
 - Authoritative final calculation uses persisted/closing approved intervals only.
 - Previous finalized payable minutes come from CLOSED shifts only. Other ACTIVE shifts are excluded from authoritative final overtime context except the shift currently being closed.
 - ACTIVE in-progress estimate endpoints are not part of the MVP. If added later, they must be clearly non-authoritative.
@@ -535,9 +539,13 @@ Overtime context:
 Pay calculation breakdown:
 
 - Backend stores enough snapshot data to explain historical calculations after policy changes.
-- PayCalculation includes totalRawMinutes, totalBaseAmount, totalPremiumAmount, totalAmount, and segments.
-- Each PaySegment includes start, end, payableMinutes, baseHourlyRate, appliedRules, stackingStrategy, effectivePremiumPercent, effectiveHourlyRate, and amount.
+- PayCalculation includes totalRawSeconds, totalRawMinutesExact, totalBaseAmount, totalPremiumAmount, totalAmount, and segments.
+- totalRawSeconds and totalRawMinutesExact are backend-calculated audit fields.
+- Each PaySegment includes start, end, payableSeconds, payableMinutesExact, payableMinutes, baseHourlyRate, appliedRules, stackingStrategy, effectivePremiumPercent, effectiveHourlyRate, baseAmount, premiumAmount, and totalAmount.
+- payableSeconds and payableMinutesExact are backend-calculated audit fields.
+- payableMinutes is display-oriented integer minutes. Amount math uses seconds/exact duration, not payableMinutes.
 - Applied rule snapshots include rule id, name, type, and premium percent.
+- Mobile may display simplified hours/minutes, but must not calculate premium pay.
 
 Acceptance examples:
 
@@ -665,10 +673,16 @@ Rounding rules:
 - For premium-aware attendance, exactCalculatedAmount and payoutAmount use
   backend final salary/pay calculation fields and policy snapshots, not
   mobile-calculated formulas.
+- For premium-aware attendance, payoutAmount is based on the stored backend
+  calculatedSalary / premium-aware item amount according to the backend payroll
+  service.
+- Rounded minutes remain informational/audit fields for payout rules and display,
+  but they must not rescale or recalculate premium-aware salary on mobile.
 - payoutAmount is whole-number money with no cents, rounded from the
   backend-owned exact item amount using CEILING.
 - Request totals are sums of item-level rawPayableMinutes,
-  payoutRoundedMinutes, calculatedSalary, and payoutAmount.
+  payoutRoundedMinutes, totalBaseAmount, totalPremiumAmount,
+  calculatedSalary/exactCalculatedAmount, and payoutAmount.
 - Examples for payoutRoundedMinutes: 0 -> 0, 1 -> 5, 4 -> 5, 5 -> 5, 7 -> 5,
   8 -> 10, 11 -> 10, 13 -> 15, 25 -> 25, 28 -> 30.
 - If product later wants 25 -> 30, that is not nearest-5 half-up rounding and
@@ -683,8 +697,11 @@ Display rules:
 - Backend APIs may still return payoutRoundedMinutes and exactCalculatedAmount
   for audit/internal use; mobile hides them from cards unless a later detailed
   audit view is added.
-- Backend APIs may expose totalBaseAmount, totalPremiumAmount, and payCalculation
-  in detailed views. Cards still show raw payable time and final payoutAmount.
+- Backend payout preview, create, list, and approve APIs expose totalBaseAmount,
+  totalPremiumAmount, exactCalculatedAmount as the existing request-level total
+  calculated salary naming, and payoutAmount where their DTO examples include
+  premium totals. Detailed views may also expose payCalculation. Cards still
+  show raw payable time and final payoutAmount.
 
 Privacy rules:
 

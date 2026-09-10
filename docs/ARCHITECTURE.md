@@ -180,6 +180,7 @@ Company Ownership and Membership
 Shift Creation
 
 - For the mobile MVP, ShiftSession creation does not require plannedStartTime or plannedEndTime.
+- Shift creation does not resolve or freeze PayPolicy and should not fail solely because a current PayPolicy is missing.
 - The foreman does not enter planned start or planned end times in mobile.
 - The foreman does not manually enter title in mobile.
 - The backend generates ShiftSession.title automatically from date/time and the real company name.
@@ -313,7 +314,8 @@ id
 attendanceId
 shiftSessionId
 payPolicyVersionId
-totalRawMinutes
+totalRawSeconds
+totalRawMinutesExact
 totalBaseAmount
 totalPremiumAmount
 totalAmount
@@ -327,13 +329,17 @@ id
 payCalculationId
 start
 end
+payableSeconds
+payableMinutesExact
 payableMinutes
 baseHourlyRate
 appliedRulesSnapshot
 stackingStrategy
 effectivePremiumPercent
 effectiveHourlyRate
-amount
+baseAmount
+premiumAmount
+totalAmount
 
 ShiftAttendance
 
@@ -367,6 +373,8 @@ managerForemanId
 status
 rawPayableMinutesTotal
 payoutRoundedMinutesTotal
+totalBaseAmount
+totalPremiumAmount
 exactCalculatedAmountTotal
 payoutAmount
 requestedAt
@@ -388,6 +396,8 @@ rawPayableMinutes
 payoutRoundedMinutes
 hourlyRate
 calculatedSalary
+totalBaseAmount
+totalPremiumAmount
 roundedItemAmountExact
 payoutAmount
 createdAt
@@ -493,14 +503,18 @@ Salary Calculation
 - DAILY_OVERTIME and WEEKLY_OVERTIME consider all relevant approved payable intervals for the same worker and company in the policy day/week.
 - Authoritative final overtime calculation uses persisted/closing approved intervals. ACTIVE in-progress estimates are deferred and must be marked non-authoritative if added later.
 - Daily and weekly overtime threshold allocation is based on chronological payable interval order in the company/policy timezone.
-- Tie-break order is shift actualStartTime, then attendance/payableStartTime, then stable database id.
+- Ordering keys are payable interval/piece start, then attendancePayableStartTime falling back to payable interval start, then required stable DB/test id, then current flag only as the final deterministic fallback.
+- shiftActualStartTime may be stored as metadata, but it must not drive overtime allocation before payable interval ordering.
 - Previous finalized payable minutes come from CLOSED shifts only. Other ACTIVE shifts are excluded from authoritative final overtime context except the shift currently being closed.
 - For the MVP, overtime calculation for a closing shift uses that shift's frozen PayPolicy version and includes previous finalized payable minutes in the same company timezone period as context.
 - Closing a later shift must not rewrite older finalized PayCalculation rows.
 - Existing finalized closed calculations are not automatically reopened/recalculated in the MVP.
 - Therefore teams should close shifts in chronological order for exact overtime allocation until batch recalculation is added.
-- PayCalculation stores totalRawMinutes, totalBaseAmount, totalPremiumAmount, totalAmount, and PaySegment rows.
-- PaySegment stores start, end, payableMinutes, baseHourlyRate, appliedRules snapshots, stackingStrategy, effectivePremiumPercent, effectiveHourlyRate, and amount.
+- PayCalculation stores totalRawSeconds, totalRawMinutesExact, totalBaseAmount, totalPremiumAmount, totalAmount, and PaySegment rows.
+- totalRawSeconds and totalRawMinutesExact are backend-calculated audit fields.
+- PaySegment stores start, end, payableSeconds, payableMinutesExact, payableMinutes, baseHourlyRate, appliedRules snapshots, stackingStrategy, effectivePremiumPercent, effectiveHourlyRate, baseAmount, premiumAmount, and totalAmount.
+- payableSeconds and payableMinutesExact are backend-calculated audit fields.
+- payableMinutes is display-oriented integer minutes. Amount math uses seconds/exact duration, not payableMinutes.
 - Applied rule snapshots store rule id, name, type, and premium percent so historical explanations survive policy edits.
 - Static break example with no pauses: for a 20:00-04:00 local shift and static break 60, remove 20:00-21:00 local payable time before premium rule evaluation.
 - Static break example with a pause: for a 20:00-04:00 local shift, dynamic pause 22:00-22:30, and static break 60, remove 22:00-22:30 first, then remove 60 minutes from the earliest remaining payable time.
@@ -566,9 +580,12 @@ Payroll Requests
 - Already PAID attendance cannot be requested again.
 - PAYMENT_REQUESTED attendance cannot be included in another pending request.
 - For the MVP, all selected attendance records in one payout request must belong to shifts created by the same foreman.
-- On successful creation, PayoutRequest stores companyId, workerId, managerForemanId, PENDING status, requestedAt, total raw payable minutes, total rounded payable minutes, total exact calculated amount, and total whole-number payout amount.
+- On successful creation, PayoutRequest stores companyId, workerId, managerForemanId, PENDING status, requestedAt, total raw payable minutes, total rounded payable minutes, totalBaseAmount, totalPremiumAmount, totalCalculatedSalary/exactCalculatedAmount, and total whole-number payout amount.
 - PayoutRequestItem snapshots attendanceId, shiftSessionId, rawPayableMinutes, payoutRoundedMinutes, hourlyRate, calculatedSalary, premium totals when exposed, roundedItemAmountExact, payoutAmount, and enough pay calculation reference/snapshot data for audit.
 - Snapshot item fields preserve what the worker requested even if future shift or rate data changes.
+- For premium-aware attendance, payoutAmount is based on stored backend calculatedSalary / premium-aware item amount according to the backend payroll service.
+- Rounded minutes remain informational/audit fields for payout rules and display, but they must not rescale or recalculate premium-aware salary on mobile.
+- Payout preview, create, list, and approve responses expose request-level aggregate totalBaseAmount, totalPremiumAmount, totalCalculatedSalary/exactCalculatedAmount, and payoutAmount when their DTO examples include premium totals.
 - PayoutRequestService sets selected attendance paymentStatus to PAYMENT_REQUESTED in the same transaction that creates the request and items.
 - Foreman managed payout listing returns only requests for the foreman's current company where managerForemanId equals the current user id.
 - Foreman approval locks the PayoutRequest and its selected ShiftAttendance rows.
@@ -589,10 +606,14 @@ Payroll Rounding
 - rawPayableMinutes 0 produces payoutRoundedMinutes 0.
 - Any non-zero rawPayableMinutes that would otherwise round to 0 produces payoutRoundedMinutes 5.
 - For non-premium attendance, roundedItemAmountExact = payoutRoundedMinutes / 60 * hourlyRate.
-- For premium-aware attendance, roundedItemAmountExact and payoutAmount use backend final pay calculation fields and policy snapshots, not client-side formulas.
-- payoutAmount is whole-number money with no cents, calculated from roundedItemAmountExact using RoundingMode.CEILING.
+- For premium-aware attendance, payoutAmount is based on stored backend calculatedSalary / premium-aware item amount according to the backend payroll service.
+- Rounded minutes remain informational/audit fields for payout rules and display, but they must not rescale or recalculate premium-aware salary on mobile.
+- Mobile must not derive payout totals locally.
+- payoutAmount is whole-number money with no cents, calculated per attendance item by the backend payroll service using RoundingMode.CEILING.
 - Because payout values are non-negative, CEILING rounds any fractional currency amount up to the next whole unit.
-- Request totals are sums of item-level rawPayableMinutes, payoutRoundedMinutes, calculatedSalary, and payoutAmount.
+- Request totals are sums of item-level rawPayableMinutes, payoutRoundedMinutes, totalBaseAmount, totalPremiumAmount, calculatedSalary/exactCalculatedAmount, and payoutAmount.
+- exactCalculatedAmount is the existing response field name for request-level totalCalculatedSalary.
+- Preview, create, list, and approve responses include request-level aggregate totalBaseAmount, totalPremiumAmount, exactCalculatedAmount, and payoutAmount when their examples show premium totals.
 - Examples for payoutRoundedMinutes: 0 -> 0, 1 -> 5, 4 -> 5, 5 -> 5, 7 -> 5, 8 -> 10, 11 -> 10, 13 -> 15, 25 -> 25, 28 -> 30.
 - If product later requires 25 -> 30, that is a different upward-rounding rule and needs an explicit docs change.
 
@@ -602,7 +623,7 @@ Payroll Privacy
 - Worker never receives foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary.
 - Foreman sees worker payout requests only for their company and managed shifts.
 - Payroll DTOs must not expose User entities, password hashes, or unrelated company data.
-- Foreman payroll DTOs expose worker identity fields, selected shifts/days, raw hours/minutes, exact calculated amount, rounded payable minutes, and whole-number payout amount needed to approve the request.
+- Foreman payroll DTOs expose worker identity fields, selected shifts/days, raw hours/minutes, exact calculated amount / totalCalculatedSalary, totalBaseAmount, totalPremiumAmount, rounded payable minutes, and whole-number payout amount needed to approve the request.
 - Mobile payout request cards for workers and foremen display raw payable time, whole-number payout amount, status, and selected days/items enough for audit.
 - Mobile payout request cards hide exact calculated amount and rounded payable minutes unless a later detailed audit view is added.
 

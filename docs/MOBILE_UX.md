@@ -348,6 +348,7 @@ Rules:
 
 - this screen is worker attendance history
 - do not use it as foreman managed-shift history
+- pay breakdown seconds and exact minutes are backend audit fields; mobile may format them as simplified hours/minutes for display
 
 ### WorkerShiftDetailsScreen
 
@@ -388,6 +389,7 @@ Rules:
 - do not calculate pause-adjusted salary on the client
 - do not calculate premium pay, overtime, effective rates, or pay breakdown totals on the client
 - do not calculate rounded payroll minutes or payout amount on the client
+- pay breakdown `payableMinutes` is display-oriented; mobile must not use it to derive amounts
 - for late workers, display backend persisted `payableStartTime`, `workedMinutes`, `pauseMinutes`, and `calculatedSalary`; do not derive them from `actualStartTime`
 
 ### WorkerPayrollScreen
@@ -660,6 +662,7 @@ Content:
 - selected shifts/days per request
 - raw payable minutes with hours/minutes formatting
 - backend-calculated whole-number payout amount
+- request-level total base amount, premium amount, and calculated salary may appear in detail views when returned by the backend
 - optional detailed premium breakdown in a separate detail view, not on request cards
 - requestedAt, approvedAt, and paidAt when present
 - status badges for `PENDING` and `APPROVED`
@@ -688,6 +691,8 @@ Rules:
 - do not show another foreman's private salary fields
 - do not calculate salary, rounded payable minutes, or payout amount on the client
 - do not calculate premium pay, overtime, effective rates, or pay breakdown totals on the client
+- rounded payable minutes are backend audit/display fields and must not be used by mobile to rescale premium-aware salary
+- mobile must not derive payout totals locally
 - do not show exact calculated amount or rounded payable minutes on payout request cards unless a later detailed audit view is added
 - keep payroll cards focused on raw payable time, final payout amount, status, and selected days/items
 
@@ -811,6 +816,9 @@ Mobile must not calculate pause-adjusted salary. It should display backend persi
   `calculatedSalary` values returned by the backend.
 - The mobile app should consume backend `payCalculation` breakdowns as
   read-only display data after close.
+- The mobile app may format backend seconds/exact-minute audit fields as
+  simplified hours/minutes, but must not use display minutes to calculate
+  premium amounts.
 - The mobile app should consume payroll `paymentStatus`,
   raw payable time, and `payoutAmount` values returned by the backend for card
   display.

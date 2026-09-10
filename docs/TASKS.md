@@ -157,7 +157,7 @@ Phase 1 - Pay policy configuration foundation:
 Phase 2A - Premium calculation foundation, no production salary change:
 
 - [ ] Add internal premium calculation service
-- [ ] Add explainable PayCalculation/PaySegment result objects without production persistence
+- [ ] Add explainable PayCalculation/PaySegment result objects with seconds/exact minutes audit fields, display-oriented payableMinutes, segment base/premium/total amounts, and applied rule snapshots, without production persistence
 - [ ] Implement TIME_OF_DAY rule evaluation
 - [ ] Implement DAY_OF_WEEK rule evaluation
 - [ ] Implement HOLIDAY rule evaluation
@@ -176,7 +176,7 @@ Phase 2B - Overtime calculation context:
 - [ ] Add previous finalized payable intervals context for the same worker/company and policy timezone period
 - [ ] Use frozen policy version plus previous finalized payable minutes for MVP overtime context when closing a shift
 - [ ] Implement deterministic chronological overtime allocation by company/policy timezone payable interval order
-- [ ] Tie-break chronological allocation by shift actualStartTime, then attendance/payableStartTime, then stable database id
+- [ ] Tie-break chronological allocation by payable interval/piece start, attendancePayableStartTime fallback, required stable DB/test id, then current flag only as final deterministic fallback
 - [ ] Document and test MVP chronological-close limitation for overtime allocation; teams should close shifts chronologically until batch recalculation exists
 - [ ] Add tests for acceptance scenarios D and E from SPEC/API
 - [ ] Add tests for weekly overtime boundary behavior
@@ -195,7 +195,7 @@ Phase 2C - Production salary integration and persisted breakdown:
 - [ ] Expose worker pay breakdown in shift summary for owner FOREMAN
 - [ ] Expose own read-only pay breakdown in worker history/details after close
 - [ ] Expose premium totals/breakdown in payout/payable detailed DTOs according to API docs while keeping mobile cards simple
-- [ ] Ensure payout requests use stored premium-included salary and backend-owned payout fields
+- [ ] Ensure payout requests use stored premium-included salary/backend payroll service amounts, expose aggregate totalBaseAmount/totalPremiumAmount/totalCalculatedSalary or exact total naming, and keep rounded minutes informational for premium-aware salary
 - [ ] Add regression tests for earliest-first static break placement, dynamic pauses, late join payableStartTime, discard, cancellation, and privacy
 - [ ] Add tests for historical policy snapshot/version immutability
 - [ ] Add acceptance scenario tests A-I from SPEC/API against production close salary behavior
