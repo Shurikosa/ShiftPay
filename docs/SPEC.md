@@ -373,13 +373,15 @@ Static break placement:
 - This rule is deterministic and auditable.
 - Future timed/manual breaks may replace aggregate earliest-first deduction, but the MVP uses earliest-first static break deduction.
 
-With configurable pay rules, worker_salary is PayCalculation.totalAmount:
+With configurable pay rules, PayCalculation.totalAmount is the audit calculation amount and ShiftAttendance.calculatedSalary is the currency-settlement amount:
 
 totalBaseAmount = sum(segment payableSeconds / 3600 * baseHourlyRate)
 totalPremiumAmount = sum(segment premiumAmount)
 totalAmount = totalBaseAmount + totalPremiumAmount
 
-Amount math uses backend-calculated seconds/exact duration. Integer payableMinutes is display-oriented and must not drive premium amount math.
+PayCalculation.totalBaseAmount, totalPremiumAmount, totalAmount and PaySegment.baseAmount, premiumAmount, totalAmount are audit calculation amounts at decimal scale 8. Premium calculation computes each segment once from seconds/exact duration at scale 8 and must not currency-round individual segments to scale 2. Persisted header values are sums of persisted segment values, so these identities hold exactly at scale 8: totalBaseAmount = sum(segment baseAmount), totalPremiumAmount = sum(segment premiumAmount), totalAmount = totalBaseAmount + totalPremiumAmount, and totalAmount = sum(segment totalAmount).
+
+ShiftAttendance.calculatedSalary = PayCalculation.totalAmount rounded once to scale 2 with HALF_UP. Amount math uses backend-calculated seconds/exact duration. Integer payableMinutes is display-oriented and must not drive premium amount math.
 
 Foreman salary:
 
@@ -409,6 +411,7 @@ foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
 -JOINED, REJECTED, CANCELLED, and DISCARDED-shift attendance keep worked minutes and calculated salary empty.
 -Worker salary calculation uses the attendance hourly rate snapshot or override as the base hourly rate.
 -Worker calculatedSalary stores the premium-aware total amount when a PayPolicy applies.
+-For legacy APPROVED attendance on a CLOSED shift without a PayCalculation snapshot, persisted calculatedSalary is the authoritative historical final amount. totalBaseAmount equals calculatedSalary, totalPremiumAmount is 0, and no snapshot is created retrospectively or recalculated.
 -Salary calculation subtracts accumulated effective pause minutes.
 -Salary calculation for late approved workers starts from the worker payable start time, not the global shift actualStartTime.
 -Dynamic pause calculations are clipped to each worker's payable work interval.
@@ -422,7 +425,7 @@ foreman_salary = foreman_worked_minutes / 60 * shift.foremanHourlyRate
 -Foreman salary fields are private and visible only to the owner FOREMAN of the shift.
 -WORKER never receives foreman salary fields.
 -For the MVP REST/mobile API, ADMIN does not receive foreman salary fields.
--Calculated salary is rounded to 2 decimal places with HALF_UP.
+-ShiftAttendance.calculatedSalary is the currency-settlement value, rounded once from PayCalculation.totalAmount to 2 decimal places with HALF_UP; it is not a sum of independently currency-rounded segment amounts.
 -Closing fails if actualStartTime is missing or salary input values are negative where request validation normally prevents them.
 
 ## 12.1 Configurable Pay Rules / Premium Pay
@@ -540,11 +543,14 @@ Pay calculation breakdown:
 
 - Backend stores enough snapshot data to explain historical calculations after policy changes.
 - PayCalculation includes totalRawSeconds, totalRawMinutesExact, totalBaseAmount, totalPremiumAmount, totalAmount, and segments.
+- PayCalculation and each PaySegment include snapshotStatus: COMPLETE or UNAVAILABLE. A PayCalculation is COMPLETE only when its persisted segment rule snapshots are complete; it is UNAVAILABLE when any persisted applied-rule snapshot is unavailable.
 - totalRawSeconds and totalRawMinutesExact are backend-calculated audit fields.
-- Each PaySegment includes start, end, payableSeconds, payableMinutesExact, payableMinutes, baseHourlyRate, appliedRules, stackingStrategy, effectivePremiumPercent, effectiveHourlyRate, baseAmount, premiumAmount, and totalAmount.
+- Each PaySegment includes start, end, payableSeconds, payableMinutesExact, payableMinutes, baseHourlyRate, snapshotStatus, appliedRules, stackingStrategy, effectivePremiumPercent, effectiveHourlyRate, baseAmount, premiumAmount, and totalAmount.
 - payableSeconds and payableMinutesExact are backend-calculated audit fields.
 - payableMinutes is display-oriented integer minutes. Amount math uses seconds/exact duration, not payableMinutes.
-- Applied rule snapshots include rule id, name, type, and premium percent.
+- PayCalculation totals and PaySegment baseAmount, premiumAmount, and totalAmount are persisted scale-8 audit calculation amounts. Header totals are exactly the sums of persisted segment values and must satisfy all four audit identities; individual segments are never currency-rounded to scale 2.
+- With snapshotStatus COMPLETE, appliedRules contains the complete persisted rule snapshot (rule id, name, type, and premium percent); `[]` means the complete snapshot recorded no applicable rules. With snapshotStatus UNAVAILABLE, persisted monetary/duration fields may still be shown, but appliedRules is null, never `[]`; clients must not infer that premium rules were absent. Backend logs/observes unreadable or invalid appliedRulesSnapshot persistence data, and mobile shows a neutral unavailable-breakdown state without recalculating amounts.
+- A legacy absent PayCalculation is not an UNAVAILABLE snapshot: it remains null or absent in an optional breakdown field and uses the historical calculatedSalary fallback.
 - Mobile may display simplified hours/minutes, but must not calculate premium pay.
 
 Acceptance examples:
@@ -618,7 +624,9 @@ Business flow:
 
 1. A foreman closes a shift.
 2. The backend persists workedMinutes, premium-aware calculatedSalary, and pay
-   calculation snapshots for APPROVED worker attendance.
+   calculation snapshots for new policy-based APPROVED worker attendance. For a
+   legacy CLOSED APPROVED attendance without a snapshot, it retains the
+   persisted calculatedSalary without backfilling or recalculating it.
 3. CLOSED APPROVED attendance starts with paymentStatus UNPAID.
 4. Worker opens Payroll and sees own CLOSED UNPAID attendance records.
 5. Worker explicitly selects attendance records, usually from a calendar or list
@@ -661,9 +669,10 @@ Rounding rules:
   submission and may display only backend-returned preview totals.
 - rawPayableMinutes is the persisted ShiftAttendance.workedMinutes from the
   close flow.
-- calculatedSalary remains the exact audit/display amount from the close flow,
-  including configured premium pay when a PayPolicy applies, stored with scale 2
-  and HALF_UP.
+- calculatedSalary is the persisted currency-settlement amount from the close
+  flow. For policy-based attendance it is PayCalculation.totalAmount rounded
+  once to scale 2 with HALF_UP, not an independently rounded sum of segments.
+- For legacy attendance without a PayCalculation snapshot, calculatedSalary is also the authoritative payout basis; totalBaseAmount equals calculatedSalary, totalPremiumAmount is 0, and the backend neither recalculates the salary nor creates a snapshot.
 - payoutRoundedMinutes is rawPayableMinutes rounded to the nearest 5 minutes
   with half-up midpoint behavior.
 - If rawPayableMinutes is 0, payoutRoundedMinutes is 0.
@@ -671,18 +680,20 @@ Rounding rules:
   payoutRoundedMinutes is 5.
 - For non-premium attendance, roundedItemAmountExact = payoutRoundedMinutes / 60 * hourlyRate.
 - For premium-aware attendance, exactCalculatedAmount and payoutAmount use
-  backend final salary/pay calculation fields and policy snapshots, not
-  mobile-calculated formulas.
-- For premium-aware attendance, payoutAmount is based on the stored backend
-  calculatedSalary / premium-aware item amount according to the backend payroll
-  service.
+  persisted final salary/item fields and policy snapshots, not mobile-calculated
+  formulas. Payout basis is stored attendance.calculatedSalary.
 - Rounded minutes remain informational/audit fields for payout rules and display,
   but they must not rescale or recalculate premium-aware salary on mobile.
 - payoutAmount is whole-number money with no cents, rounded from the
   backend-owned exact item amount using CEILING.
-- Request totals are sums of item-level rawPayableMinutes,
-  payoutRoundedMinutes, totalBaseAmount, totalPremiumAmount,
-  calculatedSalary/exactCalculatedAmount, and payoutAmount.
+- Item/request totalBaseAmount and totalPremiumAmount are scale-8 audit
+  component totals summed from calculation snapshots and persisted items.
+  Item calculatedSalary is the persisted currency-rounded attendance salary;
+  request exactCalculatedAmount/totalCalculatedSalary sums those persisted item
+  salaries, and payoutAmount sums persisted item payout amounts.
+- Audit component totals and currency-settlement calculatedSalary/payout totals
+  are distinct views and need not be identical when a rounding delta exists.
+- Worker history/details, foreman summary/details, and payout preview, create, list, and approve use the same legacy item fallback so totalSalary, base totals, premium totals, exactCalculatedAmount, and payout basis remain consistent.
 - Examples for payoutRoundedMinutes: 0 -> 0, 1 -> 5, 4 -> 5, 5 -> 5, 7 -> 5,
   8 -> 10, 11 -> 10, 13 -> 15, 25 -> 25, 28 -> 30.
 - If product later wants 25 -> 30, that is not nearest-5 half-up rounding and

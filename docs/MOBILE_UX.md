@@ -348,7 +348,7 @@ Rules:
 
 - this screen is worker attendance history
 - do not use it as foreman managed-shift history
-- pay breakdown seconds and exact minutes are backend audit fields; mobile may format them as simplified hours/minutes for display
+- pay breakdown seconds, exact minutes, and base/premium/total amounts are backend audit fields; audit amounts can have up to 8 decimal places, so mobile may format them for display but must not calculate or re-sum them
 
 ### WorkerShiftDetailsScreen
 
@@ -390,6 +390,9 @@ Rules:
 - do not calculate premium pay, overtime, effective rates, or pay breakdown totals on the client
 - do not calculate rounded payroll minutes or payout amount on the client
 - pay breakdown `payableMinutes` is display-oriented; mobile must not use it to derive amounts
+- if payCalculation is absent/null for legacy closed attendance, treat persisted calculatedSalary as the backend final amount; when totals are returned, base equals calculatedSalary and premium is 0. Do not ask the client to reconstruct a breakdown or recalculate it.
+- if a returned payCalculation or segment has `snapshotStatus: "UNAVAILABLE"`, show a neutral unavailable-breakdown state. Persisted durations and amounts may be displayed, but appliedRules is null (never an empty-rule result) and mobile must not infer that no premium rules applied or recalculate any amount.
+- detailed PayCalculation/PaySegment amounts are scale-8 audit data. Show stored calculatedSalary for normal currency display; do not independently round or sum segment amounts, because the audit-component sum can differ from the once-rounded currency salary.
 - for late workers, display backend persisted `payableStartTime`, `workedMinutes`, `pauseMinutes`, and `calculatedSalary`; do not derive them from `actualStartTime`
 
 ### WorkerPayrollScreen
@@ -645,6 +648,9 @@ Rules:
 - worker rows are based only on approved worker attendance
 - backend salary subtracts backend-tracked dynamic pause minutes first, then static break minutes from earliest remaining payable worker time
 - premium breakdown is read-only backend output and applies only to worker attendance in the initial implementation
+- worker base/premium totals and segment money fields are scale-8 audit components; total worker salary is the sum of backend currency-settlement calculatedSalary values and can differ by a rounding delta
+- for a legacy worker without a payCalculation, show the backend final salary and returned fallback totals without fabricating a detailed breakdown; base equals calculatedSalary and premium is 0
+- for `snapshotStatus: "UNAVAILABLE"`, show a neutral unavailable-breakdown state rather than an empty applied-rules state, and never recalculate amounts
 - do not show foreman salary fields to workers
 - ADMIN users are not a mobile MVP target and should not receive foreman salary fields through REST/mobile API
 
@@ -663,6 +669,7 @@ Content:
 - raw payable minutes with hours/minutes formatting
 - backend-calculated whole-number payout amount
 - request-level total base amount, premium amount, and calculated salary may appear in detail views when returned by the backend
+- request base/premium totals are scale-8 audit components; calculated salary and payout totals are currency-settlement values and can differ from the audit-component sum by a rounding delta
 - optional detailed premium breakdown in a separate detail view, not on request cards
 - requestedAt, approvedAt, and paidAt when present
 - status badges for `PENDING` and `APPROVED`
@@ -693,6 +700,8 @@ Rules:
 - do not calculate premium pay, overtime, effective rates, or pay breakdown totals on the client
 - rounded payable minutes are backend audit/display fields and must not be used by mobile to rescale premium-aware salary
 - mobile must not derive payout totals locally
+- show stored calculatedSalary/final payoutAmount for normal money display. If a detailed view exposes scale-8 base/premium audit components, format them only; do not independently round or sum them to reconcile currency totals
+- for legacy payout items without a payCalculation, use backend-returned calculatedSalary/payout values and fallback totals only; do not synthesize a breakdown or recalculate the payout basis
 - do not show exact calculated amount or rounded payable minutes on payout request cards unless a later detailed audit view is added
 - keep payroll cards focused on raw payable time, final payout amount, status, and selected days/items
 

@@ -186,8 +186,11 @@ Phase 2B - Overtime calculation context:
 Phase 2C - Production salary integration and persisted breakdown:
 
 - [ ] Add PayCalculation and PaySegment persistence/snapshot model
+- [ ] Add and expose PayCalculation/PaySegment snapshotStatus (`COMPLETE` or `UNAVAILABLE`); invalid/unreadable appliedRulesSnapshot JSON must produce `UNAVAILABLE` with `appliedRules: null`, never an empty list, and must be logged/observed as persistence corruption
 - [ ] Integrate premium calculation into closeShift using the frozen PayPolicyVersion
 - [ ] Make worker calculatedSalary the premium-included worker total for approved attendance
+- [ ] Persist PayCalculation/PaySegment base, premium, and total audit amounts at decimal scale 8; compute each segment once from seconds/exact duration without independent currency rounding, persist headers as segment sums, and enforce all four audit identities
+- [ ] Round ShiftAttendance.calculatedSalary once from PayCalculation.totalAmount to scale 2 with HALF_UP; keep detailed audit components separate from currency-settlement salary and payout totals
 - [ ] Persist calculation breakdown/snapshot data needed to explain historical calculations after policy changes
 - [ ] Keep foreman premium pay deferred; foreman salary remains separate and base-rate only
 - [ ] Ensure CANCELLED/DISCARDED shifts remain non-payable and excluded from premium/payroll calculations
@@ -196,8 +199,13 @@ Phase 2C - Production salary integration and persisted breakdown:
 - [ ] Expose own read-only pay breakdown in worker history/details after close
 - [ ] Expose premium totals/breakdown in payout/payable detailed DTOs according to API docs while keeping mobile cards simple
 - [ ] Ensure payout requests use stored premium-included salary/backend payroll service amounts, expose aggregate totalBaseAmount/totalPremiumAmount/totalCalculatedSalary or exact total naming, and keep rounded minutes informational for premium-aware salary
+- [ ] Apply the legacy CLOSED APPROVED attendance fallback consistently in worker history/details, foreman summary/details, and payout preview/create/list/approve: persisted calculatedSalary is final, totalBaseAmount equals it, totalPremiumAmount is 0, optional payCalculation is null/absent, and no snapshot is backfilled or salary recalculated
 - [ ] Add regression tests for earliest-first static break placement, dynamic pauses, late join payableStartTime, discard, cancellation, and privacy
 - [ ] Add tests for historical policy snapshot/version immutability
+- [ ] Add acceptance tests that legacy summary and payout fallback totals/basis remain consistent
+- [ ] Add acceptance tests that corrupt applied-rule JSON is explicit `UNAVAILABLE` with `appliedRules: null`, never empty rules
+- [ ] Add acceptance tests for a one-second or other sub-minute premium segment, no independent segment currency rounding, exact persisted header-to-segment audit identities, once-only final calculatedSalary rounding from header total, and payout using that stored final salary
+- [ ] Add production close-flow tests for premium calculation, frozen policy immutability, daily/weekly overtime, pause/static-break placement, DST, payout integration, and privacy
 - [ ] Add acceptance scenario tests A-I from SPEC/API against production close salary behavior
 - [ ] Update OpenAPI/Swagger docs for pay breakdown DTOs after implementation
 
