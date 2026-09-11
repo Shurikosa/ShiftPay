@@ -206,7 +206,7 @@ Phase 2C - Production salary integration and persisted breakdown:
 - [x] Add acceptance tests that corrupt applied-rule JSON is explicit `UNAVAILABLE` with `appliedRules: null`, never empty rules
 - [x] Add acceptance tests for a one-second or other sub-minute premium segment, no independent segment currency rounding, exact persisted header-to-segment audit identities, once-only final calculatedSalary rounding from header total, and payout using that stored final salary
 - [x] Add production close-flow tests for premium calculation, frozen policy immutability, daily/weekly overtime, pause/static-break placement, DST, payout integration, and privacy
-- [ ] Add acceptance scenario tests A-I from SPEC/API against production close salary behavior
+- [x] Add acceptance scenario tests A-I from SPEC/API against production close salary behavior
 - [x] Update OpenAPI/Swagger docs for pay breakdown DTOs after implementation
 
 Phase 2D - Mobile pay rules and breakdown UI:
