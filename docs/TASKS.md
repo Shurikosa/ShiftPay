@@ -64,13 +64,13 @@ Each Codex session should take one small task from this file.
 
 Short-shift correction tasks:
 
-- [ ] Add `DISCARDED` ShiftStatus for active short shifts the foreman chooses not to save
-- [ ] Update close shift to return `SHORT_SHIFT_REQUIRES_DECISION` when backend actual duration is 0 or less than 15 minutes and `saveShortShift` is not true
-- [ ] Support close shift request body `{ "saveShortShift": true }` so the foreman can explicitly save a short shift
-- [ ] Add `POST /api/v1/shifts/{shiftId}/discard` for owner FOREMAN to discard ACTIVE shifts whose backend actual duration is 0 or less than 15 minutes
-- [ ] Persist discardedAt, discardedBy, discardReason, and audit actualEndTime for DISCARDED shifts
-- [ ] Ensure DISCARDED shifts do not calculate salary, initialize payroll, appear as payable attendance, or return shift summary
-- [ ] Add lifecycle tests for short close warning, explicit save, discard, non-owner/role rejection, non-short discard conflict, pause auto-end audit behavior, and payroll exclusion
+- [x] Add `DISCARDED` ShiftStatus for active short shifts the foreman chooses not to save
+- [x] Update close shift to return `SHORT_SHIFT_REQUIRES_DECISION` when backend actual duration is 0 or less than 15 minutes and `saveShortShift` is not true
+- [x] Support close shift request body `{ "saveShortShift": true }` so the foreman can explicitly save a short shift
+- [x] Add `POST /api/v1/shifts/{shiftId}/discard` for owner FOREMAN to discard ACTIVE shifts whose backend actual duration is 0 or less than 15 minutes
+- [x] Persist discardedAt, discardedBy, discardReason, and audit actualEndTime for DISCARDED shifts
+- [x] Ensure DISCARDED shifts do not calculate salary, initialize payroll, appear as payable attendance, or return shift summary
+- [x] Add lifecycle tests for short close warning, explicit save, discard, non-owner/role rejection, non-short discard conflict, pause auto-end audit behavior, and payroll exclusion
 
 ## Milestone 5: Attendance
 
@@ -94,38 +94,38 @@ Short-shift correction tasks:
 
 Backend tasks:
 
-- [ ] Add attendance payment status: UNPAID, PAYMENT_REQUESTED, PAID
-- [ ] Initialize APPROVED CLOSED attendance as UNPAID during close flow
-- [ ] Add payout_requests table/entity with worker, company, manager foreman, status, totals, requestedAt, approvedAt, paidAt
-- [ ] Add payout_request_items table/entity with attendance snapshots, exact amount, rounded minutes, whole-number payout amount, and paidAt
-- [ ] Add payroll rounding service: round raw payable minutes to nearest 5 minutes with half-up midpoint behavior and round item payout amount up to whole money units
-- [ ] Implement `GET /api/v1/me/payable-attendances`
-- [ ] Implement `POST /api/v1/me/payout-requests/preview`
-- [ ] Implement `POST /api/v1/me/payout-requests`
-- [ ] Implement `GET /api/v1/me/payout-requests`
-- [ ] Implement `GET /api/v1/me/managed-payout-requests`
-- [ ] Implement `POST /api/v1/me/managed-payout-requests/{requestId}/approve`
-- [ ] Enforce worker ownership, company scope, CLOSED shift, APPROVED attendance, UNPAID payment status, and same-manager-foreman request validation
-- [ ] Reject duplicate attendanceIds with 400 Bad Request for preview and create
-- [ ] Prevent PAID or PAYMENT_REQUESTED attendance from being added to a new pending request
-- [ ] Enforce foreman approval only for own company and own managed shifts
-- [ ] Add transactional locking for payout request creation and approval
-- [ ] Add backend tests for payroll authorization, conflicts, transactional status updates, privacy, and rounding edge cases
-- [ ] Update OpenAPI/Swagger docs for payroll endpoints after implementation
+- [x] Add attendance payment status: UNPAID, PAYMENT_REQUESTED, PAID
+- [x] Initialize APPROVED CLOSED attendance as UNPAID during close flow
+- [x] Add payout_requests table/entity with worker, company, manager foreman, status, totals, requestedAt, approvedAt, paidAt
+- [x] Add payout_request_items table/entity with attendance snapshots, exact amount, rounded minutes, whole-number payout amount, and paidAt
+- [x] Add payroll rounding service: round raw payable minutes to nearest 5 minutes with half-up midpoint behavior and round item payout amount up to whole money units
+- [x] Implement `GET /api/v1/me/payable-attendances`
+- [x] Implement `POST /api/v1/me/payout-requests/preview`
+- [x] Implement `POST /api/v1/me/payout-requests`
+- [x] Implement `GET /api/v1/me/payout-requests`
+- [x] Implement `GET /api/v1/me/managed-payout-requests`
+- [x] Implement `POST /api/v1/me/managed-payout-requests/{requestId}/approve`
+- [x] Enforce worker ownership, company scope, CLOSED shift, APPROVED attendance, UNPAID payment status, and same-manager-foreman request validation
+- [x] Reject duplicate attendanceIds with 400 Bad Request for preview and create
+- [x] Prevent PAID or PAYMENT_REQUESTED attendance from being added to a new pending request
+- [x] Enforce foreman approval only for own company and own managed shifts
+- [x] Add transactional locking for payout request creation and approval
+- [x] Add backend tests for payroll authorization, conflicts, transactional status updates, privacy, and rounding edge cases
+- [x] Update OpenAPI/Swagger docs for payroll endpoints after implementation
 
 Mobile tasks:
 
-- [ ] Add payroll API client methods and TypeScript DTOs
-- [ ] Add Worker Payroll screen with selectable CLOSED unpaid attendance days
-- [ ] Add backend preview call for selected payout totals
-- [ ] Add payout request creation flow using explicit attendanceIds
-- [ ] Show worker payout request history with PENDING and APPROVED status badges
-- [ ] Add Foreman Payroll Requests screen for pending/approved requests
-- [ ] Add foreman approve action and refresh behavior
-- [ ] Display backend `paymentStatus`, raw payable time, and whole-number `payoutAmount` on payroll cards
-- [ ] Hide `payoutRoundedMinutes` and exact calculated amount on payout request cards unless a later detailed audit view is added
-- [ ] Ensure mobile formats time only and does not calculate or sum salary, rounded payroll minutes, payout amounts, or selected totals
-- [ ] Add short-shift close decision flow: handle `SHORT_SHIFT_REQUIRES_DECISION`, save with `{ "saveShortShift": true }`, or call discard
+- [x] Add payroll API client methods and TypeScript DTOs
+- [x] Add Worker Payroll screen with selectable CLOSED unpaid attendance days
+- [x] Add backend preview call for selected payout totals
+- [x] Add payout request creation flow using explicit attendanceIds
+- [x] Show worker payout request history with PENDING and APPROVED status badges
+- [x] Add Foreman Payroll Requests screen for pending/approved requests
+- [x] Add foreman approve action and refresh behavior
+- [x] Display backend `paymentStatus`, raw payable time, and whole-number `payoutAmount` on payroll cards
+- [x] Hide `payoutRoundedMinutes` and exact calculated amount on payout request cards unless a later detailed audit view is added
+- [x] Ensure mobile formats time only and does not calculate or sum salary, rounded payroll minutes, payout amounts, or selected totals
+- [x] Add short-shift close decision flow: handle `SHORT_SHIFT_REQUIRES_DECISION`, save with `{ "saveShortShift": true }`, or call discard
 
 ## Milestone 6.2: Configurable Pay Rules / Premium Pay
 
@@ -139,75 +139,75 @@ Phase dependencies:
 
 Phase 1 - Pay policy configuration foundation:
 
-- [ ] Add Company.timeZone with IANA timezone validation and configured backend timezone default for existing companies
-- [ ] Add default/current PayPolicy initialization for every company after creation and migration
-- [ ] Add PayPolicy/PayPolicyVersion and PayPolicyRule migrations/entities
-- [ ] Store PayPolicy as immutable company-owned versions; updating policy creates a new version and does not mutate old versions
-- [ ] Add active/default policy initialization with weekStartsOn MONDAY, stackingStrategy ADD, no default premium percentages, and migration/onboarding backfill for companies missing a current policy
-- [ ] Add PayPolicy rule persistence
-- [ ] Add PayPolicy validation for rule condition configs, premiumPercent 0.0000..1000.0000 with max scale 4, time ranges, overtime thresholds, weekdays, and manual holidays
-- [ ] Implement `GET /api/v1/me/pay-policy`
-- [ ] Implement `PUT /api/v1/me/pay-policy`
-- [ ] Implement `GET /api/v1/me/pay-policy/versions` for audit if included in the backend scope
-- [ ] Freeze current PayPolicyVersion id on ShiftSession at shift start and return PAY_POLICY_REQUIRED if the current policy invariant is broken
-- [ ] Do not integrate premium calculation into closeShift in Phase 1
-- [ ] Do not change calculatedSalary or payout behavior in Phase 1
-- [ ] Update OpenAPI/Swagger docs for pay policy endpoints after implementation
+- [x] Add Company.timeZone with IANA timezone validation and configured backend timezone default for existing companies
+- [x] Add default/current PayPolicy initialization for every company after creation and migration
+- [x] Add PayPolicy/PayPolicyVersion and PayPolicyRule migrations/entities
+- [x] Store PayPolicy as immutable company-owned versions; updating policy creates a new version and does not mutate old versions
+- [x] Add active/default policy initialization with weekStartsOn MONDAY, stackingStrategy ADD, no default premium percentages, and migration/onboarding backfill for companies missing a current policy
+- [x] Add PayPolicy rule persistence
+- [x] Add PayPolicy validation for rule condition configs, premiumPercent 0.0000..1000.0000 with max scale 4, time ranges, overtime thresholds, weekdays, and manual holidays
+- [x] Implement `GET /api/v1/me/pay-policy`
+- [x] Implement `PUT /api/v1/me/pay-policy`
+- [x] Implement `GET /api/v1/me/pay-policy/versions` for audit if included in the backend scope
+- [x] Freeze current PayPolicyVersion id on ShiftSession at shift start and return PAY_POLICY_REQUIRED if the current policy invariant is broken
+- [x] Do not integrate premium calculation into closeShift in Phase 1
+- [x] Do not change calculatedSalary or payout behavior in Phase 1
+- [x] Update OpenAPI/Swagger docs for pay policy endpoints after implementation
 
 Phase 2A - Premium calculation foundation, no production salary change:
 
-- [ ] Add internal premium calculation service
-- [ ] Add explainable PayCalculation/PaySegment result objects with seconds/exact minutes audit fields, display-oriented payableMinutes, segment base/premium/total amounts, and applied rule snapshots, without production persistence
-- [ ] Implement TIME_OF_DAY rule evaluation
-- [ ] Implement DAY_OF_WEEK rule evaluation
-- [ ] Implement HOLIDAY rule evaluation
-- [ ] Implement ADD and HIGHEST_ONLY stacking strategies through PayPolicy.stackingStrategy
-- [ ] Build segmentation for payable interval start/end, dynamic pause removal by timestamp, earliest-first static break deduction, company timezone day boundaries, midnight, TIME_OF_DAY boundaries, DAY_OF_WEEK boundaries, HOLIDAY boundaries, and DST-safe real instants/durations
-- [ ] Add unit tests for acceptance scenarios A, B, C, F, G, and H from SPEC/API
-- [ ] Add unit tests for holiday and day-of-week rule evaluation
-- [ ] Add unit tests for static break placement: 20:00-04:00 with static break 60 removes 20:00-21:00, and dynamic pause 22:00-22:30 is removed before earliest-first static break deduction
-- [ ] Do not integrate the premium calculation service with closeShift in Phase 2A
-- [ ] Do not change calculatedSalary or payout behavior in Phase 2A
+- [x] Add internal premium calculation service
+- [x] Add explainable PayCalculation/PaySegment result objects with seconds/exact minutes audit fields, display-oriented payableMinutes, segment base/premium/total amounts, and applied rule snapshots, without production persistence
+- [x] Implement TIME_OF_DAY rule evaluation
+- [x] Implement DAY_OF_WEEK rule evaluation
+- [x] Implement HOLIDAY rule evaluation
+- [x] Implement ADD and HIGHEST_ONLY stacking strategies through PayPolicy.stackingStrategy
+- [x] Build segmentation for payable interval start/end, dynamic pause removal by timestamp, earliest-first static break deduction, company timezone day boundaries, midnight, TIME_OF_DAY boundaries, DAY_OF_WEEK boundaries, HOLIDAY boundaries, and DST-safe real instants/durations
+- [x] Add unit tests for acceptance scenarios A, B, C, F, G, and H from SPEC/API
+- [x] Add unit tests for holiday and day-of-week rule evaluation
+- [x] Add unit tests for static break placement: 20:00-04:00 with static break 60 removes 20:00-21:00, and dynamic pause 22:00-22:30 is removed before earliest-first static break deduction
+- [x] Do not integrate the premium calculation service with closeShift in Phase 2A
+- [x] Do not change calculatedSalary or payout behavior in Phase 2A
 
 Phase 2B - Overtime calculation context:
 
-- [ ] Implement DAILY_OVERTIME rule evaluation
-- [ ] Implement WEEKLY_OVERTIME rule evaluation
-- [ ] Add previous finalized payable intervals context for the same worker/company and policy timezone period
-- [ ] Use frozen policy version plus previous finalized payable minutes for MVP overtime context when closing a shift
-- [ ] Implement deterministic chronological overtime allocation by company/policy timezone payable interval order
-- [ ] Tie-break chronological allocation by payable interval/piece start, attendancePayableStartTime fallback, required stable DB/test id, then current flag only as final deterministic fallback
-- [ ] Document and test MVP chronological-close limitation for overtime allocation; teams should close shifts chronologically until batch recalculation exists
-- [ ] Add tests for acceptance scenarios D and E from SPEC/API
-- [ ] Add tests for weekly overtime boundary behavior
-- [ ] Do not integrate overtime premium calculation into production closeShift in Phase 2B unless the phase is explicitly promoted to Phase 2C
-- [ ] Do not change calculatedSalary or payout behavior in Phase 2B unless the phase is explicitly promoted to Phase 2C
+- [x] Implement DAILY_OVERTIME rule evaluation
+- [x] Implement WEEKLY_OVERTIME rule evaluation
+- [x] Add previous finalized payable intervals context for the same worker/company and policy timezone period
+- [x] Use frozen policy version plus previous finalized payable minutes for MVP overtime context when closing a shift
+- [x] Implement deterministic chronological overtime allocation by company/policy timezone payable interval order
+- [x] Tie-break chronological allocation by payable interval/piece start, attendancePayableStartTime fallback, required stable DB/test id, then current flag only as final deterministic fallback
+- [x] Document and test MVP chronological-close limitation for overtime allocation; teams should close shifts chronologically until batch recalculation exists
+- [x] Add tests for acceptance scenarios D and E from SPEC/API
+- [x] Add tests for weekly overtime boundary behavior
+- [x] Do not integrate overtime premium calculation into production closeShift in Phase 2B unless the phase is explicitly promoted to Phase 2C
+- [x] Do not change calculatedSalary or payout behavior in Phase 2B unless the phase is explicitly promoted to Phase 2C
 
 Phase 2C - Production salary integration and persisted breakdown:
 
-- [ ] Add PayCalculation and PaySegment persistence/snapshot model
-- [ ] Add and expose PayCalculation/PaySegment snapshotStatus (`COMPLETE` or `UNAVAILABLE`); invalid/unreadable appliedRulesSnapshot JSON must produce `UNAVAILABLE` with `appliedRules: null`, never an empty list, and must be logged/observed as persistence corruption
-- [ ] Integrate premium calculation into closeShift using the frozen PayPolicyVersion
-- [ ] Make worker calculatedSalary the premium-included worker total for approved attendance
-- [ ] Persist PayCalculation/PaySegment base, premium, and total audit amounts at decimal scale 8; compute each segment once from seconds/exact duration without independent currency rounding, persist headers as segment sums, and enforce all four audit identities
-- [ ] Round ShiftAttendance.calculatedSalary once from PayCalculation.totalAmount to scale 2 with HALF_UP; keep detailed audit components separate from currency-settlement salary and payout totals
-- [ ] Persist calculation breakdown/snapshot data needed to explain historical calculations after policy changes
-- [ ] Keep foreman premium pay deferred; foreman salary remains separate and base-rate only
-- [ ] Ensure CANCELLED/DISCARDED shifts remain non-payable and excluded from premium/payroll calculations
-- [ ] Ensure short saved CLOSED shifts can persist zero payable, premium, and total amounts
-- [ ] Expose worker pay breakdown in shift summary for owner FOREMAN
-- [ ] Expose own read-only pay breakdown in worker history/details after close
-- [ ] Expose premium totals/breakdown in payout/payable detailed DTOs according to API docs while keeping mobile cards simple
-- [ ] Ensure payout requests use stored premium-included salary/backend payroll service amounts, expose aggregate totalBaseAmount/totalPremiumAmount/totalCalculatedSalary or exact total naming, and keep rounded minutes informational for premium-aware salary
-- [ ] Apply the legacy CLOSED APPROVED attendance fallback consistently in worker history/details, foreman summary/details, and payout preview/create/list/approve: persisted calculatedSalary is final, totalBaseAmount equals it, totalPremiumAmount is 0, optional payCalculation is null/absent, and no snapshot is backfilled or salary recalculated
-- [ ] Add regression tests for earliest-first static break placement, dynamic pauses, late join payableStartTime, discard, cancellation, and privacy
-- [ ] Add tests for historical policy snapshot/version immutability
-- [ ] Add acceptance tests that legacy summary and payout fallback totals/basis remain consistent
-- [ ] Add acceptance tests that corrupt applied-rule JSON is explicit `UNAVAILABLE` with `appliedRules: null`, never empty rules
-- [ ] Add acceptance tests for a one-second or other sub-minute premium segment, no independent segment currency rounding, exact persisted header-to-segment audit identities, once-only final calculatedSalary rounding from header total, and payout using that stored final salary
-- [ ] Add production close-flow tests for premium calculation, frozen policy immutability, daily/weekly overtime, pause/static-break placement, DST, payout integration, and privacy
+- [x] Add PayCalculation and PaySegment persistence/snapshot model
+- [x] Add and expose PayCalculation/PaySegment snapshotStatus (`COMPLETE` or `UNAVAILABLE`); invalid/unreadable appliedRulesSnapshot JSON must produce `UNAVAILABLE` with `appliedRules: null`, never an empty list, and must be logged/observed as persistence corruption
+- [x] Integrate premium calculation into closeShift using the frozen PayPolicyVersion
+- [x] Make worker calculatedSalary the premium-included worker total for approved attendance
+- [x] Persist PayCalculation/PaySegment base, premium, and total audit amounts at decimal scale 8; compute each segment once from seconds/exact duration without independent currency rounding, persist headers as segment sums, and enforce all four audit identities
+- [x] Round ShiftAttendance.calculatedSalary once from PayCalculation.totalAmount to scale 2 with HALF_UP; keep detailed audit components separate from currency-settlement salary and payout totals
+- [x] Persist calculation breakdown/snapshot data needed to explain historical calculations after policy changes
+- [x] Keep foreman premium pay deferred; foreman salary remains separate and base-rate only
+- [x] Ensure CANCELLED/DISCARDED shifts remain non-payable and excluded from premium/payroll calculations
+- [x] Ensure short saved CLOSED shifts can persist zero payable, premium, and total amounts
+- [x] Expose worker pay breakdown in shift summary for owner FOREMAN
+- [x] Expose own read-only pay breakdown in worker history/details after close
+- [x] Expose premium totals/breakdown in payout/payable detailed DTOs according to API docs while keeping mobile cards simple
+- [x] Ensure payout requests use stored premium-included salary/backend payroll service amounts, expose aggregate totalBaseAmount/totalPremiumAmount/totalCalculatedSalary or exact total naming, and keep rounded minutes informational for premium-aware salary
+- [x] Apply the legacy CLOSED APPROVED attendance fallback consistently in worker history/details, foreman summary/details, and payout preview/create/list/approve: persisted calculatedSalary is final, totalBaseAmount equals it, totalPremiumAmount is 0, optional payCalculation is null/absent, and no snapshot is backfilled or salary recalculated
+- [x] Add regression tests for earliest-first static break placement, dynamic pauses, late join payableStartTime, discard, cancellation, and privacy
+- [x] Add tests for historical policy snapshot/version immutability
+- [x] Add acceptance tests that legacy summary and payout fallback totals/basis remain consistent
+- [x] Add acceptance tests that corrupt applied-rule JSON is explicit `UNAVAILABLE` with `appliedRules: null`, never empty rules
+- [x] Add acceptance tests for a one-second or other sub-minute premium segment, no independent segment currency rounding, exact persisted header-to-segment audit identities, once-only final calculatedSalary rounding from header total, and payout using that stored final salary
+- [x] Add production close-flow tests for premium calculation, frozen policy immutability, daily/weekly overtime, pause/static-break placement, DST, payout integration, and privacy
 - [ ] Add acceptance scenario tests A-I from SPEC/API against production close salary behavior
-- [ ] Update OpenAPI/Swagger docs for pay breakdown DTOs after implementation
+- [x] Update OpenAPI/Swagger docs for pay breakdown DTOs after implementation
 
 Phase 2D - Mobile pay rules and breakdown UI:
 
@@ -254,7 +254,7 @@ Follow-up backend tasks:
 - [x] Enforce company membership before worker joins shift
 - [x] Attach shifts to foreman company
 - [x] Remove Default Company fallback for real MVP shifts
-- [ ] Remove planned time inputs from create shift API/mobile contract
+- [x] Remove planned time inputs from create shift API/mobile contract
 - [x] Generate shift title automatically from date/time and company name
 - [x] Add `foremanHourlyRate` to shift creation and ShiftSession
 - [x] Calculate private foreman salary on close and summary
@@ -303,8 +303,8 @@ Follow-up mobile tasks:
 
 - [x] Add Docker Compose for PostgreSQL
 - [ ] Add backend Dockerfile
-- [ ] Add local development compose file
-- [ ] Add README instructions for running locally
+- [x] Add local development compose file
+- [x] Add README instructions for running locally
 
 ## Milestone 10: Web Admin
 
