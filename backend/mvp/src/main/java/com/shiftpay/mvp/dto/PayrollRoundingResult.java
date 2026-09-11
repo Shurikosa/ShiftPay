@@ -7,7 +7,7 @@ import java.math.BigDecimal;
  *
  * @param rawPayableMinutes persisted worked minutes
  * @param payoutRoundedMinutes minutes rounded to the nearest 5-minute boundary with half-up midpoint behavior
- * @param roundedItemAmountExact exact rounded-minute amount before whole-money rounding
+ * @param roundedItemAmountExact exact rounded amount basis before whole-money rounding
  * @param payoutAmount whole-number money amount rounded with CEILING
  */
 public record PayrollRoundingResult(

@@ -13,4 +13,13 @@ public class PayPolicyRequiredException extends RuntimeException {
 	public PayPolicyRequiredException() {
 		super("Current pay policy is required before starting a shift");
 	}
+
+	/**
+	 * Creates the conflict exception with a flow-specific message.
+	 *
+	 * @param message API message
+	 */
+	public PayPolicyRequiredException(String message) {
+		super(message);
+	}
 }

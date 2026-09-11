@@ -2,6 +2,7 @@ package com.shiftpay.mvp.dto;
 
 import com.shiftpay.mvp.entity.PayoutRequest;
 import com.shiftpay.mvp.entity.PayoutRequestStatus;
+import tools.jackson.databind.annotation.JsonSerialize;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -20,6 +21,8 @@ import java.util.List;
  * @param rawPayableMinutes total raw persisted worked minutes
  * @param payoutRoundedMinutes total backend-rounded payable minutes
  * @param exactCalculatedAmount total exact calculated salary
+ * @param totalBaseAmount total base pay from persisted close calculations
+ * @param totalPremiumAmount total premium pay from persisted close calculations
  * @param payoutAmount total whole-number payout amount
  * @param requestedAt backend request creation timestamp
  * @param approvedAt backend approval timestamp, or null
@@ -37,6 +40,10 @@ public record PayoutRequestResponse(
 		Integer rawPayableMinutes,
 		Integer payoutRoundedMinutes,
 		BigDecimal exactCalculatedAmount,
+		@JsonSerialize(using = ScaleEightBigDecimalSerializer.class)
+		BigDecimal totalBaseAmount,
+		@JsonSerialize(using = ScaleEightBigDecimalSerializer.class)
+		BigDecimal totalPremiumAmount,
 		BigDecimal payoutAmount,
 		OffsetDateTime requestedAt,
 		OffsetDateTime approvedAt,
@@ -63,6 +70,8 @@ public record PayoutRequestResponse(
 				request.getRawPayableMinutesTotal(),
 				request.getPayoutRoundedMinutesTotal(),
 				request.getExactCalculatedAmountTotal(),
+				request.getTotalBaseAmount(),
+				request.getTotalPremiumAmount(),
 				request.getPayoutAmount(),
 				request.getRequestedAt(),
 				request.getApprovedAt(),

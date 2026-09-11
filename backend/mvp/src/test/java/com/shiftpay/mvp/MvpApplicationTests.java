@@ -63,6 +63,8 @@ class MvpApplicationTests {
 		assertThat(countRows("pay_policies")).isNotNegative();
 		assertThat(countRows("pay_policy_versions")).isNotNegative();
 		assertThat(countRows("pay_policy_rules")).isNotNegative();
+		assertThat(countRows("pay_calculations")).isNotNegative();
+		assertThat(countRows("pay_segments")).isNotNegative();
 		assertThat(countColumn("companies", "join_code")).isEqualTo(1);
 		assertThat(countColumn("companies", "time_zone")).isEqualTo(1);
 		assertThat(countColumn("users", "company_id")).isEqualTo(1);
@@ -80,8 +82,12 @@ class MvpApplicationTests {
 		assertThat(countColumn("shift_attendance", "payment_status")).isEqualTo(1);
 		assertThat(countColumn("shift_attendance", "paid_at")).isEqualTo(1);
 		assertThat(countColumn("payout_requests", "manager_foreman_id")).isEqualTo(1);
+		assertThat(countColumn("payout_requests", "total_base_amount")).isEqualTo(1);
+		assertThat(countColumn("payout_requests", "total_premium_amount")).isEqualTo(1);
 		assertThat(countColumn("payout_request_items", "rounded_item_amount_exact")).isEqualTo(1);
-		assertThat(latestFlywayVersion()).isEqualTo("12");
+		assertThat(countColumn("payout_request_items", "total_base_amount")).isEqualTo(1);
+		assertThat(countColumn("payout_request_items", "total_premium_amount")).isEqualTo(1);
+		assertThat(latestFlywayVersion()).isEqualTo("13");
 	}
 
 	/**

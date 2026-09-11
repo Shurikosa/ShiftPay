@@ -3,6 +3,7 @@ package com.shiftpay.mvp.dto;
 import com.shiftpay.mvp.entity.PaymentStatus;
 import com.shiftpay.mvp.entity.ShiftAttendance;
 import com.shiftpay.mvp.entity.ShiftSession;
+import tools.jackson.databind.annotation.JsonSerialize;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -23,6 +24,8 @@ import java.time.OffsetDateTime;
  * @param payoutRoundedMinutes backend-rounded payable minutes
  * @param hourlyRate attendance rate snapshot or override
  * @param calculatedSalary persisted exact salary from shift close
+ * @param totalBaseAmount persisted base pay total
+ * @param totalPremiumAmount persisted premium pay total
  * @param payoutAmount whole-number payout amount
  */
 public record PayoutAttendanceResponse(
@@ -39,6 +42,10 @@ public record PayoutAttendanceResponse(
 		Integer payoutRoundedMinutes,
 		BigDecimal hourlyRate,
 		BigDecimal calculatedSalary,
+		@JsonSerialize(using = ScaleEightBigDecimalSerializer.class)
+		BigDecimal totalBaseAmount,
+		@JsonSerialize(using = ScaleEightBigDecimalSerializer.class)
+		BigDecimal totalPremiumAmount,
 		BigDecimal payoutAmount
 ) {
 
@@ -68,7 +75,23 @@ public record PayoutAttendanceResponse(
 				rounding.payoutRoundedMinutes(),
 				attendance.getHourlyRate(),
 				attendance.getCalculatedSalary(),
+				totalBaseAmount(attendance),
+				totalPremiumAmount(attendance),
 				rounding.payoutAmount()
 		);
+	}
+
+	private static BigDecimal totalBaseAmount(ShiftAttendance attendance) {
+		if (attendance.getPayCalculation() != null) {
+			return attendance.getPayCalculation().getTotalBaseAmount();
+		}
+		return attendance.getCalculatedSalary().setScale(8);
+	}
+
+	private static BigDecimal totalPremiumAmount(ShiftAttendance attendance) {
+		if (attendance.getPayCalculation() != null) {
+			return attendance.getPayCalculation().getTotalPremiumAmount();
+		}
+		return BigDecimal.ZERO.setScale(8);
 	}
 }

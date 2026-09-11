@@ -65,6 +65,14 @@ public class PayoutRequest {
 	private Integer payoutRoundedMinutesTotal;
 
 	@Setter
+	@Column(name = "total_base_amount", nullable = false, precision = 20, scale = 8)
+	private BigDecimal totalBaseAmount;
+
+	@Setter
+	@Column(name = "total_premium_amount", nullable = false, precision = 20, scale = 8)
+	private BigDecimal totalPremiumAmount;
+
+	@Setter
 	@Column(name = "exact_calculated_amount_total", nullable = false, precision = 12, scale = 2)
 	private BigDecimal exactCalculatedAmountTotal;
 

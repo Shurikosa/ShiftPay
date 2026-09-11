@@ -1470,6 +1470,21 @@ class ShiftSessionControllerTests {
 		BigDecimal totalSalary = firstAttendance.getCalculatedSalary()
 				.add(secondAttendance.getCalculatedSalary())
 				.setScale(2, RoundingMode.HALF_UP);
+		BigDecimal totalBaseAmount = jdbcTemplate.queryForObject(
+				"select sum(total_base_amount) from pay_calculations where shift_session_id = ?",
+				BigDecimal.class,
+				shiftId
+		).setScale(8, RoundingMode.HALF_UP);
+		BigDecimal totalPremiumAmount = jdbcTemplate.queryForObject(
+				"select sum(total_premium_amount) from pay_calculations where shift_session_id = ?",
+				BigDecimal.class,
+				shiftId
+		).setScale(8, RoundingMode.HALF_UP);
+		BigDecimal firstCalculationTotal = jdbcTemplate.queryForObject(
+				"select total_amount from pay_calculations where attendance_id = ?",
+				BigDecimal.class,
+				firstAttendanceId
+		);
 		ShiftSession shift = shiftSessionRepository.findById(shiftId).orElseThrow();
 
 		getSummary(foremanToken, shiftId)
@@ -1478,6 +1493,8 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.status").value("CLOSED"))
 				.andExpect(jsonPath("$.totalWorkers").value(2))
 				.andExpect(jsonPath("$.totalSalary").value(totalSalary.doubleValue()))
+				.andExpect(jsonPath("$.totalBaseAmount").value(totalBaseAmount.doubleValue()))
+				.andExpect(jsonPath("$.totalPremiumAmount").value(totalPremiumAmount.doubleValue()))
 				.andExpect(jsonPath("$.foremanWorkedMinutes").value(shift.getForemanWorkedMinutes()))
 				.andExpect(jsonPath("$.foremanPauseMinutes").value(shift.getForemanPauseMinutes()))
 				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
@@ -1492,7 +1509,9 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.workers[0].hourlyRate").value(15.25))
 				.andExpect(jsonPath("$.workers[0].salary")
 						.value(firstAttendance.getCalculatedSalary().doubleValue()))
-				.andExpect(jsonPath("$.workers[0].*", hasSize(8)))
+				.andExpect(jsonPath("$.workers[0].payCalculation.totalAmount")
+						.value(firstCalculationTotal.doubleValue()))
+				.andExpect(jsonPath("$.workers[0].*", hasSize(9)))
 				.andExpect(jsonPath("$.workers[0].passwordHash").doesNotExist())
 				.andExpect(jsonPath("$.workers[0].user").doesNotExist())
 				.andExpect(jsonPath("$.workers[0].email").doesNotExist())
@@ -1503,7 +1522,7 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.workers[1].hourlyRate").value(18.50))
 				.andExpect(jsonPath("$.workers[1].salary")
 						.value(secondAttendance.getCalculatedSalary().doubleValue()))
-				.andExpect(jsonPath("$.*", hasSize(9)))
+				.andExpect(jsonPath("$.*", hasSize(11)))
 				.andExpect(jsonPath("$.workers[?(@.attendanceId == %d)]".formatted(joinedAttendanceId))
 						.isEmpty());
 		assertThat(joinedAttendance.getCalculatedSalary()).isNull();
@@ -1527,7 +1546,60 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.foremanPauseMinutes").doesNotExist())
 				.andExpect(jsonPath("$.foremanHourlyRate").doesNotExist())
 				.andExpect(jsonPath("$.foremanSalary").doesNotExist())
-				.andExpect(jsonPath("$.*", hasSize(5)));
+				.andExpect(jsonPath("$.workers[0].payCalculation").doesNotExist())
+				.andExpect(jsonPath("$.*", hasSize(7)));
+	}
+
+	/**
+	 * Uses legacy fallback totals when an otherwise complete historical close has no persisted pay calculation. The
+	 * read-only summary path must neither recreate the snapshot nor resolve a newer policy.
+	 */
+	@Test
+	void summaryUsesLegacySalaryFallbackWhenPayCalculationSnapshotIsAbsent() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createClosedShiftWithApprovedAttendance(foremanToken);
+		ShiftAttendance attendance = shiftAttendanceRepository
+				.findApprovedByShiftSessionIdWithWorkerOrderByWorkerName(shiftId)
+				.getFirst();
+		jdbcTemplate.update("delete from pay_segments where pay_calculation_id in (select id from pay_calculations where attendance_id = ?)",
+				attendance.getId());
+		jdbcTemplate.update("delete from pay_calculations where attendance_id = ?", attendance.getId());
+
+		getSummary(foremanToken, shiftId)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.totalSalary").value(attendance.getCalculatedSalary().doubleValue()))
+				.andExpect(jsonPath("$.totalBaseAmount").value(attendance.getCalculatedSalary().doubleValue()))
+				.andExpect(jsonPath("$.totalPremiumAmount").value(0.00))
+				.andExpect(jsonPath("$.workers[0].salary").value(attendance.getCalculatedSalary().doubleValue()))
+				.andExpect(jsonPath("$.workers[0].payCalculation").doesNotExist());
+		assertThat(jdbcTemplate.queryForObject(
+				"select count(*) from pay_calculations where attendance_id = ?", Integer.class, attendance.getId()
+		)).isZero();
+	}
+
+	/**
+	 * Makes a persisted segment rule snapshot malformed and verifies that response consumers receive an explicit
+	 * unavailable signal, preserving monetary values without falsely reporting an empty rule list.
+	 */
+	@Test
+	void malformedAppliedRuleSnapshotIsExplicitlyUnavailable() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		long shiftId = createClosedShiftWithApprovedAttendance(foremanToken);
+		Long segmentId = jdbcTemplate.queryForObject(
+				"select id from pay_segments order by id fetch first 1 rows only", Long.class
+		);
+		jdbcTemplate.update("update pay_segments set applied_rules_snapshot = ? where id = ?", "{bad-json", segmentId);
+		BigDecimal persistedCalculationTotal = jdbcTemplate.queryForObject(
+				"select total_amount from pay_calculations order by id fetch first 1 rows only", BigDecimal.class
+		);
+
+		getSummary(foremanToken, shiftId)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.workers[0].payCalculation.snapshotStatus").value("UNAVAILABLE"))
+				.andExpect(jsonPath("$.workers[0].payCalculation.segments[0].snapshotStatus").value("UNAVAILABLE"))
+				.andExpect(jsonPath("$.workers[0].payCalculation.segments[0].appliedRules").value((Object) null))
+				.andExpect(jsonPath("$.workers[0].payCalculation.totalAmount")
+						.value(persistedCalculationTotal.doubleValue()));
 	}
 
 	/**

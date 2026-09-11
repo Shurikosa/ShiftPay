@@ -25,6 +25,7 @@ import java.time.OffsetDateTime;
  * @param pauseMinutes persisted pause minutes deducted after close, or null before salary calculation
  * @param workedMinutes persisted worked minutes after close, or null before salary calculation
  * @param calculatedSalary persisted salary after close, or null before salary calculation
+ * @param payCalculation persisted premium pay breakdown after close, or null before salary calculation
  * @param pauseState pause state for this attendance worker
  * @param joinedAt UTC timestamp when the worker joined
  * @param approvedAt UTC timestamp when attendance was approved, or null
@@ -42,6 +43,7 @@ public record AttendanceResponse(
 		Integer pauseMinutes,
 		Integer workedMinutes,
 		BigDecimal calculatedSalary,
+		PayCalculationResponse payCalculation,
 		PauseStateResponse pauseState,
 		OffsetDateTime joinedAt,
 		OffsetDateTime approvedAt
@@ -94,6 +96,7 @@ public record AttendanceResponse(
 				attendance.getPauseMinutes(),
 				attendance.getWorkedMinutes(),
 				attendance.getCalculatedSalary(),
+				PayCalculationResponse.from(attendance.getPayCalculation()),
 				pauseState,
 				attendance.getJoinedAt(),
 				attendance.getApprovedAt()

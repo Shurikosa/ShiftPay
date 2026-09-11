@@ -128,7 +128,10 @@ public class PremiumPayCalculationService {
 
 		BigDecimal totalBaseAmount = sumBaseAmounts(segments);
 		BigDecimal totalPremiumAmount = sumPremiumAmounts(segments);
-		BigDecimal totalAmount = totalBaseAmount.add(totalPremiumAmount).setScale(CALCULATION_SCALE, RoundingMode.HALF_UP);
+		BigDecimal totalAmount = sumTotalAmounts(segments);
+		if (totalAmount.compareTo(totalBaseAmount.add(totalPremiumAmount).setScale(CALCULATION_SCALE, RoundingMode.HALF_UP)) != 0) {
+			throw new IllegalStateException("Premium pay segment amounts do not balance");
+		}
 		BigDecimal totalRawSeconds = sumPayableSeconds(segments);
 		long totalRawMinutes = wholeMinutes(totalRawSeconds);
 		BigDecimal totalRawMinutesExact = minutesExact(totalRawSeconds);
@@ -645,6 +648,13 @@ public class PremiumPayCalculationService {
 	private BigDecimal sumPremiumAmounts(List<PremiumPaySegment> segments) {
 		return segments.stream()
 				.map(PremiumPaySegment::premiumAmount)
+				.reduce(zeroAmount(), BigDecimal::add)
+				.setScale(CALCULATION_SCALE, RoundingMode.HALF_UP);
+	}
+
+	private BigDecimal sumTotalAmounts(List<PremiumPaySegment> segments) {
+		return segments.stream()
+				.map(PremiumPaySegment::totalAmount)
 				.reduce(zeroAmount(), BigDecimal::add)
 				.setScale(CALCULATION_SCALE, RoundingMode.HALF_UP);
 	}

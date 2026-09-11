@@ -32,6 +32,7 @@ import java.time.OffsetDateTime;
  * @param pauseMinutes persisted pause minutes deducted after close, or null before salary calculation
  * @param workedMinutes persisted worked minutes after close, or null
  * @param calculatedSalary persisted salary after close, or null
+ * @param payCalculation persisted premium pay breakdown after close, or null
  * @param pauseState pause state for the current user's attendance
  */
 public record MyShiftHistoryResponse(
@@ -52,6 +53,7 @@ public record MyShiftHistoryResponse(
 		Integer pauseMinutes,
 		Integer workedMinutes,
 		BigDecimal calculatedSalary,
+		PayCalculationResponse payCalculation,
 		PauseStateResponse pauseState
 ) {
 
@@ -108,6 +110,7 @@ public record MyShiftHistoryResponse(
 				attendance.getPauseMinutes(),
 				attendance.getWorkedMinutes(),
 				attendance.getCalculatedSalary(),
+				PayCalculationResponse.from(attendance.getPayCalculation()),
 				pauseState
 		);
 	}

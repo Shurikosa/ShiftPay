@@ -32,6 +32,21 @@ public interface PayPolicyVersionRepository extends JpaRepository<PayPolicyVersi
 	Optional<PayPolicyVersion> findCurrentByCompanyIdWithRules(@Param("companyId") Long companyId);
 
 	/**
+	 * Loads one frozen policy version with company and rules for close-time calculation.
+	 *
+	 * @param id policy version id stored on the shift
+	 * @return policy version when it exists
+	 */
+	@Query("""
+			select distinct policyVersion
+			from PayPolicyVersion policyVersion
+			join fetch policyVersion.company
+			left join fetch policyVersion.rules
+			where policyVersion.id = :id
+			""")
+	Optional<PayPolicyVersion> findByIdWithCompanyAndRules(@Param("id") Long id);
+
+	/**
 	 * Locks the current policy version while starting a shift.
 	 *
 	 * @param companyId company id

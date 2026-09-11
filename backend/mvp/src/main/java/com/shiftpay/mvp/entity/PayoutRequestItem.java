@@ -73,6 +73,14 @@ public class PayoutRequestItem {
 	private BigDecimal calculatedSalary;
 
 	@Setter
+	@Column(name = "total_base_amount", nullable = false, precision = 20, scale = 8)
+	private BigDecimal totalBaseAmount;
+
+	@Setter
+	@Column(name = "total_premium_amount", nullable = false, precision = 20, scale = 8)
+	private BigDecimal totalPremiumAmount;
+
+	@Setter
 	@Column(name = "rounded_item_amount_exact", nullable = false, precision = 12, scale = 4)
 	private BigDecimal roundedItemAmountExact;
 

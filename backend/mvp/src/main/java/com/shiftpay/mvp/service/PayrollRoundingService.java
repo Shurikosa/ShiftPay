@@ -49,6 +49,35 @@ public class PayrollRoundingService {
 		);
 	}
 
+	/**
+	 * Calculates payout rounding from the premium-aware salary persisted by shift close.
+	 *
+	 * @param rawPayableMinutes persisted worked minutes from shift close
+	 * @param calculatedSalary premium-aware attendance salary
+	 * @return payroll rounding result using persisted salary as the amount basis
+	 */
+	public PayrollRoundingResult calculateFromCalculatedSalary(
+			Integer rawPayableMinutes,
+			BigDecimal calculatedSalary
+	) {
+		if (rawPayableMinutes == null || rawPayableMinutes < 0) {
+			throw new PayoutRequestConflictException("Attendance is not payable");
+		}
+		if (calculatedSalary == null || calculatedSalary.signum() < 0) {
+			throw new PayoutRequestConflictException("Attendance is not payable");
+		}
+
+		int roundedMinutes = roundMinutes(rawPayableMinutes);
+		BigDecimal roundedItemAmountExact = calculatedSalary.setScale(4, RoundingMode.HALF_UP);
+		BigDecimal payoutAmount = roundedItemAmountExact.setScale(0, RoundingMode.CEILING);
+		return new PayrollRoundingResult(
+				rawPayableMinutes,
+				roundedMinutes,
+				roundedItemAmountExact,
+				payoutAmount
+		);
+	}
+
 	int roundMinutes(int rawPayableMinutes) {
 		if (rawPayableMinutes == 0) {
 			return 0;

@@ -19,6 +19,7 @@ import com.shiftpay.mvp.exception.AttendanceNotFoundException;
 import com.shiftpay.mvp.exception.ForbiddenException;
 import com.shiftpay.mvp.exception.ShiftNotFoundException;
 import com.shiftpay.mvp.exception.ShiftStateConflictException;
+import com.shiftpay.mvp.repository.PayCalculationRepository;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
 import com.shiftpay.mvp.repository.ShiftPauseIntervalRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
@@ -47,6 +48,7 @@ public class AttendanceService {
 	private final ShiftAttendanceRepository shiftAttendanceRepository;
 	private final ShiftPauseIntervalRepository shiftPauseIntervalRepository;
 	private final ShiftSessionRepository shiftSessionRepository;
+	private final PayCalculationRepository payCalculationRepository;
 	private final PauseViewFactory pauseViewFactory;
 	private final UserRepository userRepository;
 
@@ -56,6 +58,7 @@ public class AttendanceService {
 	 * @param shiftAttendanceRepository attendance repository
 	 * @param shiftPauseIntervalRepository pause interval repository
 	 * @param shiftSessionRepository shift repository used for state checks and locks
+	 * @param payCalculationRepository pay calculation snapshot repository
 	 * @param pauseViewFactory factory used to build mobile pause state fragments
 	 * @param userRepository user repository used to resolve the authenticated worker
 	 */
@@ -63,12 +66,14 @@ public class AttendanceService {
 			ShiftAttendanceRepository shiftAttendanceRepository,
 			ShiftPauseIntervalRepository shiftPauseIntervalRepository,
 			ShiftSessionRepository shiftSessionRepository,
+			PayCalculationRepository payCalculationRepository,
 			PauseViewFactory pauseViewFactory,
 			UserRepository userRepository
 	) {
 		this.shiftAttendanceRepository = shiftAttendanceRepository;
 		this.shiftPauseIntervalRepository = shiftPauseIntervalRepository;
 		this.shiftSessionRepository = shiftSessionRepository;
+		this.payCalculationRepository = payCalculationRepository;
 		this.pauseViewFactory = pauseViewFactory;
 		this.userRepository = userRepository;
 	}
@@ -132,6 +137,7 @@ public class AttendanceService {
 	@Transactional(readOnly = true)
 	public List<MyShiftHistoryResponse> getMyShiftHistory(AuthenticatedUserPrincipal principal) {
 		List<ShiftAttendance> attendanceRows = shiftAttendanceRepository.findMyShiftHistoryByWorkerId(principal.id());
+		loadPayCalculations(attendanceRows);
 		List<Long> shiftIds = attendanceRows.stream()
 				.map((attendance) -> attendance.getShiftSession().getId())
 				.toList();
@@ -180,6 +186,7 @@ public class AttendanceService {
 		validateAttendanceManagementAccess(shiftSession, principal);
 
 		List<ShiftAttendance> attendanceRows = shiftAttendanceRepository.findAllByShiftSessionIdWithWorker(shiftId);
+		loadPayCalculations(attendanceRows);
 		List<ShiftPauseInterval> pauseIntervals = shiftPauseIntervalRepository.findAllByShiftSessionId(shiftId);
 		return attendanceRows.stream()
 				.map((attendance) -> {
@@ -263,6 +270,17 @@ public class AttendanceService {
 			return actualStartTime;
 		}
 		return payableStartTime;
+	}
+
+	private void loadPayCalculations(List<ShiftAttendance> attendanceRows) {
+		List<Long> attendanceIds = attendanceRows.stream()
+				.map(ShiftAttendance::getId)
+				.toList();
+		if (attendanceIds.isEmpty()) {
+			return;
+		}
+		payCalculationRepository.findAllByAttendanceIdInWithSegments(attendanceIds)
+				.forEach((calculation) -> calculation.getAttendance().setPayCalculation(calculation));
 	}
 
 	/**

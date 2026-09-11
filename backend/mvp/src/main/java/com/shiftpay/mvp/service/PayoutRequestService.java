@@ -10,6 +10,7 @@ import com.shiftpay.mvp.dto.PayoutSelectionRequest;
 import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.Company;
 import com.shiftpay.mvp.entity.PaymentStatus;
+import com.shiftpay.mvp.entity.PayCalculation;
 import com.shiftpay.mvp.entity.PayoutRequest;
 import com.shiftpay.mvp.entity.PayoutRequestItem;
 import com.shiftpay.mvp.entity.PayoutRequestStatus;
@@ -25,6 +26,7 @@ import com.shiftpay.mvp.exception.PayoutRequestConflictException;
 import com.shiftpay.mvp.exception.PayoutRequestNotFoundException;
 import com.shiftpay.mvp.repository.PayoutRequestItemRepository;
 import com.shiftpay.mvp.repository.PayoutRequestRepository;
+import com.shiftpay.mvp.repository.PayCalculationRepository;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
 import com.shiftpay.mvp.repository.UserRepository;
 import com.shiftpay.mvp.security.AuthenticatedUserPrincipal;
@@ -43,6 +45,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Business service for worker payout request preview, creation, listing, and foreman approval.
@@ -53,6 +57,7 @@ public class PayoutRequestService {
 	private final PayrollRoundingService payrollRoundingService;
 	private final PayoutRequestItemRepository payoutRequestItemRepository;
 	private final PayoutRequestRepository payoutRequestRepository;
+	private final PayCalculationRepository payCalculationRepository;
 	private final ShiftAttendanceRepository shiftAttendanceRepository;
 	private final UserRepository userRepository;
 
@@ -62,6 +67,7 @@ public class PayoutRequestService {
 	 * @param payrollRoundingService payroll rounding calculator
 	 * @param payoutRequestItemRepository payout request item repository
 	 * @param payoutRequestRepository payout request repository
+	 * @param payCalculationRepository pay calculation snapshot repository
 	 * @param shiftAttendanceRepository attendance repository
 	 * @param userRepository user repository
 	 */
@@ -69,12 +75,14 @@ public class PayoutRequestService {
 			PayrollRoundingService payrollRoundingService,
 			PayoutRequestItemRepository payoutRequestItemRepository,
 			PayoutRequestRepository payoutRequestRepository,
+			PayCalculationRepository payCalculationRepository,
 			ShiftAttendanceRepository shiftAttendanceRepository,
 			UserRepository userRepository
 	) {
 		this.payrollRoundingService = payrollRoundingService;
 		this.payoutRequestItemRepository = payoutRequestItemRepository;
 		this.payoutRequestRepository = payoutRequestRepository;
+		this.payCalculationRepository = payCalculationRepository;
 		this.shiftAttendanceRepository = shiftAttendanceRepository;
 		this.userRepository = userRepository;
 	}
@@ -93,7 +101,7 @@ public class PayoutRequestService {
 				.stream()
 				.map((attendance) -> PayoutAttendanceResponse.from(
 						attendance,
-						payrollRoundingService.calculate(attendance.getWorkedMinutes(), attendance.getHourlyRate())
+						roundingFor(attendance)
 				))
 				.toList();
 	}
@@ -280,10 +288,20 @@ public class PayoutRequestService {
 	) {
 		validateAttendanceIds(request);
 		if (forUpdate) {
-			return shiftAttendanceRepository.findSelectedByIdsAndWorkerIdForUpdate(
+			List<ShiftAttendance> lockedAttendances = shiftAttendanceRepository.findSelectedByIdsAndWorkerIdForUpdate(
 					request.attendanceIds(),
 					worker.getId()
 			);
+			if (lockedAttendances.size() != request.attendanceIds().size()) {
+				throw new AttendanceNotFoundException();
+			}
+			List<ShiftAttendance> attendanceDetails = shiftAttendanceRepository.findAllByIdInWithPayoutDetails(
+					request.attendanceIds()
+			);
+			if (attendanceDetails.size() != request.attendanceIds().size()) {
+				throw new AttendanceNotFoundException();
+			}
+			return attendanceDetails;
 		}
 		return shiftAttendanceRepository.findSelectedByIdsAndWorkerIdWithDetails(
 				request.attendanceIds(),
@@ -315,21 +333,49 @@ public class PayoutRequestService {
 			throw new AttendanceNotFoundException();
 		}
 		Map<Long, ShiftAttendance> attendanceById = mapById(attendanceRows);
-		List<PayoutRequestPreviewItem> previewItems = requestedAttendanceIds.stream()
+		List<ShiftAttendance> validatedAttendances = requestedAttendanceIds.stream()
 				.map((attendanceId) -> {
 					ShiftAttendance attendance = attendanceById.get(attendanceId);
 					if (attendance == null) {
 						throw new AttendanceNotFoundException();
 					}
 					validatePayableAttendance(attendance, worker);
-					return new PayoutRequestPreviewItem(
-							attendance,
-							payrollRoundingService.calculate(attendance.getWorkedMinutes(), attendance.getHourlyRate())
-					);
+					return attendance;
 				})
 				.toList();
-		validateSingleManagerForeman(previewItems);
+		validateSingleManagerForeman(validatedAttendances);
+		Map<Long, PayCalculation> calculationsByAttendanceId = loadPayCalculationsByAttendanceId(validatedAttendances);
+		List<PayoutRequestPreviewItem> previewItems = validatedAttendances.stream()
+				.map((attendance) -> withPayCalculation(
+						attendance,
+						calculationsByAttendanceId.get(attendance.getId())
+				))
+				.map((attendance) -> new PayoutRequestPreviewItem(attendance, roundingFor(attendance)))
+				.toList();
 		return previewItems;
+	}
+
+	private PayrollRoundingResult roundingFor(ShiftAttendance attendance) {
+		return payrollRoundingService.calculateFromCalculatedSalary(
+				attendance.getWorkedMinutes(),
+				attendance.getCalculatedSalary()
+		);
+	}
+
+	private Map<Long, PayCalculation> loadPayCalculationsByAttendanceId(List<ShiftAttendance> attendances) {
+		return payCalculationRepository.findAllByAttendanceIdInWithSegments(
+				attendances.stream().map(ShiftAttendance::getId).toList()
+		).stream().collect(Collectors.toMap(
+				(calculation) -> calculation.getAttendance().getId(),
+				Function.identity(),
+				(first, ignored) -> first,
+				LinkedHashMap::new
+		));
+	}
+
+	private ShiftAttendance withPayCalculation(ShiftAttendance attendance, PayCalculation calculation) {
+		attendance.setPayCalculation(calculation);
+		return attendance;
 	}
 
 	private void validatePayableAttendance(ShiftAttendance attendance, User worker) {
@@ -363,10 +409,10 @@ public class PayoutRequestService {
 		}
 	}
 
-	private void validateSingleManagerForeman(List<PayoutRequestPreviewItem> previewItems) {
+	private void validateSingleManagerForeman(List<ShiftAttendance> attendances) {
 		Long managerForemanId = null;
-		for (PayoutRequestPreviewItem previewItem : previewItems) {
-			Long currentForemanId = previewItem.attendance().getShiftSession().getCreatedBy().getId();
+		for (ShiftAttendance attendance : attendances) {
+			Long currentForemanId = attendance.getShiftSession().getCreatedBy().getId();
 			if (managerForemanId == null) {
 				managerForemanId = currentForemanId;
 			}
@@ -383,6 +429,8 @@ public class PayoutRequestService {
 		payoutRequest.setRawPayableMinutesTotal(totals.rawPayableMinutes());
 		payoutRequest.setPayoutRoundedMinutesTotal(totals.payoutRoundedMinutes());
 		payoutRequest.setExactCalculatedAmountTotal(totals.exactCalculatedAmount());
+		payoutRequest.setTotalBaseAmount(totals.totalBaseAmount());
+		payoutRequest.setTotalPremiumAmount(totals.totalPremiumAmount());
 		payoutRequest.setPayoutAmount(totals.payoutAmount());
 	}
 
@@ -400,6 +448,8 @@ public class PayoutRequestService {
 		item.setPayoutRoundedMinutes(rounding.payoutRoundedMinutes());
 		item.setHourlyRate(attendance.getHourlyRate());
 		item.setCalculatedSalary(attendance.getCalculatedSalary());
+		item.setTotalBaseAmount(totalBaseAmount(attendance));
+		item.setTotalPremiumAmount(totalPremiumAmount(attendance));
 		item.setRoundedItemAmountExact(rounding.roundedItemAmountExact());
 		item.setPayoutAmount(rounding.payoutAmount());
 		return item;
@@ -429,6 +479,14 @@ public class PayoutRequestService {
 				.map((item) -> item.attendance().getCalculatedSalary())
 				.reduce(BigDecimal.ZERO, BigDecimal::add)
 				.setScale(2, RoundingMode.HALF_UP);
+		BigDecimal totalBaseAmount = previewItems.stream()
+				.map((item) -> totalBaseAmount(item.attendance()))
+				.reduce(BigDecimal.ZERO, BigDecimal::add)
+				.setScale(8, RoundingMode.HALF_UP);
+		BigDecimal totalPremiumAmount = previewItems.stream()
+				.map((item) -> totalPremiumAmount(item.attendance()))
+				.reduce(BigDecimal.ZERO, BigDecimal::add)
+				.setScale(8, RoundingMode.HALF_UP);
 		BigDecimal payoutAmount = previewItems.stream()
 				.map((item) -> item.rounding().payoutAmount())
 				.reduce(BigDecimal.ZERO, BigDecimal::add)
@@ -440,9 +498,25 @@ public class PayoutRequestService {
 				rawPayableMinutes,
 				payoutRoundedMinutes,
 				exactCalculatedAmount,
+				totalBaseAmount,
+				totalPremiumAmount,
 				payoutAmount,
 				itemResponses
 		);
+	}
+
+	private BigDecimal totalBaseAmount(ShiftAttendance attendance) {
+		if (attendance.getPayCalculation() != null) {
+			return attendance.getPayCalculation().getTotalBaseAmount();
+		}
+		return attendance.getCalculatedSalary().setScale(8);
+	}
+
+	private BigDecimal totalPremiumAmount(ShiftAttendance attendance) {
+		if (attendance.getPayCalculation() != null) {
+			return attendance.getPayCalculation().getTotalPremiumAmount();
+		}
+		return BigDecimal.ZERO.setScale(8);
 	}
 
 	private List<PayoutRequestResponse> toResponses(List<PayoutRequest> requests) {

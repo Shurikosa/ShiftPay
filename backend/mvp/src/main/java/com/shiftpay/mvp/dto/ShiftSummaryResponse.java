@@ -3,6 +3,7 @@ package com.shiftpay.mvp.dto;
 import com.shiftpay.mvp.entity.ShiftStatus;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import tools.jackson.databind.annotation.JsonSerialize;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -16,6 +17,8 @@ import java.util.List;
  * @param status shift status, always {@code CLOSED} for successful summary responses
  * @param totalWorkers number of approved attendance rows included in the summary
  * @param totalSalary sum of included worker salaries with scale two
+ * @param totalBaseAmount sum of included worker base pay totals
+ * @param totalPremiumAmount sum of included worker premium pay totals
  * @param foremanWorkedMinutes private owner-foreman worked minutes, omitted for admins
  * @param foremanPauseMinutes private owner-foreman pause minutes, omitted for admins
  * @param foremanHourlyRate private owner-foreman rate, omitted for admins
@@ -27,6 +30,10 @@ public record ShiftSummaryResponse(
 		ShiftStatus status,
 		int totalWorkers,
 		BigDecimal totalSalary,
+		@JsonSerialize(using = ScaleEightBigDecimalSerializer.class)
+		BigDecimal totalBaseAmount,
+		@JsonSerialize(using = ScaleEightBigDecimalSerializer.class)
+		BigDecimal totalPremiumAmount,
 		@JsonInclude(JsonInclude.Include.NON_NULL)
 		Integer foremanWorkedMinutes,
 		@JsonInclude(JsonInclude.Include.NON_NULL)

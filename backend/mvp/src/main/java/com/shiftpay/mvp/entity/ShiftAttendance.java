@@ -10,6 +10,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -90,6 +91,10 @@ public class ShiftAttendance {
 	@Setter
 	@Column(name = "payable_start_time")
 	private OffsetDateTime payableStartTime;
+
+	@Setter
+	@OneToOne(mappedBy = "attendance", fetch = FetchType.LAZY)
+	private PayCalculation payCalculation;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;

@@ -18,6 +18,9 @@ import com.shiftpay.mvp.repository.PayoutRequestRepository;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
+import jakarta.persistence.EntityManagerFactory;
+import org.hibernate.SessionFactory;
+import org.hibernate.stat.Statistics;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,6 +37,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Arrays;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -74,6 +78,9 @@ class PayoutRequestControllerTests {
 
 	@Autowired
 	private JdbcTemplate jdbcTemplate;
+
+	@Autowired
+	private EntityManagerFactory entityManagerFactory;
 
 	@Autowired
 	private CompanyRepository companyRepository;
@@ -197,10 +204,14 @@ class PayoutRequestControllerTests {
 				.andExpect(jsonPath("$.rawPayableMinutes").value(467))
 				.andExpect(jsonPath("$.payoutRoundedMinutes").value(465))
 				.andExpect(jsonPath("$.exactCalculatedAmount").value(116.75))
+				.andExpect(jsonPath("$.totalBaseAmount").value(116.75))
+				.andExpect(jsonPath("$.totalPremiumAmount").value(0.00))
 				.andExpect(jsonPath("$.payoutAmount").value(117))
 				.andExpect(jsonPath("$.items", hasSize(1)))
 				.andExpect(jsonPath("$.items[0].attendanceId").value(attendanceId))
 				.andExpect(jsonPath("$.items[0].paymentStatus").value("UNPAID"))
+				.andExpect(jsonPath("$.items[0].totalBaseAmount").value(116.75))
+				.andExpect(jsonPath("$.items[0].totalPremiumAmount").value(0.00))
 				.andExpect(jsonPath("$.items[0].payoutRoundedMinutes").value(465))
 				.andExpect(jsonPath("$.items[0].payoutAmount").value(117));
 
@@ -209,6 +220,170 @@ class PayoutRequestControllerTests {
 		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
 		assertThat(attendance.getPaymentStatus()).isEqualTo(PaymentStatus.UNPAID);
 		assertThat(attendance.getPaidAt()).isNull();
+	}
+
+	/**
+	 * Keeps PayCalculation lookup bounded for collection payout flows while preserving premium snapshots and legacy
+	 * fallback components. The batch query is intentionally returned by the database in an unspecified order.
+	 */
+	@Test
+	void payoutCollectionFlowsUseBoundedPayCalculationQueriesAndKeepMixedSnapshots() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long firstPremiumAttendanceId = createClosedApprovedAttendance(
+				foremanToken, workerToken, "First premium payout shift", 60, "10.00", "10.00"
+		);
+		long legacyAttendanceId = createClosedApprovedAttendance(
+				foremanToken, workerToken, "Legacy payout shift", 60, "10.00", "7.50"
+		);
+		long secondPremiumAttendanceId = createClosedApprovedAttendance(
+				foremanToken, workerToken, "Second premium payout shift", 60, "10.00", "20.00"
+		);
+		insertPayCalculationSnapshot(firstPremiumAttendanceId, "9.00000000", "1.00000000");
+		insertPayCalculationSnapshot(secondPremiumAttendanceId, "18.00000000", "2.00000000");
+
+		Statistics statistics = resetHibernateStatistics();
+		MvcResult payable = getPayableAttendances(workerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(3)))
+				.andReturn();
+		assertThat(payable.getResponse().getContentAsString())
+				.contains("\"totalPremiumAmount\":1.00000000", "\"totalPremiumAmount\":2.00000000");
+		assertNoRootPayCalculationLookup(statistics);
+		assertThat(statistics.getCollectionFetchCount()).isZero();
+
+		statistics.clear();
+		MvcResult preview = previewPayoutRequest(
+				workerToken, secondPremiumAttendanceId, legacyAttendanceId, firstPremiumAttendanceId
+		)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.totalBaseAmount").value(34.50))
+				.andExpect(jsonPath("$.totalPremiumAmount").value(3.00))
+				.andExpect(jsonPath("$.items[0].totalBaseAmount").value(18.00))
+				.andExpect(jsonPath("$.items[1].totalBaseAmount").value(7.50))
+				.andExpect(jsonPath("$.items[2].totalBaseAmount").value(9.00))
+				.andReturn();
+		assertThat(preview.getResponse().getContentAsString())
+				.contains("\"totalPremiumAmount\":3.00000000", "\"totalPremiumAmount\":0.00000000");
+		assertOnePayoutDetailsLoadWithoutPayCalculation(statistics);
+		assertOneBatchPayCalculationLookup(statistics);
+		assertThat(statistics.getEntityFetchCount()).isZero();
+		assertThat(statistics.getCollectionFetchCount()).isZero();
+
+		statistics.clear();
+		MvcResult created = createPayoutRequest(
+				workerToken, secondPremiumAttendanceId, legacyAttendanceId, firstPremiumAttendanceId
+		)
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.totalBaseAmount").value(34.50))
+				.andExpect(jsonPath("$.totalPremiumAmount").value(3.00))
+				.andExpect(jsonPath("$.items[0].attendanceId").value(secondPremiumAttendanceId))
+				.andExpect(jsonPath("$.items[1].attendanceId").value(legacyAttendanceId))
+				.andExpect(jsonPath("$.items[2].attendanceId").value(firstPremiumAttendanceId))
+				.andReturn();
+		assertThat(created.getResponse().getContentAsString())
+				.contains("\"totalPremiumAmount\":3.00000000", "\"totalPremiumAmount\":0.00000000");
+		assertOnePayoutDetailsLoadWithoutPayCalculation(statistics);
+		assertOneBatchPayCalculationLookup(statistics);
+		assertThat(statistics.getEntityFetchCount()).isZero();
+		assertThat(statistics.getCollectionFetchCount()).isZero();
+
+		MvcResult history = mockMvc.perform(get("/api/v1/me/shifts")
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + workerToken))
+				.andExpect(status().isOk())
+				.andReturn();
+		assertThat(history.getResponse().getContentAsString())
+				.contains("\"snapshotStatus\":\"COMPLETE\"", "\"appliedRules\":[{\"id\":7,\"name\":\"Night\"");
+	}
+
+	/**
+	 * Keeps a legacy closed attendance without a pay-calculation row on its stored historical salary through every
+	 * payout operation. In particular, its payout basis must not be reconstructed from rounded minutes and rate.
+	 */
+	@Test
+	void legacyAttendanceUsesStoredSalaryForPayoutTotalsAndNeverBackfillsSnapshot() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = createClosedApprovedAttendance(
+				foremanToken,
+				workerToken,
+				"Legacy historical payout shift",
+				60,
+				"15.00",
+				"10.10"
+		);
+
+		MvcResult payable = getPayableAttendances(workerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].calculatedSalary").value(10.10))
+				.andExpect(jsonPath("$[0].totalBaseAmount").value(10.10))
+				.andExpect(jsonPath("$[0].totalPremiumAmount").value(0.00))
+				.andExpect(jsonPath("$[0].payoutAmount").value(11))
+				.andReturn();
+		assertLegacyAuditComponentsScaleEight(payable, "10.10000000");
+
+		MvcResult preview = previewPayoutRequest(workerToken, attendanceId)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.exactCalculatedAmount").value(10.10))
+				.andExpect(jsonPath("$.totalBaseAmount").value(10.10))
+				.andExpect(jsonPath("$.totalPremiumAmount").value(0.00))
+				.andExpect(jsonPath("$.payoutAmount").value(11))
+				.andReturn();
+		assertLegacyAuditComponentsScaleEight(preview, "10.10000000");
+
+		MvcResult created = createPayoutRequest(workerToken, attendanceId)
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.exactCalculatedAmount").value(10.10))
+				.andExpect(jsonPath("$.totalBaseAmount").value(10.10))
+				.andExpect(jsonPath("$.totalPremiumAmount").value(0.00))
+				.andExpect(jsonPath("$.payoutAmount").value(11))
+				.andExpect(jsonPath("$.items[0].totalBaseAmount").value(10.10))
+				.andExpect(jsonPath("$.items[0].totalPremiumAmount").value(0.00))
+				.andReturn();
+		assertLegacyAuditComponentsScaleEight(created, "10.10000000");
+		long requestId = extractLong(created, PAYOUT_REQUEST_ID_PATTERN);
+
+		MvcResult workerList = getPayoutRequests(workerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].id").value(requestId))
+				.andExpect(jsonPath("$[0].status").value("PENDING"))
+				.andExpect(jsonPath("$[0].exactCalculatedAmount").value(10.10))
+				.andExpect(jsonPath("$[0].totalBaseAmount").value(10.10))
+				.andExpect(jsonPath("$[0].totalPremiumAmount").value(0.00))
+				.andExpect(jsonPath("$[0].items[0].calculatedSalary").value(10.10))
+				.andExpect(jsonPath("$[0].items[0].totalBaseAmount").value(10.10))
+				.andExpect(jsonPath("$[0].items[0].totalPremiumAmount").value(0.00))
+				.andReturn();
+		assertLegacyAuditComponentsScaleEight(workerList, "10.10000000");
+		MvcResult managedList = getManagedPayoutRequests(foremanToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].id").value(requestId))
+				.andExpect(jsonPath("$[0].status").value("PENDING"))
+				.andExpect(jsonPath("$[0].exactCalculatedAmount").value(10.10))
+				.andExpect(jsonPath("$[0].totalBaseAmount").value(10.10))
+				.andExpect(jsonPath("$[0].totalPremiumAmount").value(0.00))
+				.andExpect(jsonPath("$[0].items[0].calculatedSalary").value(10.10))
+				.andExpect(jsonPath("$[0].items[0].totalBaseAmount").value(10.10))
+				.andExpect(jsonPath("$[0].items[0].totalPremiumAmount").value(0.00))
+				.andReturn();
+		assertLegacyAuditComponentsScaleEight(managedList, "10.10000000");
+		assertThat(jdbcTemplate.queryForObject(
+				"select count(*) from pay_calculations where attendance_id = ?", Integer.class, attendanceId
+		)).isZero();
+
+		MvcResult approved = mockMvc.perform(post(MANAGED_PAYOUT_REQUESTS_URL + "/" + requestId + "/approve")
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.exactCalculatedAmount").value(10.10))
+				.andExpect(jsonPath("$.totalBaseAmount").value(10.10))
+				.andExpect(jsonPath("$.totalPremiumAmount").value(0.00))
+				.andExpect(jsonPath("$.payoutAmount").value(11))
+				.andReturn();
+		assertLegacyAuditComponentsScaleEight(approved, "10.10000000");
+
+		assertThat(jdbcTemplate.queryForObject(
+				"select count(*) from pay_calculations where attendance_id = ?", Integer.class, attendanceId
+		)).isZero();
 	}
 
 	/**
@@ -241,6 +416,8 @@ class PayoutRequestControllerTests {
 				.andExpect(jsonPath("$.rawPayableMinutes").value(467))
 				.andExpect(jsonPath("$.payoutRoundedMinutes").value(465))
 				.andExpect(jsonPath("$.exactCalculatedAmount").value(116.75))
+				.andExpect(jsonPath("$.totalBaseAmount").value(116.75))
+				.andExpect(jsonPath("$.totalPremiumAmount").value(0.00))
 				.andExpect(jsonPath("$.payoutAmount").value(117))
 				.andExpect(jsonPath("$.requestedAt").isString())
 				.andExpect(jsonPath("$.approvedAt").value((Object) null))
@@ -258,6 +435,8 @@ class PayoutRequestControllerTests {
 		assertThat(payoutRequest.getRawPayableMinutesTotal()).isEqualTo(467);
 		assertThat(payoutRequest.getPayoutRoundedMinutesTotal()).isEqualTo(465);
 		assertThat(payoutRequest.getExactCalculatedAmountTotal()).isEqualByComparingTo("116.75");
+		assertThat(payoutRequest.getTotalBaseAmount()).isEqualByComparingTo("116.75");
+		assertThat(payoutRequest.getTotalPremiumAmount()).isEqualByComparingTo("0.00");
 		assertThat(payoutRequest.getPayoutAmount()).isEqualByComparingTo("117");
 		assertThat(payoutRequestItemRepository.findAll()).hasSize(2);
 		assertThat(shiftAttendanceRepository.findById(firstAttendanceId).orElseThrow().getPaymentStatus())
@@ -469,10 +648,12 @@ class PayoutRequestControllerTests {
 				"15.00"
 		);
 
+		Statistics statistics = resetHibernateStatistics();
 		createPayoutRequest(workerToken, firstAttendanceId, secondAttendanceId)
 				.andExpect(status().isConflict())
 				.andExpect(jsonPath("$.message")
 						.value("Payout request items must belong to shifts managed by the same foreman"));
+		assertNoRootPayCalculationLookup(statistics);
 	}
 
 	/**
@@ -768,7 +949,7 @@ class PayoutRequestControllerTests {
 				.andExpect(jsonPath("$.rawPayableMinutes").value(102))
 				.andExpect(jsonPath("$.payoutRoundedMinutes").value(110))
 				.andExpect(jsonPath("$.exactCalculatedAmount").value(20.40))
-				.andExpect(jsonPath("$.payoutAmount").value(22))
+				.andExpect(jsonPath("$.payoutAmount").value(24))
 				.andExpect(jsonPath("$.items[0].rawPayableMinutes").value(0))
 				.andExpect(jsonPath("$.items[0].payoutRoundedMinutes").value(0))
 				.andExpect(jsonPath("$.items[0].payoutAmount").value(0))
@@ -783,13 +964,13 @@ class PayoutRequestControllerTests {
 				.andExpect(jsonPath("$.items[3].payoutAmount").value(1))
 				.andExpect(jsonPath("$.items[4].rawPayableMinutes").value(7))
 				.andExpect(jsonPath("$.items[4].payoutRoundedMinutes").value(5))
-				.andExpect(jsonPath("$.items[4].payoutAmount").value(1))
+				.andExpect(jsonPath("$.items[4].payoutAmount").value(2))
 				.andExpect(jsonPath("$.items[5].rawPayableMinutes").value(8))
 				.andExpect(jsonPath("$.items[5].payoutRoundedMinutes").value(10))
 				.andExpect(jsonPath("$.items[5].payoutAmount").value(2))
 				.andExpect(jsonPath("$.items[6].rawPayableMinutes").value(11))
 				.andExpect(jsonPath("$.items[6].payoutRoundedMinutes").value(10))
-				.andExpect(jsonPath("$.items[6].payoutAmount").value(2))
+				.andExpect(jsonPath("$.items[6].payoutAmount").value(3))
 				.andExpect(jsonPath("$.items[7].rawPayableMinutes").value(13))
 				.andExpect(jsonPath("$.items[7].payoutRoundedMinutes").value(15))
 				.andExpect(jsonPath("$.items[7].payoutAmount").value(3))
@@ -817,19 +998,23 @@ class PayoutRequestControllerTests {
 				"0.00"
 		);
 
-		getPayableAttendances(workerToken)
+		MvcResult payable = getPayableAttendances(workerToken)
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$", hasSize(1)))
 				.andExpect(jsonPath("$[0].attendanceId").value(attendanceId))
 				.andExpect(jsonPath("$[0].rawPayableMinutes").value(0))
-				.andExpect(jsonPath("$[0].payoutAmount").value(0));
+				.andExpect(jsonPath("$[0].payoutAmount").value(0))
+				.andReturn();
+		assertLegacyAuditComponentsScaleEight(payable, "0.00000000");
 
-		createPayoutRequest(workerToken, attendanceId)
+		MvcResult created = createPayoutRequest(workerToken, attendanceId)
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.rawPayableMinutes").value(0))
 				.andExpect(jsonPath("$.payoutRoundedMinutes").value(0))
 				.andExpect(jsonPath("$.exactCalculatedAmount").value(0.00))
-				.andExpect(jsonPath("$.payoutAmount").value(0));
+				.andExpect(jsonPath("$.payoutAmount").value(0))
+				.andReturn();
+		assertLegacyAuditComponentsScaleEight(created, "0.00000000");
 	}
 
 	/**
@@ -1070,6 +1255,93 @@ class PayoutRequestControllerTests {
 		return extractLong(result, ATTENDANCE_ID_PATTERN);
 	}
 
+	private void insertPayCalculationSnapshot(Long attendanceId, String baseAmount, String premiumAmount) {
+		Long shiftId = jdbcTemplate.queryForObject(
+				"select shift_session_id from shift_attendance where id = ?", Long.class, attendanceId
+		);
+		Long policyVersionId = jdbcTemplate.queryForObject("""
+				select policy.current_version_id
+				from pay_policies policy
+				join shift_sessions shift on shift.company_id = policy.company_id
+				where shift.id = ?
+				""", Long.class, shiftId);
+		BigDecimal base = new BigDecimal(baseAmount);
+		BigDecimal premium = new BigDecimal(premiumAmount);
+		BigDecimal total = base.add(premium);
+		jdbcTemplate.update("""
+				insert into pay_calculations (
+					attendance_id, shift_session_id, pay_policy_version_id, total_raw_seconds,
+					total_raw_minutes_exact, total_base_amount, total_premium_amount, total_amount
+				) values (?, ?, ?, 3600, 60, ?, ?, ?)
+				""", attendanceId, shiftId, policyVersionId, base, premium, total);
+		Long calculationId = jdbcTemplate.queryForObject(
+				"select id from pay_calculations where attendance_id = ?", Long.class, attendanceId
+		);
+		jdbcTemplate.update("""
+				insert into pay_segments (
+					pay_calculation_id, segment_start, segment_end, payable_seconds, payable_minutes,
+					payable_minutes_exact, base_hourly_rate, applied_rules_snapshot, stacking_strategy,
+					effective_premium_percent, effective_hourly_rate, base_amount, premium_amount, total_amount
+				)
+				select ?, actual_start_time, actual_end_time, 3600, 60, 60, 10,
+					?, 'ADD', 25, 12.50000000, ?, ?, ?
+				from shift_sessions where id = ?
+				""",
+				calculationId,
+				"[{\"id\":7,\"name\":\"Night\",\"type\":\"TIME_OF_DAY\",\"premiumPercent\":25}]",
+				base,
+				premium,
+				total,
+				shiftId
+		);
+	}
+
+	private Statistics resetHibernateStatistics() {
+		Statistics statistics = entityManagerFactory.unwrap(SessionFactory.class).getStatistics();
+		statistics.setStatisticsEnabled(true);
+		statistics.clear();
+		return statistics;
+	}
+
+	private void assertNoRootPayCalculationLookup(Statistics statistics) {
+		assertThat(payCalculationQueryExecutions(statistics)).isZero();
+	}
+
+	private void assertOneBatchPayCalculationLookup(Statistics statistics) {
+		assertThat(payCalculationQueryExecutions(statistics)).isEqualTo(1);
+		assertThat(queryExecutionsContaining(statistics, "calculation.attendance.id in :attendanceIds")).isEqualTo(1);
+		assertThat(queryExecutionsContaining(statistics, "calculation.attendance.id = :attendanceId")).isZero();
+	}
+
+	/**
+	 * Covers both sides of the collection-loading contract: a single detail query owns shift to-one associations,
+	 * and the separate calculation batch is the only query allowed to load calculation snapshots.
+	 */
+	private void assertOnePayoutDetailsLoadWithoutPayCalculation(Statistics statistics) {
+		long payoutDetailQueries = Arrays.stream(statistics.getQueries())
+				.filter((query) -> query.contains("from ShiftAttendance attendance")
+						&& query.contains("join fetch attendance.worker worker")
+						&& query.contains("join fetch attendance.shiftSession shiftSession"))
+				.mapToLong((query) -> statistics.getQueryStatistics(query).getExecutionCount())
+				.sum();
+		assertThat(payoutDetailQueries).isEqualTo(1);
+		assertThat(Arrays.stream(statistics.getQueries())
+				.filter((query) -> query.contains("from ShiftAttendance attendance"))
+				.noneMatch((query) -> query.contains("attendance.payCalculation")))
+				.isTrue();
+	}
+
+	private long payCalculationQueryExecutions(Statistics statistics) {
+		return queryExecutionsContaining(statistics, "from PayCalculation calculation");
+	}
+
+	private long queryExecutionsContaining(Statistics statistics, String fragment) {
+		return Arrays.stream(statistics.getQueries())
+				.filter((query) -> query.contains(fragment))
+				.mapToLong((query) -> statistics.getQueryStatistics(query).getExecutionCount())
+				.sum();
+	}
+
 	private void setPaymentStatus(long attendanceId, PaymentStatus paymentStatus) {
 		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
 		attendance.setPaymentStatus(paymentStatus);
@@ -1139,6 +1411,12 @@ class PayoutRequestControllerTests {
 		}
 		builder.append("]}");
 		return builder.toString();
+	}
+
+	private void assertLegacyAuditComponentsScaleEight(MvcResult result, String baseAmount) throws Exception {
+		String response = result.getResponse().getContentAsString();
+		assertThat(response).contains("\"totalBaseAmount\":" + baseAmount);
+		assertThat(response).contains("\"totalPremiumAmount\":0.00000000");
 	}
 
 	private long extractLong(MvcResult result, Pattern pattern) throws Exception {
