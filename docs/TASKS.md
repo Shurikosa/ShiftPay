@@ -211,16 +211,16 @@ Phase 2C - Production salary integration and persisted breakdown:
 
 Phase 2D - Mobile pay rules and breakdown UI:
 
-- [ ] Add pay policy API client methods and TypeScript DTOs
-- [ ] Add Foreman Pay Rules settings screen
-- [ ] Add policy API integration for load/save/version display
-- [ ] Add stacking strategy segmented control for ADD/HIGHEST_ONLY
-- [ ] Add enable/disable toggles and percentage inputs for premium rules
-- [ ] Add TIME_OF_DAY start/end inputs
-- [ ] Add DAILY_OVERTIME and WEEKLY_OVERTIME threshold inputs
-- [ ] Add DAY_OF_WEEK multi-select
-- [ ] Add manual HOLIDAY local date list with optional labels
-- [ ] Add pay policy loading, validation, error, and save states
+- [x] Add pay policy API client methods and TypeScript DTOs
+- [x] Add Foreman Pay Rules settings screen
+- [x] Add policy API integration for load/save/version display
+- [x] Add stacking strategy segmented control for ADD/HIGHEST_ONLY
+- [x] Add enable/disable toggles and percentage inputs for premium rules
+- [x] Add TIME_OF_DAY start/end inputs
+- [x] Add DAILY_OVERTIME and WEEKLY_OVERTIME threshold inputs
+- [x] Add DAY_OF_WEEK multi-select
+- [x] Add manual HOLIDAY local date list with optional labels
+- [x] Add pay policy loading, validation, error, and save states
 - [ ] Display read-only worker pay breakdown after close for own attendance
 - [ ] Display foreman-managed worker premium breakdown in summary/detail views
 - [ ] Keep payroll cards limited to raw payable time, final payout amount, status, and selected days/items
