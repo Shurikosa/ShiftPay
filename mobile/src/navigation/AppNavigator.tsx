@@ -6,6 +6,7 @@ import { WorkerShiftHistoryProvider } from "../context/WorkerShiftHistoryContext
 import { CreateCompanyScreen } from "../screens/CreateCompanyScreen";
 import { CreateShiftScreen } from "../screens/CreateShiftScreen";
 import { ForemanDashboardScreen } from "../screens/ForemanDashboardScreen";
+import { ForemanPayRulesScreen } from "../screens/ForemanPayRulesScreen";
 import { ForemanPayrollRequestsScreen } from "../screens/ForemanPayrollRequestsScreen";
 import { ForemanShiftDetailsScreen } from "../screens/ForemanShiftDetailsScreen";
 import { JoinCompanyScreen } from "../screens/JoinCompanyScreen";
@@ -57,6 +58,7 @@ function ForemanNavigator() {
     <ForemanManagedShiftsProvider>
       <ForemanStack.Navigator screenOptions={{ headerShown: false }}>
         <ForemanStack.Screen component={ForemanDashboardScreen} name="ForemanDashboard" />
+        <ForemanStack.Screen component={ForemanPayRulesScreen} name="ForemanPayRules" />
         <ForemanStack.Screen component={CreateShiftScreen} name="CreateShift" />
         <ForemanStack.Screen
           component={ForemanPayrollRequestsScreen}
