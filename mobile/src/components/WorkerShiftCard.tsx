@@ -30,6 +30,11 @@ export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
       ? "Waiting for foreman approval"
       : null;
   const pauseBadgeLabel = isDiscarded ? null : getWorkerPauseBadgeLabel(shift.pauseState);
+  const hasPayBreakdown =
+    shift.status === "CLOSED" &&
+    shift.attendanceStatus === "APPROVED" &&
+    shift.calculatedSalary !== null &&
+    shift.payCalculation != null;
 
   return (
     <Pressable
@@ -63,6 +68,9 @@ export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
           ) : null}
           {pauseBadgeLabel ? (
             <StatusBadge label={pauseBadgeLabel} tone="warning" />
+          ) : null}
+          {hasPayBreakdown ? (
+            <StatusBadge label="Pay breakdown" tone="primary" />
           ) : null}
         </View>
       </View>

@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from "react-native";
 import { endMyPause, startMyPause } from "../api/shifts";
 import { Button } from "../components/Button";
 import { DetailRow } from "../components/DetailRow";
+import { PayCalculationBreakdown } from "../components/PayCalculationBreakdown";
 import { Screen } from "../components/Screen";
 import { StateMessage } from "../components/StateMessage";
 import { StatusBadge } from "../components/StatusBadge";
@@ -153,6 +154,10 @@ export function WorkerShiftDetailsScreen({
   const pauseBadgeLabel = isDiscarded ? null : getWorkerPauseBadgeLabel(shift.pauseState);
   const canPause = isApprovedActiveShift && Boolean(shift.pauseState) && !isAllPaused;
   const needsPauseStateRefresh = isApprovedActiveShift && !shift.pauseState;
+  const canShowFinalPayBreakdown =
+    shift.status === "CLOSED" &&
+    shift.attendanceStatus === "APPROVED" &&
+    shift.calculatedSalary !== null;
 
   return (
     <Screen>
@@ -237,6 +242,17 @@ export function WorkerShiftDetailsScreen({
             </>
           )}
         </View>
+
+        {canShowFinalPayBreakdown ? (
+          shift.payCalculation ? (
+            <PayCalculationBreakdown calculation={shift.payCalculation} />
+          ) : (
+            <StateMessage
+              title="Historical breakdown unavailable"
+              message="This closed attendance has no calculation snapshot. The stored calculated salary remains the authoritative final amount."
+            />
+          )
+        ) : null}
 
         {canPause ? (
           <Button

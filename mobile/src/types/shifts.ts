@@ -1,4 +1,5 @@
 import type { PaymentStatus } from "./payroll";
+import type { PayCalculation } from "./payCalculation";
 
 export type ShiftStatus =
   | "CREATED"
@@ -54,6 +55,7 @@ export interface WorkerShiftHistoryItem {
   pauseMinutes?: number | null;
   workedMinutes: number | null;
   calculatedSalary: number | null;
+  payCalculation?: PayCalculation | null;
   pauseState?: PauseState;
 }
 

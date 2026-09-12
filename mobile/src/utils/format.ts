@@ -49,6 +49,10 @@ export function formatRate(value: number): string {
   return value.toFixed(2);
 }
 
+export function formatAuditDecimal(value: number): string {
+  return value.toFixed(8).replace(/\.?0+$/, "");
+}
+
 export function formatOptionalLocation(value: string | null | undefined): string {
   return value && value.trim().length > 0 ? value : "No location set";
 }
