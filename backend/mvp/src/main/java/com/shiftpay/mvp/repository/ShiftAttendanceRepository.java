@@ -1,6 +1,8 @@
 package com.shiftpay.mvp.repository;
 
 import com.shiftpay.mvp.entity.ShiftAttendance;
+import com.shiftpay.mvp.repository.readmodel.ManagedAttendanceReadRow;
+import com.shiftpay.mvp.repository.readmodel.MyHistoryReadRow;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -108,6 +110,43 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 	List<ShiftAttendance> findAllByShiftSessionIdWithWorker(@Param("shiftId") Long shiftId);
 
 	/**
+	 * Loads scalar rows for {@code GET /api/v1/shifts/{shiftId}/attendance}.
+	 *
+	 * <p>The projection supplies the managed-attendance response without materializing {@link ShiftAttendance}, whose
+	 * inverse pay-calculation association can otherwise trigger row-linear selects.</p>
+	 *
+	 * @param shiftId shift session id
+	 * @return scalar attendance rows ordered by join time and id
+	 */
+	@Query("""
+			select new com.shiftpay.mvp.repository.readmodel.ManagedAttendanceReadRow(
+				attendance.id,
+				worker.id,
+				worker.firstName,
+				worker.lastName,
+				attendance.status,
+				attendance.paymentStatus,
+				attendance.hourlyRate,
+				attendance.breakMinutes,
+				attendance.payableStartTime,
+				attendance.pauseMinutes,
+				attendance.workedMinutes,
+				attendance.calculatedSalary,
+				attendance.joinedAt,
+				attendance.approvedAt,
+				shift.status,
+				shift.actualStartTime,
+				shift.actualEndTime
+			)
+			from ShiftAttendance attendance
+			join attendance.worker worker
+			join attendance.shiftSession shift
+			where shift.id = :shiftId
+			order by attendance.joinedAt asc, attendance.id asc
+			""")
+	List<ManagedAttendanceReadRow> findManagedReadRowsByShiftId(@Param("shiftId") Long shiftId);
+
+	/**
 	 * Lists the current user's worker-attendance history and fetches shift details in the same query.
 	 *
 	 * @param workerId current authenticated user id
@@ -129,6 +168,50 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 			order by attendance.joinedAt desc, attendance.id desc
 			""")
 	List<ShiftAttendance> findMyShiftHistoryByWorkerId(@Param("workerId") Long workerId);
+
+	/**
+	 * Loads scalar rows for {@code GET /api/v1/me/shifts}.
+	 *
+	 * <p>The projection supplies personal-history response fields without materializing {@link ShiftAttendance}, whose
+	 * inverse pay-calculation association can otherwise trigger row-linear selects.</p>
+	 *
+	 * @param workerId authenticated worker id
+	 * @return scalar history rows ordered by newest join time and id
+	 */
+	@Query("""
+			select new com.shiftpay.mvp.repository.readmodel.MyHistoryReadRow(
+				shift.id,
+				attendance.id,
+				company.id,
+				company.name,
+				shift.title,
+				shift.location,
+				shift.status,
+				shift.actualStartTime,
+				shift.actualEndTime,
+				attendance.status,
+				attendance.paymentStatus,
+				attendance.hourlyRate,
+				attendance.breakMinutes,
+				attendance.payableStartTime,
+				attendance.pauseMinutes,
+				attendance.workedMinutes,
+				attendance.calculatedSalary
+			)
+			from ShiftAttendance attendance
+			join attendance.shiftSession shift
+			join shift.company company
+			where attendance.worker.id = :workerId
+			  and shift.status in (
+				com.shiftpay.mvp.entity.ShiftStatus.OPEN,
+				com.shiftpay.mvp.entity.ShiftStatus.ACTIVE,
+				com.shiftpay.mvp.entity.ShiftStatus.CLOSED,
+				com.shiftpay.mvp.entity.ShiftStatus.DISCARDED,
+				com.shiftpay.mvp.entity.ShiftStatus.CANCELLED
+			  )
+			order by attendance.joinedAt desc, attendance.id desc
+			""")
+	List<MyHistoryReadRow> findMyHistoryReadRowsByWorkerId(@Param("workerId") Long workerId);
 
 	/**
 	 * Lists payable closed attendance for the worker payroll screen.

@@ -2,7 +2,7 @@ package com.shiftpay.mvp.dto;
 
 import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.PaymentStatus;
-import com.shiftpay.mvp.entity.ShiftAttendance;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -25,7 +25,7 @@ import java.time.OffsetDateTime;
  * @param pauseMinutes persisted pause minutes deducted after close, or null before salary calculation
  * @param workedMinutes persisted worked minutes after close, or null before salary calculation
  * @param calculatedSalary persisted salary after close, or null before salary calculation
- * @param payCalculation persisted premium pay breakdown after close, or null before salary calculation
+ * @param payCalculation persisted premium pay breakdown only for an authorized finalized snapshot; omitted otherwise
  * @param pauseState pause state for this attendance worker
  * @param joinedAt UTC timestamp when the worker joined
  * @param approvedAt UTC timestamp when attendance was approved, or null
@@ -43,63 +43,9 @@ public record AttendanceResponse(
 		Integer pauseMinutes,
 		Integer workedMinutes,
 		BigDecimal calculatedSalary,
+		@JsonInclude(JsonInclude.Include.NON_NULL)
 		PayCalculationResponse payCalculation,
 		PauseStateResponse pauseState,
 		OffsetDateTime joinedAt,
 		OffsetDateTime approvedAt
-) {
-
-	/**
-	 * Maps an attendance entity to the shift attendance list response.
-	 *
-	 * @param attendance attendance entity with worker already fetched
-	 * @return attendance response DTO
-	 */
-	public static AttendanceResponse from(ShiftAttendance attendance) {
-		return from(attendance, PauseStateResponse.none(), null);
-	}
-
-	/**
-	 * Maps an attendance entity plus pause state to the shift attendance list response.
-	 *
-	 * @param attendance attendance entity with worker already fetched
-	 * @param pauseState pause state for the attendance worker
-	 * @return attendance response DTO
-	 */
-	public static AttendanceResponse from(ShiftAttendance attendance, PauseStateResponse pauseState) {
-		return from(attendance, pauseState, null);
-	}
-
-	/**
-	 * Maps an attendance entity plus pause state and payable start to the shift attendance list response.
-	 *
-	 * @param attendance attendance entity with worker already fetched
-	 * @param pauseState pause state for the attendance worker
-	 * @param payableStartTime effective worker payable start time
-	 * @return attendance response DTO
-	 */
-	public static AttendanceResponse from(
-			ShiftAttendance attendance,
-			PauseStateResponse pauseState,
-			OffsetDateTime payableStartTime
-	) {
-		return new AttendanceResponse(
-				attendance.getId(),
-				attendance.getWorker().getId(),
-				attendance.getWorker().getFirstName(),
-				attendance.getWorker().getLastName(),
-				attendance.getStatus(),
-				attendance.getPaymentStatus(),
-				attendance.getHourlyRate(),
-				attendance.getBreakMinutes(),
-				payableStartTime,
-				attendance.getPauseMinutes(),
-				attendance.getWorkedMinutes(),
-				attendance.getCalculatedSalary(),
-				PayCalculationResponse.from(attendance.getPayCalculation()),
-				pauseState,
-				attendance.getJoinedAt(),
-				attendance.getApprovedAt()
-		);
-	}
-}
+) { }

@@ -58,6 +58,24 @@ public interface PayCalculationRepository extends JpaRepository<PayCalculation, 
 	List<PayCalculation> findAllByAttendanceIdInWithSegments(@Param("attendanceIds") Collection<Long> attendanceIds);
 
 	/**
+	 * Loads calculation snapshots for projection-based attendance reads.
+	 *
+	 * <p>Segments are fetch-joined in one bounded query. The query deliberately does not fetch or materialize
+	 * {@code ShiftAttendance}; scalar attendance projections already supply the response fields and ids used to map
+	 * these snapshots.</p>
+	 *
+	 * @param attendanceIds finalized attendance ids whose snapshots may be returned
+	 * @return calculation snapshots with segments
+	 */
+	@Query("""
+			select distinct calculation
+			from PayCalculation calculation
+			left join fetch calculation.segments
+			where calculation.attendance.id in :attendanceIds
+			""")
+	List<PayCalculation> findAllByAttendanceIdInWithSegmentsForRead(@Param("attendanceIds") Collection<Long> attendanceIds);
+
+	/**
 	 * Removes an existing calculation snapshot for recalculating a not-yet-closed attendance in the same transaction.
 	 *
 	 * @param attendanceId attendance id

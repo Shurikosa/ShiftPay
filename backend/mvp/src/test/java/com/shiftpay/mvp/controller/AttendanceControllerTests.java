@@ -11,11 +11,17 @@ import com.shiftpay.mvp.repository.CompanyRepository;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
+import com.shiftpay.mvp.testsupport.SqlStatementCollector;
+import org.hibernate.cfg.JdbcSettings;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.hibernate.autoconfigure.HibernatePropertiesCustomizer;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -27,6 +33,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -47,6 +54,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(AttendanceControllerTests.SqlStatementCaptureConfiguration.class)
 class AttendanceControllerTests {
 
 	private static final String REGISTER_URL = "/api/v1/auth/register";
@@ -74,6 +82,9 @@ class AttendanceControllerTests {
 	private ShiftAttendanceRepository shiftAttendanceRepository;
 
 	@Autowired
+	private SqlStatementCollector sqlStatementCollector;
+
+	@Autowired
 	private ShiftSessionRepository shiftSessionRepository;
 
 	@Autowired
@@ -88,6 +99,23 @@ class AttendanceControllerTests {
 	@BeforeEach
 	void setUp() {
 		TestDataCleaner.clean(jdbcTemplate);
+		sqlStatementCollector.clear();
+	}
+
+	/**
+	 * Confirms that the test-only Hibernate statement inspector is active for repository queries.
+	 */
+	@Test
+	void sqlStatementCollectorCapturesHibernateRepositorySelect() {
+		sqlStatementCollector.clear();
+
+		shiftAttendanceRepository.count();
+
+		assertThat(sqlStatementCollector.snapshot())
+				.anyMatch(sql -> {
+					String normalized = sql.toLowerCase(Locale.ROOT);
+					return normalized.contains("select") && normalized.contains("shift_attendance");
+				});
 	}
 
 	/**
@@ -480,12 +508,12 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$[1].pauseMinutes").value((Object) null))
 				.andExpect(jsonPath("$[1].workedMinutes").value((Object) null))
 				.andExpect(jsonPath("$[1].calculatedSalary").value((Object) null))
-				.andExpect(jsonPath("$[1].payCalculation").value((Object) null))
+				.andExpect(jsonPath("$[1].payCalculation").doesNotExist())
 				.andExpect(jsonPath("$[1].pauseState.allPaused").value(false))
 				.andExpect(jsonPath("$[1].pauseState.personallyPaused").value(false))
 				.andExpect(jsonPath("$[1].joinedAt").value("2026-07-06T18:00:00Z"))
 				.andExpect(jsonPath("$[1].approvedAt").value((Object) null))
-				.andExpect(jsonPath("$[1].*", hasSize(16)))
+				.andExpect(jsonPath("$[1].*", hasSize(15)))
 				.andExpect(jsonPath("$[1].passwordHash").doesNotExist())
 				.andExpect(jsonPath("$[1].worker").doesNotExist())
 				.andExpect(jsonPath("$[1].email").doesNotExist());
@@ -507,6 +535,353 @@ class AttendanceControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$", hasSize(1)))
 				.andExpect(jsonPath("$[0].attendanceId").value(attendanceId));
+	}
+
+	@Test
+	void attendanceAndPersonalHistoryExposePersistedSnapshotsOnlyToEligibleNonAdminCallers() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Private calculation shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long workerAttendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), workerAttendanceId, "{}").andExpect(status().isOk());
+		User foreman = userRepository.findByEmail("foreman@example.com").orElseThrow();
+		long foremanAttendanceId = createAttendanceForUser(shift, foreman, OffsetDateTime.now(ZoneOffset.UTC));
+		approveStoredAttendance(foremanAttendanceId);
+		String adminToken = createAdminAndLogin();
+		User admin = userRepository.findByEmail("admin@example.com").orElseThrow();
+		long adminAttendanceId = createAttendanceForUser(shift, admin, OffsetDateTime.now(ZoneOffset.UTC));
+		approveStoredAttendance(adminAttendanceId);
+		startShift(foremanToken, shift.id());
+		closeShift(foremanToken, shift.id());
+		int persistedSnapshots = jdbcTemplate.queryForObject("select count(*) from pay_calculations", Integer.class);
+
+		mockMvc.perform(get(attendanceUrl(shift.id())).header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation.snapshotStatus"
+						.formatted(workerAttendanceId)).value("COMPLETE"));
+		mockMvc.perform(get(attendanceUrl(shift.id())).header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation"
+						.formatted(workerAttendanceId)).doesNotExist());
+
+		getMyShiftHistory(workerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(1)))
+				.andExpect(jsonPath("$[0].attendanceId").value(workerAttendanceId))
+				.andExpect(jsonPath("$[0].payCalculation.snapshotStatus").value("COMPLETE"));
+		getMyShiftHistory(foremanToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(1)))
+				.andExpect(jsonPath("$[0].attendanceId").value(foremanAttendanceId))
+				.andExpect(jsonPath("$[0].payCalculation.snapshotStatus").value("COMPLETE"))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(workerAttendanceId)).isEmpty());
+		getMyShiftHistory(adminToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(1)))
+				.andExpect(jsonPath("$[0].attendanceId").value(adminAttendanceId))
+				.andExpect(jsonPath("$[0].payCalculation").doesNotExist());
+		assertThat(jdbcTemplate.queryForObject("select count(*) from pay_calculations", Integer.class))
+				.isEqualTo(persistedSnapshots);
+	}
+
+	@Test
+	void attendanceAndHistoryOmitLegacySnapshotsButKeepPersistedDegradedSnapshotsForPermittedReaders() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Legacy and degraded calculation shift");
+		String legacyWorkerToken = registerAndLogin("legacy.worker@example.com", "WORKER");
+		String degradedWorkerToken = registerAndLogin("degraded.worker@example.com", "WORKER");
+		long legacyAttendanceId = joinAndGetAttendanceId(legacyWorkerToken, shift.joinCode());
+		long degradedAttendanceId = joinAndGetAttendanceId(degradedWorkerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), legacyAttendanceId, "{}").andExpect(status().isOk());
+		approveAttendance(foremanToken, shift.id(), degradedAttendanceId, "{}").andExpect(status().isOk());
+		startShift(foremanToken, shift.id());
+		closeShift(foremanToken, shift.id());
+		jdbcTemplate.update("delete from pay_segments where pay_calculation_id in (select id from pay_calculations where attendance_id = ?)",
+				legacyAttendanceId);
+		jdbcTemplate.update("delete from pay_calculations where attendance_id = ?", legacyAttendanceId);
+		Long degradedSegmentId = jdbcTemplate.queryForObject(
+				"select id from pay_segments where pay_calculation_id in (select id from pay_calculations where attendance_id = ?)",
+				Long.class,
+				degradedAttendanceId
+		);
+		jdbcTemplate.update("update pay_segments set applied_rules_snapshot = ? where id = ?", "{bad-json", degradedSegmentId);
+
+		mockMvc.perform(get(attendanceUrl(shift.id())).header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(2)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(legacyAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].calculatedSalary".formatted(legacyAttendanceId),
+						hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation".formatted(legacyAttendanceId)).doesNotExist())
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation.snapshotStatus"
+						.formatted(degradedAttendanceId)).value("UNAVAILABLE"))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation.segments[0].appliedRules"
+						.formatted(degradedAttendanceId)).value((Object) null));
+		getMyShiftHistory(legacyWorkerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(1)))
+				.andExpect(jsonPath("$[0].attendanceId").value(legacyAttendanceId))
+				.andExpect(jsonPath("$[0].calculatedSalary").isNumber())
+				.andExpect(jsonPath("$[0].payCalculation").doesNotExist());
+		getMyShiftHistory(degradedWorkerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].payCalculation.snapshotStatus").value("UNAVAILABLE"))
+				.andExpect(jsonPath("$[0].payCalculation.segments[0].appliedRules").value((Object) null));
+		assertThat(jdbcTemplate.queryForObject(
+				"select count(*) from pay_calculations where attendance_id = ?", Integer.class, legacyAttendanceId
+		)).isZero();
+	}
+
+	@Test
+	void adminManagedAttendanceOmitsPayCalculationWithoutSnapshotSql() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Admin managed attendance SQL privacy shift");
+		String firstWorkerToken = registerAndLogin("first.worker@example.com", "WORKER");
+		String secondWorkerToken = registerAndLogin("second.worker@example.com", "WORKER");
+		String thirdWorkerToken = registerAndLogin("third.worker@example.com", "WORKER");
+		long firstAttendanceId = joinAndGetAttendanceId(firstWorkerToken, shift.joinCode());
+		long secondAttendanceId = joinAndGetAttendanceId(secondWorkerToken, shift.joinCode());
+		long thirdAttendanceId = joinAndGetAttendanceId(thirdWorkerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), firstAttendanceId, "{}").andExpect(status().isOk());
+		approveAttendance(foremanToken, shift.id(), secondAttendanceId, "{}").andExpect(status().isOk());
+		approveAttendance(foremanToken, shift.id(), thirdAttendanceId, "{}").andExpect(status().isOk());
+		startShift(foremanToken, shift.id());
+		closeShift(foremanToken, shift.id());
+		assertPersistedSnapshotsWithSegments(firstAttendanceId, secondAttendanceId, thirdAttendanceId);
+		String adminToken = createAdminAndLogin();
+
+		sqlStatementCollector.clear();
+
+		mockMvc.perform(get(attendanceUrl(shift.id())).header(HttpHeaders.AUTHORIZATION, "Bearer " + adminToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(3)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(firstAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].calculatedSalary".formatted(firstAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation".formatted(firstAttendanceId))
+						.doesNotExist())
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(secondAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].calculatedSalary".formatted(secondAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation".formatted(secondAttendanceId))
+						.doesNotExist())
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(thirdAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].calculatedSalary".formatted(thirdAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation".formatted(thirdAttendanceId))
+						.doesNotExist());
+
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("pay_calculations")).isZero();
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("pay_segments")).isZero();
+	}
+
+	@Test
+	void adminPersonalHistoryOmitsPayCalculationWithoutSnapshotSql() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift firstShift = createShift(foremanToken, "First admin history SQL privacy shift");
+		CreatedShift secondShift = createShift(foremanToken, "Second admin history SQL privacy shift");
+		String adminToken = createAdminAndLogin();
+		User admin = userRepository.findByEmail("admin@example.com").orElseThrow();
+		long firstAttendanceId = createAttendanceForUser(firstShift, admin, OffsetDateTime.now(ZoneOffset.UTC));
+		long secondAttendanceId = createAttendanceForUser(secondShift, admin, OffsetDateTime.now(ZoneOffset.UTC));
+		approveStoredAttendance(firstAttendanceId);
+		approveStoredAttendance(secondAttendanceId);
+		startShift(foremanToken, firstShift.id());
+		startShift(foremanToken, secondShift.id());
+		closeShift(foremanToken, firstShift.id());
+		closeShift(foremanToken, secondShift.id());
+		assertPersistedSnapshotsWithSegments(firstAttendanceId, secondAttendanceId);
+
+		sqlStatementCollector.clear();
+
+		getMyShiftHistory(adminToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(2)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(firstAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].status".formatted(firstAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].calculatedSalary".formatted(firstAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation".formatted(firstAttendanceId))
+						.doesNotExist())
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(secondAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].status".formatted(secondAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].calculatedSalary".formatted(secondAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation".formatted(secondAttendanceId))
+						.doesNotExist());
+
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("pay_calculations")).isZero();
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("pay_segments")).isZero();
+	}
+
+	@Test
+	void ownerForemanManagedAttendanceLoadsFinalizedSnapshotsInBoundedBatches() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Owner managed attendance bounded SQL shift");
+		String firstWorkerToken = registerAndLogin("first.worker@example.com", "WORKER");
+		String secondWorkerToken = registerAndLogin("second.worker@example.com", "WORKER");
+		String thirdWorkerToken = registerAndLogin("third.worker@example.com", "WORKER");
+		long firstAttendanceId = joinAndGetAttendanceId(firstWorkerToken, shift.joinCode());
+		long secondAttendanceId = joinAndGetAttendanceId(secondWorkerToken, shift.joinCode());
+		long thirdAttendanceId = joinAndGetAttendanceId(thirdWorkerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), firstAttendanceId, "{}").andExpect(status().isOk());
+		approveAttendance(foremanToken, shift.id(), secondAttendanceId, "{}").andExpect(status().isOk());
+		approveAttendance(foremanToken, shift.id(), thirdAttendanceId, "{}").andExpect(status().isOk());
+		startShift(foremanToken, shift.id());
+		closeShift(foremanToken, shift.id());
+		assertPersistedSnapshotsWithSegments(firstAttendanceId, secondAttendanceId, thirdAttendanceId);
+
+		sqlStatementCollector.clear();
+
+		mockMvc.perform(get(attendanceUrl(shift.id())).header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(3)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(firstAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].calculatedSalary".formatted(firstAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation.snapshotStatus"
+						.formatted(firstAttendanceId)).value("COMPLETE"))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(secondAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].calculatedSalary".formatted(secondAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation.snapshotStatus"
+						.formatted(secondAttendanceId)).value("COMPLETE"))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(thirdAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].calculatedSalary".formatted(thirdAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation.snapshotStatus"
+						.formatted(thirdAttendanceId)).value("COMPLETE"));
+
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("pay_calculations")).isEqualTo(1);
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("pay_segments")).isEqualTo(1);
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("shift_attendance")).isEqualTo(1);
+	}
+
+	@Test
+	void workerPersonalHistoryLoadsFinalizedSnapshotsInBoundedBatches() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift firstShift = createShift(foremanToken, "First worker history bounded SQL shift");
+		CreatedShift secondShift = createShift(foremanToken, "Second worker history bounded SQL shift");
+		CreatedShift thirdShift = createShift(foremanToken, "Third worker history bounded SQL shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long firstAttendanceId = joinAndGetAttendanceId(workerToken, firstShift.joinCode());
+		long secondAttendanceId = joinAndGetAttendanceId(workerToken, secondShift.joinCode());
+		long thirdAttendanceId = joinAndGetAttendanceId(workerToken, thirdShift.joinCode());
+		approveAttendance(foremanToken, firstShift.id(), firstAttendanceId, "{}").andExpect(status().isOk());
+		approveAttendance(foremanToken, secondShift.id(), secondAttendanceId, "{}").andExpect(status().isOk());
+		approveAttendance(foremanToken, thirdShift.id(), thirdAttendanceId, "{}").andExpect(status().isOk());
+		startShift(foremanToken, firstShift.id());
+		startShift(foremanToken, secondShift.id());
+		startShift(foremanToken, thirdShift.id());
+		closeShift(foremanToken, firstShift.id());
+		closeShift(foremanToken, secondShift.id());
+		closeShift(foremanToken, thirdShift.id());
+		assertPersistedSnapshotsWithSegments(firstAttendanceId, secondAttendanceId, thirdAttendanceId);
+
+		sqlStatementCollector.clear();
+
+		getMyShiftHistory(workerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(3)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(firstAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].calculatedSalary".formatted(firstAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation.snapshotStatus"
+						.formatted(firstAttendanceId)).value("COMPLETE"))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(secondAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].calculatedSalary".formatted(secondAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation.snapshotStatus"
+						.formatted(secondAttendanceId)).value("COMPLETE"))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(thirdAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].calculatedSalary".formatted(thirdAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation.snapshotStatus"
+						.formatted(thirdAttendanceId)).value("COMPLETE"));
+
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("pay_calculations")).isEqualTo(1);
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("pay_segments")).isEqualTo(1);
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("shift_attendance")).isEqualTo(1);
+	}
+
+	@Test
+	void ownerForemanManagedAttendanceWithNonFinalRowsSkipsSnapshotSql() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Owner non-final attendance SQL shift");
+		String firstWorkerToken = registerAndLogin("first.worker@example.com", "WORKER");
+		String secondWorkerToken = registerAndLogin("second.worker@example.com", "WORKER");
+		String thirdWorkerToken = registerAndLogin("third.worker@example.com", "WORKER");
+		long firstAttendanceId = joinAndGetAttendanceId(firstWorkerToken, shift.joinCode());
+		long secondAttendanceId = joinAndGetAttendanceId(secondWorkerToken, shift.joinCode());
+		long thirdAttendanceId = joinAndGetAttendanceId(thirdWorkerToken, shift.joinCode());
+
+		sqlStatementCollector.clear();
+
+		mockMvc.perform(get(attendanceUrl(shift.id())).header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(3)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(firstAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation".formatted(firstAttendanceId))
+						.doesNotExist())
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(secondAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation".formatted(secondAttendanceId))
+						.doesNotExist())
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)]".formatted(thirdAttendanceId), hasSize(1)))
+				.andExpect(jsonPath("$[?(@.attendanceId == %d)].payCalculation".formatted(thirdAttendanceId))
+						.doesNotExist());
+
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("pay_calculations")).isZero();
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("pay_segments")).isZero();
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("shift_attendance")).isEqualTo(1);
+	}
+
+	@Test
+	void ownerForemanManagedAttendanceOmitsStaleSnapshotForOpenShift() throws Exception {
+		assertOwnerForemanManagedStaleSnapshotIsOmitted(StaleSnapshotState.OPEN_SHIFT);
+	}
+
+	@Test
+	void ownerForemanManagedAttendanceOmitsStaleSnapshotForActiveShift() throws Exception {
+		assertOwnerForemanManagedStaleSnapshotIsOmitted(StaleSnapshotState.ACTIVE_SHIFT);
+	}
+
+	@Test
+	void ownerForemanManagedAttendanceOmitsStaleSnapshotForCancelledShift() throws Exception {
+		assertOwnerForemanManagedStaleSnapshotIsOmitted(StaleSnapshotState.CANCELLED_SHIFT);
+	}
+
+	@Test
+	void ownerForemanManagedAttendanceOmitsStaleSnapshotForDiscardedShift() throws Exception {
+		assertOwnerForemanManagedStaleSnapshotIsOmitted(StaleSnapshotState.DISCARDED_SHIFT);
+	}
+
+	@Test
+	void ownerForemanManagedAttendanceOmitsStaleSnapshotForClosedNonApprovedAttendance() throws Exception {
+		assertOwnerForemanManagedStaleSnapshotIsOmitted(StaleSnapshotState.CLOSED_NON_APPROVED_ATTENDANCE);
+	}
+
+	@Test
+	void ownerForemanManagedAttendanceOmitsStaleSnapshotForClosedNullCalculatedSalary() throws Exception {
+		assertOwnerForemanManagedStaleSnapshotIsOmitted(StaleSnapshotState.CLOSED_NULL_CALCULATED_SALARY);
+	}
+
+	@Test
+	void workerPersonalHistoryOmitsStaleSnapshotForOpenShift() throws Exception {
+		assertWorkerHistoryStaleSnapshotIsOmitted(StaleSnapshotState.OPEN_SHIFT);
+	}
+
+	@Test
+	void workerPersonalHistoryOmitsStaleSnapshotForActiveShift() throws Exception {
+		assertWorkerHistoryStaleSnapshotIsOmitted(StaleSnapshotState.ACTIVE_SHIFT);
+	}
+
+	@Test
+	void workerPersonalHistoryOmitsStaleSnapshotForCancelledShift() throws Exception {
+		assertWorkerHistoryStaleSnapshotIsOmitted(StaleSnapshotState.CANCELLED_SHIFT);
+	}
+
+	@Test
+	void workerPersonalHistoryOmitsStaleSnapshotForDiscardedShift() throws Exception {
+		assertWorkerHistoryStaleSnapshotIsOmitted(StaleSnapshotState.DISCARDED_SHIFT);
+	}
+
+	@Test
+	void workerPersonalHistoryOmitsStaleSnapshotForClosedNonApprovedAttendance() throws Exception {
+		assertWorkerHistoryStaleSnapshotIsOmitted(StaleSnapshotState.CLOSED_NON_APPROVED_ATTENDANCE);
+	}
+
+	@Test
+	void workerPersonalHistoryOmitsStaleSnapshotForClosedNullCalculatedSalary() throws Exception {
+		assertWorkerHistoryStaleSnapshotIsOmitted(StaleSnapshotState.CLOSED_NULL_CALCULATED_SALARY);
 	}
 
 	/**
@@ -933,13 +1308,15 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$[0].status").value("DISCARDED"))
 				.andExpect(jsonPath("$[0].attendanceStatus").value("APPROVED"))
 				.andExpect(jsonPath("$[0].actualStartTime").isString())
-				.andExpect(jsonPath("$[0].payableStartTime").value((Object) null));
+				.andExpect(jsonPath("$[0].payableStartTime").value((Object) null))
+				.andExpect(jsonPath("$[0].payCalculation").doesNotExist());
 		mockMvc.perform(get(attendanceUrl(shift.id()))
 						.header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$[0].attendanceId").value(attendanceId))
 				.andExpect(jsonPath("$[0].status").value("APPROVED"))
-				.andExpect(jsonPath("$[0].payableStartTime").value((Object) null));
+				.andExpect(jsonPath("$[0].payableStartTime").value((Object) null))
+				.andExpect(jsonPath("$[0].payCalculation").doesNotExist());
 	}
 
 	/**
@@ -1071,7 +1448,7 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$[0].pauseMinutes").value((Object) null))
 				.andExpect(jsonPath("$[0].workedMinutes").value((Object) null))
 				.andExpect(jsonPath("$[0].calculatedSalary").value((Object) null))
-				.andExpect(jsonPath("$[0].payCalculation").value((Object) null))
+				.andExpect(jsonPath("$[0].payCalculation").doesNotExist())
 				.andExpect(jsonPath("$[0].pauseState.allPaused").value(false))
 				.andExpect(jsonPath("$[0].pauseState.personallyPaused").value(false))
 				.andExpect(jsonPath("$[0].plannedStartTime").doesNotExist())
@@ -1080,7 +1457,7 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$[0].foremanWorkedMinutes").doesNotExist())
 				.andExpect(jsonPath("$[0].foremanPauseMinutes").doesNotExist())
 				.andExpect(jsonPath("$[0].foremanSalary").doesNotExist())
-				.andExpect(jsonPath("$[0].*", hasSize(19)))
+				.andExpect(jsonPath("$[0].*", hasSize(18)))
 				.andExpect(jsonPath("$[0].passwordHash").doesNotExist())
 				.andExpect(jsonPath("$[0].user").doesNotExist())
 				.andExpect(jsonPath("$[0].worker").doesNotExist())
@@ -1140,6 +1517,7 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$[0].attendanceStatus").value("JOINED"))
 				.andExpect(jsonPath("$[0].workedMinutes").value((Object) null))
 				.andExpect(jsonPath("$[0].calculatedSalary").value((Object) null))
+				.andExpect(jsonPath("$[0].payCalculation").doesNotExist())
 				.andExpect(jsonPath("$[1].shiftId").value(closedApprovedShift.id()))
 				.andExpect(jsonPath("$[1].attendanceId").value(closedApprovedAttendanceId))
 				.andExpect(jsonPath("$[1].status").value("CLOSED"))
@@ -1149,21 +1527,25 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$[1].workedMinutes").value(closedApprovedAttendance.getWorkedMinutes()))
 				.andExpect(jsonPath("$[1].calculatedSalary")
 						.value(closedApprovedAttendance.getCalculatedSalary().doubleValue()))
+				.andExpect(jsonPath("$[1].payCalculation.snapshotStatus").value("COMPLETE"))
 				.andExpect(jsonPath("$[2].shiftId").value(activeShift.id()))
 				.andExpect(jsonPath("$[2].status").value("ACTIVE"))
 				.andExpect(jsonPath("$[2].attendanceStatus").value("JOINED"))
 				.andExpect(jsonPath("$[2].workedMinutes").value((Object) null))
 				.andExpect(jsonPath("$[2].calculatedSalary").value((Object) null))
+				.andExpect(jsonPath("$[2].payCalculation").doesNotExist())
 				.andExpect(jsonPath("$[3].shiftId").value(openShift.id()))
 				.andExpect(jsonPath("$[3].status").value("OPEN"))
 				.andExpect(jsonPath("$[3].workedMinutes").value((Object) null))
 				.andExpect(jsonPath("$[3].calculatedSalary").value((Object) null))
+				.andExpect(jsonPath("$[3].payCalculation").doesNotExist())
 				.andExpect(jsonPath("$[4].shiftId").value(closedJoinedShift.id()))
 				.andExpect(jsonPath("$[4].attendanceId").value(closedJoinedAttendanceId))
 				.andExpect(jsonPath("$[4].status").value("CLOSED"))
 				.andExpect(jsonPath("$[4].attendanceStatus").value("JOINED"))
 				.andExpect(jsonPath("$[4].workedMinutes").value((Object) null))
-				.andExpect(jsonPath("$[4].calculatedSalary").value((Object) null));
+				.andExpect(jsonPath("$[4].calculatedSalary").value((Object) null))
+				.andExpect(jsonPath("$[4].payCalculation").doesNotExist());
 	}
 
 	/**
@@ -1668,6 +2050,130 @@ class AttendanceControllerTests {
 		shiftAttendanceRepository.saveAndFlush(attendance);
 	}
 
+	private void approveStoredAttendance(long attendanceId) {
+		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
+		attendance.setStatus(AttendanceStatus.APPROVED);
+		attendance.setApprovedAt(OffsetDateTime.now(ZoneOffset.UTC));
+		shiftAttendanceRepository.saveAndFlush(attendance);
+	}
+
+	private void assertPersistedSnapshotsWithSegments(long... attendanceIds) {
+		String placeholders = String.join(", ", java.util.Collections.nCopies(attendanceIds.length, "?"));
+		Object[] parameters = new Object[attendanceIds.length];
+		for (int index = 0; index < attendanceIds.length; index++) {
+			parameters[index] = attendanceIds[index];
+		}
+
+		assertThat(jdbcTemplate.queryForObject(
+				"select count(*) from pay_calculations where attendance_id in (" + placeholders + ")",
+				Integer.class,
+				parameters
+		)).isEqualTo(attendanceIds.length);
+		assertThat(jdbcTemplate.queryForObject("""
+				select count(distinct calculation.attendance_id)
+				from pay_calculations calculation
+				join pay_segments segment on segment.pay_calculation_id = calculation.id
+				where calculation.attendance_id in (%s)
+				""".formatted(placeholders), Integer.class, parameters)).isEqualTo(attendanceIds.length);
+	}
+
+	private void assertOwnerForemanManagedStaleSnapshotIsOmitted(StaleSnapshotState state) throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		StaleSnapshotFixture fixture = createFinalizedSnapshotThenMakeIneligible(foremanToken, workerToken, state);
+
+		sqlStatementCollector.clear();
+
+		ResultActions response = mockMvc.perform(get(attendanceUrl(fixture.shift().id()))
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(1)))
+				.andExpect(jsonPath("$[0].attendanceId").value(fixture.attendanceId()))
+				.andExpect(jsonPath("$[0].status").value(state.expectedAttendanceStatus()))
+				.andExpect(jsonPath("$[0].hourlyRate").isNumber());
+		assertExpectedCalculatedSalary(response, state);
+		response.andExpect(jsonPath("$[0].payCalculation").doesNotExist());
+
+		assertNoSnapshotSql(state);
+	}
+
+	private void assertWorkerHistoryStaleSnapshotIsOmitted(StaleSnapshotState state) throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		StaleSnapshotFixture fixture = createFinalizedSnapshotThenMakeIneligible(foremanToken, workerToken, state);
+
+		sqlStatementCollector.clear();
+
+		ResultActions response = getMyShiftHistory(workerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(1)))
+				.andExpect(jsonPath("$[0].shiftId").value(fixture.shift().id()))
+				.andExpect(jsonPath("$[0].attendanceId").value(fixture.attendanceId()))
+				.andExpect(jsonPath("$[0].status").value(state.expectedShiftStatus()))
+				.andExpect(jsonPath("$[0].attendanceStatus").value(state.expectedAttendanceStatus()))
+				.andExpect(jsonPath("$[0].hourlyRate").isNumber());
+		assertExpectedCalculatedSalary(response, state);
+		response.andExpect(jsonPath("$[0].payCalculation").doesNotExist());
+
+		assertNoSnapshotSql(state);
+	}
+
+	private StaleSnapshotFixture createFinalizedSnapshotThenMakeIneligible(
+			String foremanToken,
+			String workerToken,
+			StaleSnapshotState state
+	) throws Exception {
+		CreatedShift shift = createShift(foremanToken, "Stale snapshot " + state.displayName());
+		long attendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		approveAttendance(foremanToken, shift.id(), attendanceId, "{}").andExpect(status().isOk());
+		startShift(foremanToken, shift.id());
+		closeShift(foremanToken, shift.id());
+
+		makeSnapshotIneligible(state, shift.id(), attendanceId);
+		assertPersistedSnapshotsWithSegments(attendanceId);
+		return new StaleSnapshotFixture(shift, attendanceId);
+	}
+
+	private void makeSnapshotIneligible(StaleSnapshotState state, long shiftId, long attendanceId) {
+		switch (state) {
+			case OPEN_SHIFT -> jdbcTemplate.update("update shift_sessions set status = 'OPEN' where id = ?", shiftId);
+			case ACTIVE_SHIFT -> jdbcTemplate.update("update shift_sessions set status = 'ACTIVE' where id = ?", shiftId);
+			case CANCELLED_SHIFT -> jdbcTemplate.update("update shift_sessions set status = 'CANCELLED' where id = ?", shiftId);
+			case DISCARDED_SHIFT -> jdbcTemplate.update("""
+					update shift_sessions
+					set status = 'DISCARDED',
+						discarded_at = current_timestamp,
+						discarded_by = created_by,
+						discard_reason = 'STALE_SNAPSHOT_TEST'
+					where id = ?
+					""", shiftId);
+			case CLOSED_NON_APPROVED_ATTENDANCE -> jdbcTemplate.update(
+					"update shift_attendance set status = 'JOINED' where id = ?", attendanceId
+			);
+			case CLOSED_NULL_CALCULATED_SALARY -> jdbcTemplate.update(
+					"update shift_attendance set calculated_salary = null where id = ?", attendanceId
+			);
+		}
+	}
+
+	private void assertExpectedCalculatedSalary(ResultActions response, StaleSnapshotState state) throws Exception {
+		if (state.hasPersistedCalculatedSalary()) {
+			response.andExpect(jsonPath("$[0].calculatedSalary").isNumber());
+		}
+		else {
+			response.andExpect(jsonPath("$[0].calculatedSalary").value((Object) null));
+		}
+	}
+
+	private void assertNoSnapshotSql(StaleSnapshotState state) {
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("pay_calculations"))
+				.as("%s must not query pay_calculations".formatted(state.displayName()))
+				.isZero();
+		assertThat(sqlStatementCollector.countContainingIgnoreCase("pay_segments"))
+				.as("%s must not query pay_segments".formatted(state.displayName()))
+				.isZero();
+	}
+
 	/**
 	 * Seeds an attendance row for any user, including FOREMAN or ADMIN, to exercise /me/shifts history filtering.
 	 *
@@ -1728,6 +2234,20 @@ class AttendanceControllerTests {
 		return matcher.group(1);
 	}
 
+	@TestConfiguration(proxyBeanMethods = false)
+	static class SqlStatementCaptureConfiguration {
+
+		@Bean
+		SqlStatementCollector sqlStatementCollector() {
+			return new SqlStatementCollector();
+		}
+
+		@Bean
+		HibernatePropertiesCustomizer statementInspectorCustomizer(SqlStatementCollector sqlStatementCollector) {
+			return properties -> properties.put(JdbcSettings.STATEMENT_INSPECTOR, sqlStatementCollector);
+		}
+	}
+
 	/**
 	 * Small setup value object carrying the fields tests need after creating a shift.
 	 *
@@ -1735,5 +2255,50 @@ class AttendanceControllerTests {
 	 * @param joinCode generated join code for worker joins
 	 */
 	private record CreatedShift(long id, String joinCode) {
+	}
+
+	private record StaleSnapshotFixture(CreatedShift shift, long attendanceId) {
+	}
+
+	private enum StaleSnapshotState {
+		OPEN_SHIFT("OPEN shift", "OPEN", "APPROVED", true),
+		ACTIVE_SHIFT("ACTIVE shift", "ACTIVE", "APPROVED", true),
+		CANCELLED_SHIFT("CANCELLED shift", "CANCELLED", "APPROVED", true),
+		DISCARDED_SHIFT("DISCARDED shift", "DISCARDED", "APPROVED", true),
+		CLOSED_NON_APPROVED_ATTENDANCE("CLOSED non-approved attendance", "CLOSED", "JOINED", true),
+		CLOSED_NULL_CALCULATED_SALARY("CLOSED attendance with null calculated salary", "CLOSED", "APPROVED", false);
+
+		private final String displayName;
+		private final String expectedShiftStatus;
+		private final String expectedAttendanceStatus;
+		private final boolean hasPersistedCalculatedSalary;
+
+		StaleSnapshotState(
+				String displayName,
+				String expectedShiftStatus,
+				String expectedAttendanceStatus,
+				boolean hasPersistedCalculatedSalary
+		) {
+			this.displayName = displayName;
+			this.expectedShiftStatus = expectedShiftStatus;
+			this.expectedAttendanceStatus = expectedAttendanceStatus;
+			this.hasPersistedCalculatedSalary = hasPersistedCalculatedSalary;
+		}
+
+		String displayName() {
+			return displayName;
+		}
+
+		String expectedShiftStatus() {
+			return expectedShiftStatus;
+		}
+
+		String expectedAttendanceStatus() {
+			return expectedAttendanceStatus;
+		}
+
+		boolean hasPersistedCalculatedSalary() {
+			return hasPersistedCalculatedSalary;
+		}
 	}
 }
