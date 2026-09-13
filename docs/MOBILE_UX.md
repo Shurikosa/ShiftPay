@@ -620,6 +620,7 @@ Rules:
 - late worker pay starts from backend `payableStartTime`/approval time, not the global shift start
 - cancelled shifts should show CANCELLED status and no salary summary action
 - use backend `pauseState` and attendance-level pause state; do not derive active pause state locally beyond rendering returned fields
+- render a managed worker `payCalculation` only when the owner-FOREMAN attendance response returns it. Treat an omitted property as no returned breakdown; never infer, reconstruct, or calculate one. Render returned `UNAVAILABLE` snapshots with the neutral unavailable-breakdown state.
 
 ### ShiftSummaryScreen
 

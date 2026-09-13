@@ -209,6 +209,10 @@ Phase 2C - Production salary integration and persisted breakdown:
 - [x] Add acceptance scenario tests A-I from SPEC/API against production close salary behavior
 - [x] Update OpenAPI/Swagger docs for pay breakdown DTOs after implementation
 
+Phase 2C backend follow-up:
+
+- [ ] Enforce role-aware payCalculation omission for `GET /api/v1/shifts/{shiftId}/attendance` and `GET /api/v1/me/shifts`, and add privacy (including ADMIN omission), finalized-state, legacy-absence, and UNAVAILABLE snapshot tests
+
 Phase 2D - Mobile pay rules and breakdown UI:
 
 - [x] Add pay policy API client methods and TypeScript DTOs
@@ -225,6 +229,8 @@ Phase 2D - Mobile pay rules and breakdown UI:
 - [ ] Display foreman-managed worker premium breakdown in summary/detail views
 - [ ] Keep payroll cards limited to raw payable time, final payout amount, status, and selected days/items
 - [ ] Ensure mobile does not calculate premium pay, overtime, effective rates, rule matches, payroll totals, or pay breakdown totals
+- [ ] Prevent stale overlapping `ForemanShiftDetailsScreen` loads from rendering an older attendance/payCalculation response
+- [ ] Align mobile payroll DTOs with required totalBaseAmount and totalPremiumAmount fields without expanding payroll-card presentation
 
 Future hardening:
 

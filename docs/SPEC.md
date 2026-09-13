@@ -153,7 +153,7 @@ Basic flow:
 28. System calculates worker salary totals from base pay plus configured percentage premiums.
 29. System calculates the foreman's private salary from ShiftSession.foremanHourlyRate without creating ShiftAttendance for the foreman. Foreman premium pay is deferred.
 30. Worker can view their own worker result and own pay breakdown after close.
-31. Foreman can view shift summary, including worker salary summary, worker premium breakdown, and their own private foreman salary.
+31. Owner FOREMAN can view shift summary, including worker salary summary, worker premium breakdown after close, and their own private foreman salary.
 32. Foreman can view the list of shifts they created and manage.
 
 ## 6. Shift Statuses
@@ -587,7 +587,8 @@ Authorization and privacy:
 - WORKER can read only calculation results relevant to their own attendance after close.
 - ADMIN REST/mobile behavior is deferred unless a later docs update explicitly adds it.
 - Worker never sees foreman salary/rate.
-- Foreman sees worker premium breakdown for managed shifts and payouts.
+- Owner FOREMAN sees worker premium breakdown for managed shifts after close and for managed payouts where the API exposes it.
+- ADMIN worker-breakdown visibility remains deferred for REST/mobile attendance, summary, and personal-history responses (`GET /api/v1/shifts/{shiftId}/attendance`, `GET /api/v1/shifts/{shiftId}/summary`, and `GET /api/v1/me/shifts`). ADMIN may still access permitted attendance, summary worker data, and own-history data, but those responses omit `payCalculation`.
 
 ## 13. Payroll Requests MVP
 

@@ -426,6 +426,9 @@ Attendance Query
 - Controllers return attendance DTOs and never expose User entities or password hashes.
 - Attendance DTOs expose payableStartTime, pauseState, pauseMinutes, workedMinutes, and calculatedSalary so active pause state and close-time salary results can be read without a summary endpoint.
 - Attendance DTOs expose paymentStatus where payroll status matters. Shift status and attendance approval status remain separate from payment status.
+- Authorization to list attendance is separate from authorization to see worker PayCalculation audit snapshots. Only the owner FOREMAN receives an optional payCalculation DTO, and only for CLOSED, APPROVED attendance with finalized calculatedSalary and an existing persisted snapshot.
+- ADMIN attendance DTOs omit payCalculation entirely. Non-final rows and legacy CLOSED APPROVED rows without a snapshot also omit it; legacy calculatedSalary remains authoritative. An existing degraded snapshot remains a returned PayCalculation with canonical UNAVAILABLE semantics, not a legacy absence.
+- Attendance query services/controllers read persisted data only and must not calculate, backfill, or reconstruct a snapshot to populate the DTO. ADMIN REST/mobile worker-breakdown visibility remains deferred.
 
 Worker Shift History
 
@@ -436,6 +439,10 @@ Worker Shift History
 - OPEN, ACTIVE, CLOSED, CANCELLED, and DISCARDED shifts are included.
 - The endpoint reads persisted workedMinutes and calculatedSalary from ShiftAttendance and never recalculates salary.
 - OPEN, ACTIVE, CANCELLED, DISCARDED, and unapproved attendance can return null workedMinutes and calculatedSalary.
+- Authorization to read personal history is separate from PayCalculation audit-snapshot visibility. WORKER and FOREMAN may receive an optional payCalculation DTO only for their own CLOSED, APPROVED attendance with finalized calculatedSalary and an existing persisted snapshot; FOREMAN never receives managed-worker snapshots through this endpoint.
+- ADMIN personal-history DTOs omit payCalculation entirely, even for the ADMIN's own permitted attendance rows. That omission does not remove or alter the other permitted persisted history fields, and ADMIN REST/mobile worker audit-breakdown visibility remains deferred.
+- Non-final rows and legacy CLOSED APPROVED rows without a snapshot omit payCalculation; legacy calculatedSalary and its documented aggregate fallback remain authoritative. A degraded persisted snapshot returned to a permitted WORKER or FOREMAN caller has canonical UNAVAILABLE semantics, not legacy absence.
+- History query services/controllers read persisted attendance and snapshot data only and must not calculate, backfill, or reconstruct a snapshot for the DTO.
 - CLOSED approved attendance exposes paymentStatus so the worker can distinguish UNPAID, PAYMENT_REQUESTED, and PAID.
 - The repository fetches attendance with shift in one query to avoid N+1 loading.
 - Results are ordered by joinedAt descending and then attendance id descending.
@@ -680,6 +687,8 @@ Shift Summary
 - Summary DTOs expose worker identity fields but never expose User entities or password hashes.
 - Worker summary remains based on approved ShiftAttendance rows.
 - Worker summary exposes pauseMinutes for approved closed attendance.
+- Only the owner FOREMAN receives worker PayCalculation breakdowns in the summary DTO, and only for CLOSED, APPROVED worker rows with finalized calculatedSalary and an existing persisted snapshot. A degraded persisted snapshot is returned with canonical UNAVAILABLE semantics; legacy rows without a snapshot omit payCalculation and keep their persisted salary plus legacy aggregate fallback authoritative.
+- Summary services/controllers read persisted data only and must not calculate, backfill, or reconstruct a PayCalculation snapshot. ADMIN REST/mobile summary responses omit payCalculation entirely; authorization to read the summary's worker rows does not grant audit-snapshot visibility.
 - Foreman private salary fields are separate from worker rows: foremanWorkedMinutes, foremanPauseMinutes, foremanHourlyRate, and foremanSalary.
 - Foreman salary fields are returned only to the owner FOREMAN.
 - WORKER never receives foreman salary fields.
@@ -776,7 +785,7 @@ FOREMAN:
 - approve PENDING payout requests for their company and managed shifts
 
 ADMIN:
-- read shift detail, list/approve attendance, and read worker-only shift summaries through REST where implemented
+- read shift detail, list/approve attendance, and read worker data within shift summaries through REST where implemented
 - no REST/mobile shift create/start/close/cancel/pause access
 - no REST/mobile payout request creation or approval access for the MVP
 - user management after mobile MVP through Vaadin

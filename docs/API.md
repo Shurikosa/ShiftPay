@@ -1190,6 +1190,12 @@ Rules:
 - The endpoint is available while the shift is OPEN, ACTIVE, CLOSED, CANCELLED, or DISCARDED.
 - Results are sorted by joinedAt ascending, then attendanceId ascending.
 - Worker data is returned through the attendance DTO; passwordHash and the User entity are never exposed.
+- Authorization to list attendance does not by itself grant access to worker PayCalculation audit snapshots.
+- Only the owner FOREMAN may receive the optional `payCalculation` property, and only for CLOSED, APPROVED attendance with finalized calculatedSalary and an existing persisted PayCalculation snapshot.
+- When returned, `payCalculation` has the canonical PayCalculation DTO shape and COMPLETE/UNAVAILABLE semantics documented in the `PayCalculation DTO` section below. An existing degraded snapshot is returned with `snapshotStatus: "UNAVAILABLE"`; it is not legacy absence.
+- ADMIN responses omit `payCalculation` entirely, even though ADMIN can list attendance for any shift. ADMIN worker-breakdown visibility remains deferred for REST/mobile responses.
+- The property is omitted for non-final attendance and for legacy CLOSED APPROVED attendance without a snapshot; the legacy persisted calculatedSalary remains authoritative.
+- This endpoint reads persisted fields only. It must never calculate, backfill, or reconstruct a PayCalculation snapshot.
 
 Response:
 
@@ -1223,6 +1229,7 @@ Status: 200 OK
 
 For APPROVED attendance after the shift is closed, pauseMinutes, workedMinutes, and calculatedSalary contain the close-time calculation.
 For JOINED, REJECTED, CANCELLED, and DISCARDED-shift attendance, pauseMinutes, workedMinutes, and calculatedSalary remain null.
+For the owner FOREMAN, a finalized CLOSED APPROVED row with an existing snapshot may additionally include `payCalculation` in the canonical DTO shape. It is omitted, rather than null, for ADMIN, non-final rows, and legacy rows without a snapshot.
 paymentStatus is separate from shift status and attendance approval status. Payroll endpoints are the source of truth for payout request and rounded payout fields.
 payableStartTime is null until the worker has approved attendance and an effective payable start. For a worker approved before the shift starts, the effective payable start is the shift actualStartTime and may be returned after start. For a worker approved during an ACTIVE shift, payableStartTime is the approval time.
 pauseState shows the all-pause state plus the listed worker's personal pause state. It does not expose foreman salary or rate fields.
@@ -1589,9 +1596,8 @@ Rules:
 - ADMIN can get worker summary for any shift.
 - WORKER is not allowed.
 - Summary is available only for CLOSED shifts.
-- The endpoint uses stored workedMinutes and calculatedSalary from shift_attendance.
-- The endpoint does not recalculate salary.
-- A legacy APPROVED attendance on a CLOSED shift without a PayCalculation snapshot uses its persisted calculatedSalary as its authoritative historical final amount. For that attendance, totalBaseAmount equals calculatedSalary, totalPremiumAmount is 0, and payCalculation/detailed breakdown is null or omitted according to the DTO's existing optional-field convention. The backend must not create a snapshot retrospectively or recalculate the legacy salary.
+- The endpoint reads persisted workedMinutes and calculatedSalary from shift_attendance. It must never calculate, backfill, or reconstruct a PayCalculation snapshot.
+- A legacy APPROVED attendance on a CLOSED shift without a PayCalculation snapshot uses its persisted calculatedSalary as its authoritative historical final amount. For that attendance, totalBaseAmount equals calculatedSalary, totalPremiumAmount is 0, and `payCalculation` is omitted. The backend must not create a snapshot retrospectively or recalculate the legacy salary.
 - Only APPROVED attendance is included in workers.
 - JOINED, REJECTED, and CANCELLED attendance is excluded.
 - totalWorkers is the number of included APPROVED attendance records.
@@ -1602,8 +1608,9 @@ Rules:
 - Worker summary remains limited to APPROVED worker attendance.
 - Salary results subtract static break minutes and effective pause minutes, then clamp paid minutes to zero when unpaid minutes exceed the payable duration.
 - Late approved worker salary starts from the worker payable start time, not the global shift actualStartTime.
-- Worker payCalculation breakdown is returned to the owner FOREMAN for managed shifts after close.
-- ADMIN summary responses omit private foreman fields. ADMIN worker pay breakdown visibility is deferred unless needed by Vaadin later.
+- Only the owner FOREMAN receives worker `payCalculation`, and only for CLOSED, APPROVED worker rows with finalized calculatedSalary and an existing persisted PayCalculation snapshot.
+- An existing degraded snapshot is returned with the canonical `UNAVAILABLE` semantics; it is not treated as legacy absence.
+- ADMIN summary responses omit private foreman fields and all worker `payCalculation` breakdowns. ADMIN worker-breakdown visibility remains deferred for REST/mobile responses unless a future canonical docs change adds it.
 - CANCELLED and DISCARDED shifts do not return summary because salary is not calculated.
 - Workers are sorted by lastName ascending, firstName ascending, then workerId ascending.
 - If an APPROVED attendance has null workedMinutes or calculatedSalary, the endpoint returns 409.
@@ -1769,10 +1776,13 @@ Rules:
 - OPEN, ACTIVE, CLOSED, CANCELLED, and DISCARDED shifts are included.
 - CLOSED shifts return workedMinutes and calculatedSalary when those values were already calculated and stored.
 - OPEN, ACTIVE, CANCELLED, DISCARDED, and unapproved attendance may return null workedMinutes and calculatedSalary.
-- This endpoint reads stored attendance salary fields and does not recalculate salary.
-- CLOSED approved attendance may include the current worker's own payCalculation breakdown.
+- Authorization to read personal attendance history does not by itself grant access to a PayCalculation audit snapshot. WORKER may receive `payCalculation` only for their own CLOSED, APPROVED attendance with finalized calculatedSalary and an existing persisted snapshot. FOREMAN may receive it under the same conditions only for their own worker attendance, never for managed workers through this endpoint.
+- ADMIN may read only their own permitted attendance-history rows, but ADMIN responses omit `payCalculation` entirely. ADMIN REST/mobile worker audit-breakdown visibility remains deferred.
+- The property is omitted for non-final attendance and for legacy CLOSED APPROVED attendance without a snapshot. Its omission does not remove or alter any other permitted persisted history fields.
+- An existing degraded snapshot returned to a permitted WORKER or FOREMAN caller has canonical `snapshotStatus: "UNAVAILABLE"` semantics; it is not legacy absence.
+- This endpoint reads persisted attendance and snapshot fields only. It must never calculate, backfill, or reconstruct a PayCalculation snapshot.
 - When included, payCalculation totals and segment money fields are scale-8 audit data; calculatedSalary is the separately stored scale-2 currency-settlement value and can differ from those audit components by a rounding delta.
-- For legacy CLOSED APPROVED attendance without a PayCalculation snapshot, calculatedSalary remains the authoritative historical final amount; any returned totalBaseAmount equals calculatedSalary, totalPremiumAmount is 0, and payCalculation/detailed breakdown is null or omitted according to the DTO's existing optional-field convention. The backend must not backfill a snapshot or recalculate that salary.
+- For legacy CLOSED APPROVED attendance without a PayCalculation snapshot, calculatedSalary remains the authoritative historical final amount; any returned totalBaseAmount equals calculatedSalary, totalPremiumAmount is 0, and payCalculation/detailed breakdown is omitted according to the DTO's optional-field convention.
 - CLOSED approved attendance includes paymentStatus so the worker can see whether the payroll item is UNPAID, PAYMENT_REQUESTED, or PAID.
 - The response includes pauseState for active shift display and pauseMinutes after close-time salary calculation.
 - The response includes payableStartTime when the backend knows the worker's effective salary start.
@@ -1780,7 +1790,7 @@ Rules:
 - The response does not expose User entities, worker records, email, or passwordHash.
 - The repository fetches attendance with shift in one query to avoid N+1 loading.
 
-Response:
+Response for a WORKER or FOREMAN accessing their own finalized worker attendance:
 
 [
   {
@@ -1840,7 +1850,8 @@ Response:
 ]
 
 Worker history never returns foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary.
-Salary and premium pay remain backend-calculated. Mobile should display persisted workedMinutes, pauseMinutes, payableStartTime, calculatedSalary, and payCalculation without recalculating them.
+An ADMIN response retains the other permitted persisted history fields but omits payCalculation entirely.
+Salary and premium pay remain backend-calculated. Mobile should display persisted workedMinutes, pauseMinutes, payableStartTime, calculatedSalary, and any returned payCalculation without recalculating them.
 Rounded payout minutes and payout amounts are returned by payroll endpoints. Mobile must not derive them from worker history.
 
 Missing, invalid, or expired token:
