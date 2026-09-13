@@ -6,13 +6,19 @@ import { getErrorMessage } from "../api/errors";
 import { getShiftSummary } from "../api/shifts";
 import { Button } from "../components/Button";
 import { DetailRow } from "../components/DetailRow";
+import { PayCalculationBreakdown } from "../components/PayCalculationBreakdown";
 import { Screen } from "../components/Screen";
 import { StateMessage } from "../components/StateMessage";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAuth } from "../context/AuthContext";
 import type { ForemanStackParamList } from "../types/navigation";
 import type { ShiftSummary } from "../types/shifts";
-import { formatMoney, formatMinutes, formatRate } from "../utils/format";
+import {
+  formatAuditDecimal,
+  formatMoney,
+  formatMinutes,
+  formatRate
+} from "../utils/format";
 import { formatPauseMinutes } from "../utils/pauseDisplay";
 import { getShiftStatusTone } from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
@@ -54,6 +60,7 @@ export function ShiftSummaryScreen({ navigation, route }: ShiftSummaryScreenProp
 
   const hasForemanSummary =
     summary?.foremanWorkedMinutes !== undefined ||
+    summary?.foremanPauseMinutes !== undefined ||
     summary?.foremanHourlyRate !== undefined ||
     summary?.foremanSalary !== undefined;
 
@@ -92,7 +99,20 @@ export function ShiftSummaryScreen({ navigation, route }: ShiftSummaryScreenProp
             <View style={styles.panel}>
               <DetailRow label="Total workers" value={String(summary.totalWorkers)} />
               <DetailRow label="Total worker salary" value={formatMoney(summary.totalSalary)} />
+              <DetailRow
+                label="Total base amount (audit)"
+                value={formatAuditDecimal(summary.totalBaseAmount)}
+              />
+              <DetailRow
+                label="Total premium amount (audit)"
+                value={formatAuditDecimal(summary.totalPremiumAmount)}
+              />
             </View>
+            <Text style={styles.auditNote}>
+              Base and premium totals are backend-provided audit values. They may
+              differ from the stored worker salary total after final settlement
+              rounding.
+            </Text>
 
             {hasForemanSummary ? (
               <View style={styles.section}>
@@ -146,6 +166,16 @@ export function ShiftSummaryScreen({ navigation, route }: ShiftSummaryScreenProp
                         <DetailRow label="Hourly rate" value={formatRate(worker.hourlyRate)} />
                         <DetailRow label="Salary" value={formatMoney(worker.salary)} />
                       </View>
+                      {worker.payCalculation ? (
+                        <PayCalculationBreakdown
+                          calculation={worker.payCalculation}
+                        />
+                      ) : (
+                        <StateMessage
+                          title="Historical breakdown unavailable"
+                          message="This worker has no calculation snapshot. The stored salary remains the authoritative final amount; no worker audit breakdown was reconstructed."
+                        />
+                      )}
                     </View>
                   ))}
                 </View>
@@ -186,6 +216,10 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     ...typography.body,
+    color: colors.textSecondary
+  },
+  auditNote: {
+    ...typography.caption,
     color: colors.textSecondary
   },
   stateBlock: {

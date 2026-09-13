@@ -20,6 +20,8 @@ export interface PayableAttendance {
   payoutRoundedMinutes: number;
   hourlyRate: number;
   calculatedSalary: number;
+  totalBaseAmount: number;
+  totalPremiumAmount: number;
   payoutAmount: number;
 }
 
@@ -36,6 +38,8 @@ export interface PayoutRequestItem {
   hourlyRate: number;
   calculatedSalary: number;
   roundedItemAmountExact?: number;
+  totalBaseAmount: number;
+  totalPremiumAmount: number;
   payoutAmount: number;
   paidAt?: string | null;
 }
@@ -44,6 +48,8 @@ export interface PayoutRequestTotals {
   rawPayableMinutes: number;
   payoutRoundedMinutes: number;
   exactCalculatedAmount: number;
+  totalBaseAmount: number;
+  totalPremiumAmount: number;
   payoutAmount: number;
 }
 

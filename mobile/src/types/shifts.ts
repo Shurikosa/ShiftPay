@@ -124,6 +124,7 @@ export interface ShiftAttendance {
   pauseMinutes?: number | null;
   workedMinutes: number | null;
   calculatedSalary: number | null;
+  payCalculation?: PayCalculation | null;
   pauseState?: PauseState;
   joinedAt: string;
   approvedAt: string | null;
@@ -180,6 +181,7 @@ export interface ShiftSummaryWorker {
   pauseMinutes?: number;
   hourlyRate: number;
   salary: number;
+  payCalculation?: PayCalculation | null;
 }
 
 export interface ShiftSummary {
@@ -187,6 +189,8 @@ export interface ShiftSummary {
   status: ShiftStatus;
   totalWorkers: number;
   totalSalary: number;
+  totalBaseAmount: number;
+  totalPremiumAmount: number;
   foremanWorkedMinutes?: number;
   foremanPauseMinutes?: number;
   foremanHourlyRate?: number;

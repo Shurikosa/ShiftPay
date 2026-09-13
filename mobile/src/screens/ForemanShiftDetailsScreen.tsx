@@ -18,6 +18,7 @@ import {
 import { ApiError, getErrorMessage } from "../api/errors";
 import { Button } from "../components/Button";
 import { DetailRow } from "../components/DetailRow";
+import { PayCalculationBreakdown } from "../components/PayCalculationBreakdown";
 import { Screen } from "../components/Screen";
 import { StateMessage } from "../components/StateMessage";
 import { StatusBadge } from "../components/StatusBadge";
@@ -103,6 +104,8 @@ export function ForemanShiftDetailsScreen({
   const [shortShiftDecisionOpen, setShortShiftDecisionOpen] = useState(false);
   const mutationInFlightRef = useRef(false);
   const shortShiftDecisionOpenRef = useRef(false);
+  const detailsLoadSequenceRef = useRef(0);
+  const isDetailsScreenFocusedRef = useRef(false);
 
   const setShortShiftDecisionGuard = (isOpen: boolean) => {
     shortShiftDecisionOpenRef.current = isOpen;
@@ -134,6 +137,15 @@ export function ForemanShiftDetailsScreen({
   };
 
   const loadDetails = useCallback(async () => {
+    if (!isDetailsScreenFocusedRef.current) {
+      return;
+    }
+
+    const loadSequence = ++detailsLoadSequenceRef.current;
+    const isCurrentLoad = () =>
+      isDetailsScreenFocusedRef.current &&
+      detailsLoadSequenceRef.current === loadSequence;
+
     setLoading(true);
     setError(null);
 
@@ -144,19 +156,30 @@ export function ForemanShiftDetailsScreen({
           getShiftAttendance(token, shiftId)
         ])
       );
-      setShift(nextShift);
-      setAttendance(nextAttendance);
+
+      if (isCurrentLoad()) {
+        setShift(nextShift);
+        setAttendance(nextAttendance);
+      }
     } catch (caughtError) {
-      setError(getErrorMessage(caughtError));
+      if (isCurrentLoad()) {
+        setError(getErrorMessage(caughtError));
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentLoad()) {
+        setLoading(false);
+      }
     }
   }, [authenticatedRequest, shiftId]);
 
   useFocusEffect(
     useCallback(() => {
+      isDetailsScreenFocusedRef.current = true;
       void loadDetails();
-      return undefined;
+      return () => {
+        isDetailsScreenFocusedRef.current = false;
+        detailsLoadSequenceRef.current += 1;
+      };
     }, [loadDetails])
   );
 
@@ -641,6 +664,10 @@ export function ForemanShiftDetailsScreen({
                   {attendance.map((item) => {
                     const canApprove =
                       canApproveAttendance && item.status === "JOINED";
+                    const canShowFinalPayBreakdown =
+                      shift.status === "CLOSED" &&
+                      item.status === "APPROVED" &&
+                      item.calculatedSalary !== null;
 
                     return (
                       <View key={item.attendanceId} style={styles.attendanceCard}>
@@ -707,6 +734,19 @@ export function ForemanShiftDetailsScreen({
                             </>
                           )}
                         </View>
+
+                        {canShowFinalPayBreakdown ? (
+                          item.payCalculation ? (
+                            <PayCalculationBreakdown
+                              calculation={item.payCalculation}
+                            />
+                          ) : (
+                            <StateMessage
+                              title="Historical breakdown unavailable"
+                              message="This closed attendance has no calculation snapshot. The stored calculated salary remains the authoritative final amount."
+                            />
+                          )
+                        ) : null}
 
                         {canApprove ? (
                           <Button
