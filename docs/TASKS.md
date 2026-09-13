@@ -211,7 +211,7 @@ Phase 2C - Production salary integration and persisted breakdown:
 
 Phase 2C backend follow-up:
 
-- [ ] Enforce role-aware payCalculation omission for `GET /api/v1/shifts/{shiftId}/attendance` and `GET /api/v1/me/shifts`, and add privacy (including ADMIN omission), finalized-state, legacy-absence, and UNAVAILABLE snapshot tests
+- [x] Enforce role-aware payCalculation omission for `GET /api/v1/shifts/{shiftId}/attendance` and `GET /api/v1/me/shifts`, and add privacy (including ADMIN omission), finalized-state, legacy-absence, and UNAVAILABLE snapshot tests
 
 Phase 2D - Mobile pay rules and breakdown UI:
 
