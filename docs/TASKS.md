@@ -226,11 +226,11 @@ Phase 2D - Mobile pay rules and breakdown UI:
 - [x] Add manual HOLIDAY local date list with optional labels
 - [x] Add pay policy loading, validation, error, and save states
 - [x] Display read-only worker pay breakdown after close for own attendance
-- [ ] Display foreman-managed worker premium breakdown in summary/detail views
-- [ ] Keep payroll cards limited to raw payable time, final payout amount, status, and selected days/items
-- [ ] Ensure mobile does not calculate premium pay, overtime, effective rates, rule matches, payroll totals, or pay breakdown totals
-- [ ] Prevent stale overlapping `ForemanShiftDetailsScreen` loads from rendering an older attendance/payCalculation response
-- [ ] Align mobile payroll DTOs with required totalBaseAmount and totalPremiumAmount fields without expanding payroll-card presentation
+- [x] Display foreman-managed worker premium breakdown in summary/detail views
+- [x] Keep payroll cards limited to raw payable time, final payout amount, status, and selected days/items
+- [x] Ensure mobile does not calculate premium pay, overtime, effective rates, rule matches, payroll totals, or pay breakdown totals
+- [x] Prevent stale overlapping `ForemanShiftDetailsScreen` loads from rendering an older attendance/payCalculation response
+- [x] Align mobile payroll DTOs with required totalBaseAmount and totalPremiumAmount fields without expanding payroll-card presentation
 
 Future hardening:
 
