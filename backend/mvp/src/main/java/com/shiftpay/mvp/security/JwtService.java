@@ -43,7 +43,7 @@ public class JwtService {
 	 */
 	public JwtService(
 			@Value("${security.jwt.secret:shiftpay-dev-secret-change-me}") String secret,
-			@Value("${security.jwt.expiration-seconds:3600}") long expirationSeconds
+			@Value("${security.jwt.expiration-seconds:28800}") long expirationSeconds
 	) {
 		this.secret = secret;
 		this.expirationSeconds = expirationSeconds;

@@ -15,6 +15,11 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -33,6 +38,7 @@ class AuthControllerTests {
 
 	private static final String REGISTER_URL = "/api/v1/auth/register";
 	private static final String LOGIN_URL = "/api/v1/auth/login";
+	private static final Pattern ACCESS_TOKEN_PATTERN = Pattern.compile("\\\"accessToken\\\":\\\"([^\\\"]+)\\\"");
 
 	@Autowired
 	private MockMvc mockMvc;
@@ -243,6 +249,33 @@ class AuthControllerTests {
 	}
 
 	/**
+	 * Obtains a token through the login endpoint and independently decodes its payload to verify the configured default
+	 * lifetime.
+	 */
+	@Test
+	void defaultLoginAccessTokenLifetimeIsEightHours() throws Exception {
+		registerWorker();
+
+		MvcResult result = mockMvc.perform(post(LOGIN_URL)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "email": "worker@example.com",
+								  "password": "password123"
+								}
+								"""))
+				.andExpect(status().isOk())
+				.andReturn();
+
+		String accessToken = extractAccessToken(result.getResponse().getContentAsString());
+		String payload = decodeJwtPayload(accessToken);
+		long issuedAt = readJwtNumericClaim(payload, "iat");
+		long expiresAt = readJwtNumericClaim(payload, "exp");
+
+		assertThat(expiresAt - issuedAt).isEqualTo(28_800L);
+	}
+
+	/**
 	 * Checks that a wrong password for a real account is rejected without revealing credential details.
 	 */
 	@Test
@@ -338,5 +371,23 @@ class AuthControllerTests {
 						  "role": "ADMIN"
 						}
 						"""));
+	}
+
+	private String extractAccessToken(String responseBody) {
+		Matcher matcher = ACCESS_TOKEN_PATTERN.matcher(responseBody);
+		assertThat(matcher.find()).isTrue();
+		return matcher.group(1);
+	}
+
+	private String decodeJwtPayload(String accessToken) {
+		String[] tokenParts = accessToken.split("\\.");
+		assertThat(tokenParts).hasSize(3);
+		return new String(Base64.getUrlDecoder().decode(tokenParts[1]), StandardCharsets.UTF_8);
+	}
+
+	private long readJwtNumericClaim(String payload, String claimName) {
+		Matcher matcher = Pattern.compile("\\\"%s\\\":(\\d+)".formatted(claimName)).matcher(payload);
+		assertThat(matcher.find()).as("JWT payload contains numeric %s claim", claimName).isTrue();
+		return Long.parseLong(matcher.group(1));
 	}
 }

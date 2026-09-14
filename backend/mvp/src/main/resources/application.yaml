@@ -31,7 +31,7 @@ spring:
 security:
   jwt:
     secret: ${JWT_SECRET:shiftpay-dev-secret-change-me}
-    expiration-seconds: ${JWT_EXPIRATION_SECONDS:3600}
+    expiration-seconds: ${JWT_EXPIRATION_SECONDS:28800}
 
 shiftpay:
   default-time-zone: ${SHIFTPAY_DEFAULT_TIME_ZONE:Europe/Berlin}
