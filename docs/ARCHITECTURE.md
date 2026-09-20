@@ -106,6 +106,9 @@ id
 name
 joinCode
 ownerForemanId
+currencyLabel
+defaultWorkerHourlyRate
+defaultForemanHourlyRate
 timeZone
 createdAt
 updatedAt
@@ -136,6 +139,7 @@ actualEndTime
 defaultBreakMinutes
 defaultHourlyRate
 foremanHourlyRate
+currencyLabel
 foremanWorkedMinutes
 foremanPauseMinutes
 foremanCalculatedSalary
@@ -167,12 +171,19 @@ Company Ownership and Membership
 - FOREMAN must have a company before creating or starting shifts.
 - The backend must not use Default Company for real MVP shifts.
 - Company has a backend-generated joinCode.
+- Company has mutable defaultWorkerHourlyRate and defaultForemanHourlyRate fields. They are independent nullable non-negative scale-2 defaults for future shifts, not historical salary inputs.
+- New companies require currencyLabel for new monetary activity. It is free-form Unicode display text, not an ISO-4217 code. The authoritative boundary algorithm removes only leading and trailing Unicode `White_Space` code points in this exact set: U+0009–U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, and U+3000; rejects an empty result; and limits the result to 64 Unicode code points, not UTF-8 bytes or UTF-16 code units. It must not depend on Java `trim()`, Java `strip()`, or JavaScript `trim()`. Non-boundary text is preserved without case conversion or Unicode normalization. Backend validation is authoritative; mobile may mirror this exact rule for immediate feedback but must display a backend field-validation rejection.
+- The migration leaves currencyLabel nullable for existing Company rows. It does not backfill from a locale, ISO registry, current company data, or historical money because none is a trustworthy historical source.
+- Company Settings REST/mobile access is FOREMAN-only. `GET` and `PUT /api/v1/me/company` use CompanySettingsResponse and UpdateCompanySettingsRequest. WORKER and ADMIN receive 403 and do not receive the company default rates; ADMIN management remains deferred to Vaadin.
+- The update edits company name, both defaults, and currencyLabel; joinCode and timeZone remain read-only in this phase. Defaults may be cleared independently with null, but currencyLabel cannot be cleared. PayPolicy remains a separate immutable/versioned aggregate.
 - Company has a timeZone field using an IANA timezone id, for example `Europe/Berlin`.
 - Company.timeZone is the source of truth for pay policy day, week, and holiday boundaries.
 - Existing companies can default to the backend configured timezone until configurable company timezone UI exists.
 - WORKER joins a company by company join code.
 - WORKER can join a shift only if they are already a member of that shift's company.
 - ShiftSession.companyId is required for real MVP shifts.
+- ShiftSession.currencyLabel snapshots the non-null Company.currencyLabel at shift creation. Changing company settings never changes existing shift, attendance, calculation, payroll, or payout history. Legacy rows without the new snapshot remain null and are not backfilled by read paths.
+- A company with null currencyLabel must save Company Settings before it can create a new shift; creation returns a clear 409 conflict instead of creating a shift with an unknown label. Existing legacy shifts may complete under their established lifecycle but retain the unknown null label.
 - Company name is exposed in current-user, shift, managed-shift, and worker-history DTOs where useful for mobile dashboards and menus.
 - ADMIN user management remains deferred until after the mobile MVP and should be implemented in Vaadin.
 - The mobile MVP should not add an ADMIN flow.
@@ -190,7 +201,7 @@ Shift Creation
 - Start resolves and freezes the current company PayPolicy version onto ShiftSession.payPolicyVersionId.
 - Historical CLOSED calculations must keep using the frozen PayPolicy version even if the company's current policy changes later.
 - actualEndTime is set by the backend when the foreman closes the shift.
-- Shift creation keeps optional location, defaultBreakMinutes, defaultHourlyRate, and foremanHourlyRate.
+- Shift creation keeps optional location, defaultBreakMinutes, defaultHourlyRate, and foremanHourlyRate. The existing CreateShiftRequest names remain unchanged; the two rate fields are nullable overrides resolved independently from the Company defaults. For each field, an omitted property or explicit JSON `null` means no override and falls back to its matching Company default; a numeric value, including `0`, is the shift override. If the resolved worker or foreman rate is still absent, creation returns the corresponding 400 field-validation error.
 - defaultBreakMinutes is optional and defaults to 0 when omitted.
 - Dynamic pause tracking is separate from defaultBreakMinutes and is available only while the shift is ACTIVE.
 
@@ -226,8 +237,10 @@ Short Shift Discard
 Hourly Rate Ownership
 
 - WORKER does not provide or modify hourly rates.
-- FOREMAN sets defaultHourlyRate when creating an owned shift.
-- FOREMAN sets foremanHourlyRate when creating an owned shift.
+- FOREMAN may provide defaultHourlyRate when creating an owned shift; an omitted property or explicit JSON `null` causes ShiftSessionService to resolve Company.defaultWorkerHourlyRate instead. A numeric value, including `0`, is the shift-only override.
+- FOREMAN may provide foremanHourlyRate when creating an owned shift; an omitted property or explicit JSON `null` causes ShiftSessionService to resolve Company.defaultForemanHourlyRate instead. A numeric value, including `0`, is the shift-only override.
+- Each resolved shift rate is required. When request and matching company default are both absent, creation returns field validation rather than inventing a rate.
+- Explicit request values override company defaults for that shift only. Company default changes never update existing ShiftSession rows.
 - ADMIN cannot create shifts or set defaultHourlyRate through the REST/mobile API.
 - ShiftAttendance.hourlyRate is copied from ShiftSession.defaultHourlyRate when a worker joins.
 - ShiftAttendance.hourlyRate is a snapshot for that worker and shift, so later shift-rate changes do not rewrite historical attendance.
@@ -263,6 +276,8 @@ Pay Policy Model
 - premiumPercent supports a maximum scale of 4 decimal places.
 - Invalid premiumPercent values return 400 validation errors.
 - 0 is allowed to support temporary/no-op enabled rules, but UI may warn.
+- Company default rates and currencyLabel are not fields on PayPolicyVersion. The mobile policy editor may use Company.defaultWorkerHourlyRate only for a clearly labelled, non-authoritative single-rule percentage preview.
+- The preview may calculate one premium-per-hour and one base-plus-this-rule example. For a default worker rate of 20 and a 25% rule, it may show `Premium: +5.00 EUR/hour` and `Rate with this rule only: 25.00 EUR/hour` with the current Company currencyLabel. It never uses defaultForemanHourlyRate because foreman premium pay is deferred, and it must not evaluate applicability, stacking, segments, overtime, salary, payout, or totals; production calculation remains backend-owned.
 - No legal, country, Saturday, Sunday, night, overtime, or holiday premium values are hardcoded.
 - No default premium applies unless explicitly configured in the active company policy.
 - Holiday dates are manual company-configured local dates in the company/policy timezone.
@@ -372,6 +387,7 @@ id
 companyId
 workerId
 managerForemanId
+currencyLabel
 status
 rawPayableMinutesTotal
 payoutRoundedMinutesTotal
@@ -425,6 +441,7 @@ Attendance Query
 - Results are ordered by joinedAt ascending and then attendance id ascending.
 - Controllers return attendance DTOs and never expose User entities or password hashes.
 - Attendance DTOs expose payableStartTime, pauseState, pauseMinutes, workedMinutes, and calculatedSalary so active pause state and close-time salary results can be read without a summary endpoint.
+- Attendance DTOs also expose the nullable ShiftSession.currencyLabel beside rate and salary data. A null is an unknown legacy label, not a client-side fallback instruction.
 - Attendance DTOs expose paymentStatus where payroll status matters. Shift status and attendance approval status remain separate from payment status.
 - Authorization to list attendance is separate from authorization to see worker PayCalculation audit snapshots. Only the owner FOREMAN receives an optional payCalculation DTO, and only for CLOSED, APPROVED attendance with finalized calculatedSalary and an existing persisted snapshot.
 - ADMIN attendance DTOs omit payCalculation entirely. Non-final rows and legacy CLOSED APPROVED rows without a snapshot also omit it; legacy calculatedSalary remains authoritative. An existing degraded snapshot remains a returned PayCalculation with canonical UNAVAILABLE semantics, not a legacy absence.
@@ -447,7 +464,7 @@ Worker Shift History
 - The repository fetches attendance with shift in one query to avoid N+1 loading.
 - Results are ordered by joinedAt descending and then attendance id descending.
 - DTOs expose shift and attendance fields only, never User entities, emails, password hashes, foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary.
-- DTOs include company name, payableStartTime, pauseState for active shift display, and persisted pauseMinutes after close-time salary calculation.
+- DTOs include company name, nullable ShiftSession.currencyLabel, payableStartTime, pauseState for active shift display, and persisted pauseMinutes after close-time salary calculation.
 
 Foreman Managed Shifts
 
@@ -462,6 +479,7 @@ Foreman Managed Shifts
 - The endpoint reuses ShiftSession service/repository logic and does not recalculate salary.
 - Results are ordered by createdAt descending and shift id descending.
 - Response DTOs expose shift/session fields needed by the mobile dashboard and do not expose User entities, password hashes, company entity, createdAt, or updatedAt.
+- Monetary shift/session DTOs include nullable ShiftSession.currencyLabel; a legacy null must be returned unchanged.
 - Response DTOs include pauseState for the foreman's own personal pause plus any all-participant pause.
 - foremanHourlyRate is included only for the owner FOREMAN in the REST/mobile MVP.
 - ADMIN responses do not include foremanHourlyRate or foreman salary fields.
@@ -549,7 +567,7 @@ Salary Calculation
 salary to zero for workers and the private foreman salary.
 - CANCELLED and DISCARDED shifts do not calculate salary.
 - No client should calculate worker or foreman salary.
-- Mobile must not calculate premium pay, rule matches, overtime, or pay breakdown totals.
+- Mobile must not calculate actual premium pay, rule matches, overtime, or pay breakdown totals. The separately permitted Company-default single-rule editor example is illustrative configuration feedback, not a payable calculation.
 - Close fails with 409 if actualStartTime is missing or salary inputs are negative where request validation normally prevents
 them.
 - Close is transactional: when salary validation fails, the shift remains ACTIVE and attendance salary fields are not written.
@@ -595,10 +613,13 @@ Payroll Requests
 - Already PAID attendance cannot be requested again.
 - PAYMENT_REQUESTED attendance cannot be included in another pending request.
 - For the MVP, all selected attendance records in one payout request must belong to shifts created by the same foreman.
-- On successful creation, PayoutRequest stores companyId, workerId, managerForemanId, PENDING status, requestedAt, total raw payable minutes, total rounded payable minutes, scale-8 audit totalBaseAmount and totalPremiumAmount, scale-2 totalCalculatedSalary/exactCalculatedAmount, and total whole-number payout amount.
-- PayoutRequestItem snapshots attendanceId, shiftSessionId, rawPayableMinutes, payoutRoundedMinutes, hourlyRate, currency-settlement calculatedSalary, scale-8 audit base and premium totals when exposed, roundedItemAmountExact, payoutAmount, and enough pay calculation reference/snapshot data for audit.
+- A selected attendance with null ShiftSession.currencyLabel is an unknown legacy record and is rejected with a clear 409 conflict; current company settings must not be used to relabel it.
+- All selected attendance records must have exactly the same non-null ShiftSession.currencyLabel. Mixed labels are rejected with `MIXED_CURRENCY_LABELS` so no aggregate combines differently labelled money. Labels compare exactly as the preserved post-boundary-trimming code-point sequence stored at creation; there is no case normalization or conversion.
+- On successful creation, PayoutRequest stores companyId, workerId, managerForemanId, non-null currencyLabel, PENDING status, requestedAt, total raw payable minutes, total rounded payable minutes, scale-8 audit totalBaseAmount and totalPremiumAmount, scale-2 totalCalculatedSalary/exactCalculatedAmount, and total whole-number payout amount.
+- PayoutRequestItem snapshots attendanceId, shiftSessionId, rawPayableMinutes, payoutRoundedMinutes, hourlyRate, currency-settlement calculatedSalary, scale-8 audit base and premium totals when exposed, roundedItemAmountExact, payoutAmount, and enough pay calculation reference/snapshot data for audit. It does not duplicate currencyLabel: the parent PayoutRequest label is authoritative because the mixed-label invariant makes a single request label sufficient.
 - Payout preview, creation, list, and approval all use the legacy fallback item values and never create a PayCalculation retrospectively or recalculate legacy salary.
 - Snapshot item fields preserve what the worker requested even if future shift or rate data changes.
+- Company currencyLabel changes affect only future shifts. Payout read paths return the persisted request label and never substitute the current company label, convert amounts, or backfill legacy labels. PayoutRequest rows created before the migration retain nullable currencyLabel for historical transparency.
 - For premium-aware attendance, payoutAmount is based on stored backend calculatedSalary / premium-aware item amount according to the backend payroll service.
 - Rounded minutes remain informational/audit fields for payout rules and display, but they must not rescale or recalculate premium-aware salary on mobile.
 - Payout preview, create, list, and approve responses expose request-level aggregate totalBaseAmount, totalPremiumAmount, totalCalculatedSalary/exactCalculatedAmount, and payoutAmount when their DTO examples include premium totals.
@@ -685,6 +706,7 @@ Shift Summary
 - Summary totalBaseAmount and totalPremiumAmount are scale-8 audit component sums. They need not add up to totalSalary because totalSalary sums once-per-attendance currency-rounded calculatedSalary values.
 - If approved attendance is missing workedMinutes or calculatedSalary, summary returns a conflict.
 - Summary DTOs expose worker identity fields but never expose User entities or password hashes.
+- Summary DTOs expose the nullable ShiftSession.currencyLabel next to the shift's money values; a legacy null must be returned unchanged.
 - Worker summary remains based on approved ShiftAttendance rows.
 - Worker summary exposes pauseMinutes for approved closed attendance.
 - Only the owner FOREMAN receives worker PayCalculation breakdowns in the summary DTO, and only for CLOSED, APPROVED worker rows with finalized calculatedSalary and an existing persisted snapshot. A degraded persisted snapshot is returned with canonical UNAVAILABLE semantics; legacy rows without a snapshot omit payCalculation and keep their persisted salary plus legacy aggregate fallback authoritative.
@@ -774,6 +796,7 @@ WORKER:
 
 FOREMAN:
 - create own company
+- get and update own Company Settings through `GET`/`PUT /api/v1/me/company`
 - create shift
 - manage own shifts
 - approve attendance
@@ -788,6 +811,7 @@ ADMIN:
 - read shift detail, list/approve attendance, and read worker data within shift summaries through REST where implemented
 - no REST/mobile shift create/start/close/cancel/pause access
 - no REST/mobile payout request creation or approval access for the MVP
+- no REST/mobile Company Settings or Pay Policy access for the MVP
 - user management after mobile MVP through Vaadin
 - no mobile admin flow
 
@@ -827,6 +851,8 @@ RegisterScreen
 WorkerDashboardScreen
 WorkerPayrollScreen
 ForemanDashboardScreen
+ForemanCompanySettingsScreen
+ForemanPayRulesScreen
 ForemanPayrollRequestsScreen
 JoinShiftScreen
 CreateShiftScreen

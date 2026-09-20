@@ -198,6 +198,7 @@ Status: 200 OK
   "company": {
     "id": 10,
     "name": "Acme Construction",
+    "currencyLabel": "EUR",
     "timeZone": "Europe/Berlin"
   }
 }
@@ -216,11 +217,12 @@ For the owner FOREMAN, company may also include joinCode so it can be shared wit
     "id": 10,
     "name": "Acme Construction",
     "joinCode": "CMP123",
+    "currencyLabel": "EUR",
     "timeZone": "Europe/Berlin"
   }
 }
 
-The mobile app uses this endpoint during session restore and can display company.name in the main menu or dashboard when present. company.timeZone is an IANA timezone id and is the source of truth for pay policy day, week, and holiday boundaries. Existing companies can default to the backend configured timezone until configurable company timezone UI exists.
+The mobile app uses this endpoint during session restore and can display company.name in the main menu or dashboard when present. `company.currencyLabel` is the company's current display-only currency label; it is not an ISO-4217 code and must not trigger conversion or locale-specific currency arithmetic. It is nullable for a company that predates currency-label onboarding; `null` means no label is known, not that the client may substitute a label. `defaultWorkerHourlyRate` and `defaultForemanHourlyRate` are deliberately not included in this compact current-user company summary: only the FOREMAN-only Company Settings endpoint exposes them. `company.timeZone` is an IANA timezone id and is the source of truth for pay policy day, week, and holiday boundaries. Existing companies can default to the backend configured timezone until configurable company timezone UI exists.
 
 Missing, invalid, or expired token:
 
@@ -250,6 +252,10 @@ Rules:
 - FOREMAN creates a company after registration if they do not already have one.
 - FOREMAN can own only one company for the mobile MVP.
 - The backend generates a company join code.
+- `name` is required, trimmed, and has the existing maximum of 255 characters.
+- `currencyLabel` is required and uses the exact boundary-whitespace and code-point validation defined below.
+- `currencyLabel` is a label only. The backend does not validate ISO-4217 membership, convert amounts, or infer decimal/rounding rules from it.
+- `defaultWorkerHourlyRate` and `defaultForemanHourlyRate` are independent optional company defaults. Each is nullable; when present it must be non-negative, have at most two decimal places, and fit the existing rate precision of up to 10 integer digits.
 - timeZone is optional and must be a valid IANA timezone id when provided.
 - If timeZone is omitted, the backend uses the configured default timezone.
 - Company timeZone is the source of truth for pay policy day, week, and holiday boundaries.
@@ -257,12 +263,27 @@ Rules:
 - Company name is shown in the mobile main menu or dashboard.
 - ADMIN company management is deferred to Vaadin after the mobile MVP.
 
+Currency-label boundary whitespace and validation
+
+This exact algorithm applies to `currencyLabel` on company creation and Company Settings update:
+
+1. Remove only leading and trailing Unicode code points in the Unicode `White_Space` property. The accepted boundary-trimming set is: U+0009–U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, and U+3000.
+2. Reject the value as blank if it is empty after that removal.
+3. Count the remaining value by Unicode code points, not UTF-8 bytes or UTF-16 code units, and reject it when it exceeds 64 code points.
+
+The algorithm must not depend on Java `trim()`, Java `strip()`, or JavaScript `trim()`. It preserves all non-boundary content exactly: no case conversion, Unicode normalization, ISO-code validation, conversion, or inference is allowed. Backend validation is authoritative.
+
 Request:
 
 {
   "name": "Acme Construction",
+  "currencyLabel": "EUR",
+  "defaultWorkerHourlyRate": 20.00,
+  "defaultForemanHourlyRate": 30.00,
   "timeZone": "Europe/Berlin"
 }
+
+Request DTO: `CreateCompanyRequest`
 
 Response:
 
@@ -272,8 +293,13 @@ Status: 201 Created
   "id": 10,
   "name": "Acme Construction",
   "joinCode": "CMP123",
+  "currencyLabel": "EUR",
+  "defaultWorkerHourlyRate": 20.00,
+  "defaultForemanHourlyRate": 30.00,
   "timeZone": "Europe/Berlin"
 }
+
+Response DTO: `CreateCompanyResponse`
 
 Validation error:
 
@@ -323,6 +349,96 @@ Status: 409 Conflict
   "path": "/api/v1/companies"
 }
 
+Get my company settings
+
+Only FOREMAN.
+
+GET /api/v1/me/company
+
+Headers:
+
+Authorization: Bearer <token>
+
+Response:
+
+Status: 200 OK
+
+{
+  "id": 10,
+  "name": "Acme Construction",
+  "joinCode": "CMP123",
+  "currencyLabel": "EUR",
+  "defaultWorkerHourlyRate": 20.00,
+  "defaultForemanHourlyRate": 30.00,
+  "timeZone": "Europe/Berlin"
+}
+
+Response DTO: `CompanySettingsResponse`
+
+- `id`, `name`, `joinCode`, and `timeZone` are non-null.
+- `currencyLabel` is nullable only for an existing migrated company. `defaultWorkerHourlyRate` and `defaultForemanHourlyRate` are independently nullable for every company. New company creation always returns a non-null `currencyLabel`.
+
+Rules:
+
+- This endpoint is available only to the authenticated FOREMAN for their current company. WORKER and ADMIN receive 403 Forbidden in the REST/mobile MVP.
+- joinCode and timeZone are read-only on the Company Settings screen in this phase.
+- The two default rates are nullable. null means that new shift creation must provide the corresponding explicit shift rate.
+- currencyLabel is the current company display label. Historical shift and payout DTOs use their own persisted currencyLabel snapshots.
+
+Update my company settings
+
+Only FOREMAN.
+
+PUT /api/v1/me/company
+
+Headers:
+
+Authorization: Bearer <token>
+
+Request:
+
+{
+  "name": "Acme Construction GmbH",
+  "currencyLabel": "EUR",
+  "defaultWorkerHourlyRate": 22.50,
+  "defaultForemanHourlyRate": 32.00
+}
+
+Request DTO: `UpdateCompanySettingsRequest`
+
+Response:
+
+Status: 200 OK
+
+{
+  "id": 10,
+  "name": "Acme Construction GmbH",
+  "joinCode": "CMP123",
+  "currencyLabel": "EUR",
+  "defaultWorkerHourlyRate": 22.50,
+  "defaultForemanHourlyRate": 32.00,
+  "timeZone": "Europe/Berlin"
+}
+
+Response DTO: `CompanySettingsResponse`
+
+Rules:
+
+- This is a complete settings update: `name` and `currencyLabel` are required. `name` uses the existing trimmed/non-blank 255-character validation.
+- `currencyLabel` uses the exact boundary-whitespace and Unicode-code-point algorithm documented above. It cannot be cleared.
+- defaultWorkerHourlyRate and defaultForemanHourlyRate are independently nullable; null clears that default.
+- A provided rate must be non-negative, have at most two decimal places, and fit the existing 10-integer-digit rate precision.
+- Updating any company setting affects only future shift creation. It never rewrites rates, currency labels, attendance salary, pay calculations, or payout requests already snapshotted for an existing shift.
+- Pay policy remains versioned separately through `/api/v1/me/pay-policy`; updating company settings does not create a PayPolicy version.
+- Missing company returns 409 Conflict. Invalid fields return 400 Bad Request. Missing/invalid authentication returns 401, and WORKER/ADMIN access returns 403.
+
+Currency-label migration and onboarding
+
+- The Flyway migration adds nullable `currencyLabel` storage to existing Company, ShiftSession, and PayoutRequest rows. It does not derive or backfill a label from the current company, a locale, an ISO registry, or any historical amount; none of those sources establishes the historical label safely.
+- A new company must supply a valid currencyLabel during `POST /api/v1/companies`. An existing foreman whose company has `currencyLabel: null` must save Company Settings before creating a new shift. The rate defaults remain optional: that foreman may instead provide either missing rate as a per-shift override.
+- Existing shifts and payout requests retain `currencyLabel: null` when no snapshot was stored. The new nullable DTO field is serialized as `null` rather than omitted so clients can distinguish an unknown historical label. These records may remain readable and an existing shift may finish under its established lifecycle, but the null label means historical currency is unknown. A read endpoint must never assign the company's current label to it.
+- A legacy attendance from such a shift cannot be selected for a new payout request, because a new PayoutRequest must persist a known label. Existing payout requests with a null label remain readable as historical records and are not mutated.
+
 Join company by code
 
 Only WORKER.
@@ -353,8 +469,16 @@ Status: 200 OK
 {
   "id": 10,
   "name": "Acme Construction",
+  "currencyLabel": "EUR",
   "timeZone": "Europe/Berlin"
 }
+
+Response DTO: `JoinCompanyResponse`
+
+- `id` and `name` are non-null.
+- `currencyLabel` is always serialized. It is nullable only when the joined company predates currency-label onboarding and its Company.currencyLabel has not been configured.
+- `currencyLabel: null` means that the company label is unknown/unconfigured. The backend must not replace it with a default label, derive it from another record, or backfill/relabel it while handling this join response.
+- The example above is a configured company. A migrated unconfigured company returns the same response shape with `"currencyLabel": null`.
 
 Validation error:
 
@@ -406,9 +530,34 @@ Authorization: Bearer <token>
 Request:
 
 {
+  "location": "Cologne"
+}
+
+Request DTO: `CreateShiftRequest`. The existing `defaultHourlyRate` and `foremanHourlyRate` field names are preserved.
+
+Request fields:
+
+- `location`: optional.
+- `defaultBreakMinutes`: optional non-negative integer; omitted defaults to 0.
+- `defaultHourlyRate`: nullable decimal worker-rate override. Omitted and explicit JSON `null` both mean no worker-rate override. A numeric value, including `0`, is the override for this shift.
+- `foremanHourlyRate`: nullable decimal foreman-rate override. Omitted and explicit JSON `null` both mean no foreman-rate override. A numeric value, including `0`, is the override for this shift.
+
+For either numeric rate, the existing validation remains non-negative with at most two decimal places and up to 10 integer digits. Numeric zero is a valid override; it is never treated as missing.
+
+defaultHourlyRate and foremanHourlyRate are optional per-shift overrides. A client may still send either or both explicitly:
+
+{
   "location": "Cologne",
-  "defaultHourlyRate": 15.00,
-  "foremanHourlyRate": 25.00
+  "defaultHourlyRate": 24.00,
+  "foremanHourlyRate": 35.00
+}
+
+Explicit JSON null has the same fallback meaning as omission:
+
+{
+  "location": "Cologne",
+  "defaultHourlyRate": null,
+  "foremanHourlyRate": null
 }
 
 Response for owner FOREMAN:
@@ -426,10 +575,13 @@ Status: 201 Created
   "actualStartTime": null,
   "actualEndTime": null,
   "defaultBreakMinutes": 0,
-  "defaultHourlyRate": 15.00,
-  "foremanHourlyRate": 25.00,
+  "defaultHourlyRate": 20.00,
+  "foremanHourlyRate": 30.00,
+  "currencyLabel": "EUR",
   "createdBy": 5
 }
+
+Response DTO: `ShiftResponse`. `currencyLabel` is non-null for a newly created shift and nullable only for an older, migrated shift returned by a read endpoint.
 
 FOREMAN must have a company before creating a shift. The backend attaches the shift to the foreman's company. Real MVP shifts must not use Default Company.
 
@@ -441,9 +593,15 @@ location is optional.
 
 defaultBreakMinutes is optional, must be greater than or equal to 0 when provided, and defaults to 0 when omitted. Dynamic pauses are separate from defaultBreakMinutes and are tracked through pause endpoints while the shift is ACTIVE.
 
-defaultHourlyRate is required, must be greater than or equal to 0, and supports up to two decimal places. It is used only as the worker attendance rate snapshot when workers join.
+For the worker rate, omitted `defaultHourlyRate` and `"defaultHourlyRate": null` both fall back to `Company.defaultWorkerHourlyRate`. A numeric defaultHourlyRate is the worker-rate override for that shift only. After that resolution, the worker rate is required, must be non-negative, and supports up to two decimal places. If both the override and Company.defaultWorkerHourlyRate are absent, the backend returns the documented 400 field-validation error for `defaultHourlyRate`. The resolved value is copied to ShiftSession.defaultHourlyRate and later to the worker attendance rate snapshot when workers join.
 
-foremanHourlyRate is required, must be greater than or equal to 0, supports up to two decimal places, and is stored on ShiftSession for the foreman's private salary calculation. The owner FOREMAN can see foremanHourlyRate. WORKER never receives it. For the MVP REST/mobile API, ADMIN does not create shifts and does not receive foremanHourlyRate or foreman salary fields in read responses.
+For the foreman rate, omitted `foremanHourlyRate` and `"foremanHourlyRate": null` both fall back to `Company.defaultForemanHourlyRate`. A numeric foremanHourlyRate is the foreman-rate override for that shift only. After that resolution, the foreman rate is required, must be non-negative, supports up to two decimal places, and is stored on ShiftSession for the foreman's private salary calculation. If both the override and Company.defaultForemanHourlyRate are absent, the backend returns the documented 400 field-validation error for `foremanHourlyRate`. The owner FOREMAN can see foremanHourlyRate. WORKER never receives it. For the MVP REST/mobile API, ADMIN does not create shifts and does not receive foremanHourlyRate or foreman salary fields in read responses.
+
+The backend copies the current non-null `Company.currencyLabel` to `ShiftSession.currencyLabel` when the shift is created. Later company settings changes never relabel that shift, its attendance, salary/pay calculations, payroll records, or payouts. A legacy shift that predates this snapshot has `currencyLabel: null`; read paths must return that unknown value and must not invent or backfill a label.
+
+All shift, attendance, summary, personal-history, and payable-attendance DTOs that expose money include the applicable nullable shift `currencyLabel`. Payout preview and payout-request DTOs include the persisted request `currencyLabel`. Mobile renders a non-null label as text beside returned amounts and must never replace a historical snapshot with the company's current label.
+
+If a rate override is omitted or null and its corresponding company default is also absent, the backend returns 400 Bad Request with a field error for `defaultHourlyRate` or `foremanHourlyRate`, as applicable. If `company.currencyLabel` is null on a migrated company, the backend returns 409 Conflict with the clear message `Company currency label must be configured before creating a shift`; it must not create a new shift with an unknown currency label. No separate `COMPANY_SETTINGS_REQUIRED` code is introduced: rates are optional defaults, so that broader name would misstate the failed invariant.
 
 Validation error:
 
@@ -466,6 +624,18 @@ Status: 409 Conflict
   "status": 409,
   "error": "Conflict",
   "message": "Foreman must create a company before creating shifts",
+  "path": "/api/v1/shifts"
+}
+
+Company currency label is not configured:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Company currency label must be configured before creating a shift",
   "path": "/api/v1/shifts"
 }
 
@@ -523,6 +693,7 @@ Status: 200 OK
   "defaultBreakMinutes": 0,
   "defaultHourlyRate": 15.00,
   "foremanHourlyRate": 25.00,
+  "currencyLabel": "EUR",
   "pauseState": {
     "allPaused": false,
     "allPauseStartedAt": null,
@@ -553,6 +724,7 @@ Status: 200 OK
   "actualEndTime": null,
   "defaultBreakMinutes": 0,
   "defaultHourlyRate": 15.00,
+  "currencyLabel": "EUR",
   "pauseState": {
     "allPaused": false,
     "allPauseStartedAt": null,
@@ -727,6 +899,7 @@ Status: 200 OK
   "defaultBreakMinutes": 0,
   "defaultHourlyRate": 15.00,
   "foremanHourlyRate": 25.00,
+  "currencyLabel": "EUR",
   "pauseState": {
     "allPaused": false,
     "allPauseStartedAt": null,
@@ -1073,7 +1246,8 @@ Status: 200 OK
   "shiftId": 100,
   "workerId": 1,
   "status": "JOINED",
-  "hourlyRate": 15.00
+  "hourlyRate": 15.00,
+  "currencyLabel": "EUR"
 }
 
 Validation error:
@@ -1210,6 +1384,7 @@ Status: 200 OK
     "status": "JOINED",
     "paymentStatus": "UNPAID",
     "hourlyRate": 15.00,
+    "currencyLabel": "EUR",
     "breakMinutes": 0,
     "payableStartTime": null,
     "pauseMinutes": null,
@@ -1233,6 +1408,7 @@ For the owner FOREMAN, a finalized CLOSED APPROVED row with an existing snapshot
 paymentStatus is separate from shift status and attendance approval status. Payroll endpoints are the source of truth for payout request and rounded payout fields.
 payableStartTime is null until the worker has approved attendance and an effective payable start. For a worker approved before the shift starts, the effective payable start is the shift actualStartTime and may be returned after start. For a worker approved during an ACTIVE shift, payableStartTime is the approval time.
 pauseState shows the all-pause state plus the listed worker's personal pause state. It does not expose foreman salary or rate fields.
+currencyLabel is the nullable ShiftSession snapshot that applies to this attendance's hourly rate and calculated salary. It is null for a legacy shift with no stored label and must not be replaced with the current company label.
 
 Missing, invalid, or expired token:
 
@@ -1315,6 +1491,7 @@ Status: 200 OK
   "attendanceId": 500,
   "status": "APPROVED",
   "hourlyRate": 18.50,
+  "currencyLabel": "EUR",
   "approvedAt": "2026-07-06T20:00:00Z"
 }
 
@@ -1541,7 +1718,7 @@ Status: 409 Conflict
 
 7. Salary Calculation
 
-The backend is the source of truth for salary. Mobile clients must display server fields and must not calculate worker salary, foreman salary, premium pay, overtime, rule matching, or pay breakdown totals locally.
+The backend is the source of truth for salary. Mobile clients must display server fields and must not calculate worker salary, foreman salary, actual premium pay, overtime, rule matching, or pay breakdown totals locally. The separately documented Pay Rules editor example is not a payable-result calculation.
 
 Static break minutes and dynamic pause minutes are both unpaid deductions. Dynamic pause minutes are calculated from persisted pause intervals and merged as a union for each participant so overlapping personal and all-participant pauses are not double-counted.
 
@@ -1628,6 +1805,7 @@ Status: 200 OK
 {
   "shiftId": 100,
   "status": "CLOSED",
+  "currencyLabel": "EUR",
   "totalWorkers": 1,
   "totalSalary": 120.00,
   "totalBaseAmount": 120.00000000,
@@ -1685,6 +1863,7 @@ Status: 200 OK
 {
   "shiftId": 100,
   "status": "CLOSED",
+  "currencyLabel": "EUR",
   "totalWorkers": 1,
   "totalSalary": 120.00,
   "totalBaseAmount": 120.00000000,
@@ -1798,6 +1977,7 @@ Response for a WORKER or FOREMAN accessing their own finalized worker attendance
     "attendanceId": 500,
     "companyId": 10,
     "companyName": "Acme Construction",
+    "currencyLabel": "EUR",
     "title": "Tuesday 10:00 - Acme Construction",
     "location": "Cologne",
     "status": "CLOSED",
@@ -1895,6 +2075,7 @@ Status: 200 OK
     "id": 100,
     "companyId": 10,
     "companyName": "Acme Construction",
+    "currencyLabel": "EUR",
     "title": "Tuesday 10:00 - Acme Construction",
     "location": "Cologne",
     "status": "OPEN",
@@ -1953,6 +2134,8 @@ Status: 403 Forbidden
 
 Premium pay is backend-owned. Mobile must not calculate premium pay, rule matches, overtime, or pay breakdown totals.
 
+The sole client-side calculation exception is an illustrative editor preview on the FOREMAN Pay Rules screen. When `Company.defaultWorkerHourlyRate` is configured and the foreman enters one rule percentage, mobile may display `base rate * entered percentage / 100` as the premium per hour and `base rate + that one premium` as the example rate if only that rule applied. For 20 and 25%, the permitted copy is `Premium: +5.00 EUR/hour` and `Rate with this rule only: 25.00 EUR/hour`, using the current Company.currencyLabel. The preview is non-authoritative and must not evaluate rule applicability, time segments, stacking across rules, daily/weekly overtime, salary, payout, or totals. It must not use `defaultForemanHourlyRate`, because foreman premium pay is deferred. Persisted calculations and all payable results remain backend-owned.
+
 Domain contract:
 
 - Company owns an immutable, versioned PayPolicy.
@@ -2001,6 +2184,8 @@ ADD
 HIGHEST_ONLY
 
 ADD sums all applicable percentage premiums against the base rate. HIGHEST_ONLY applies only the highest applicable premium. Stacking is PayPolicy.stackingStrategy.
+
+The API enum names and persisted policy model remain exactly `ADD`, `HIGHEST_ONLY`, `TIME_OF_DAY`, `DAILY_OVERTIME`, `WEEKLY_OVERTIME`, `DAY_OF_WEEK`, and `HOLIDAY`. Mobile presentation copy may be friendlier, but must not rename these contract values. `thresholdMinutes` remains the API representation for overtime conditions even when mobile presents hours.
 
 Calculation pipeline:
 
@@ -2166,6 +2351,7 @@ Authorization and privacy:
 - ADMIN REST/mobile policy endpoints are deferred.
 - Worker never sees foreman salary/rate.
 - Foreman sees worker premium breakdown for managed shifts and payouts.
+- Company defaults and currency used by the editor are loaded from `GET /api/v1/me/company`; they are not part of immutable PayPolicyVersion data.
 
 ### Get my pay policy
 
@@ -2418,6 +2604,7 @@ payout_requests:
 - companyId
 - workerId
 - managerForemanId
+- currencyLabel snapshot (non-null for every new request)
 - status
 - rawPayableMinutesTotal
 - payoutRoundedMinutesTotal
@@ -2467,6 +2654,8 @@ Payroll rounding:
 - Item calculatedSalary is the persisted currency-rounded attendance salary. Request exactCalculatedAmount (the existing response name for totalCalculatedSalary) is the sum of persisted item calculatedSalary values; payoutAmount is the sum of persisted item payoutAmount values.
 - Audit component totals and currency-settlement calculatedSalary/payout totals are distinct views and need not be identical when the once-per-attendance rounding creates a delta.
 - Preview, create, list, and approve responses include request-level aggregate totalBaseAmount, totalPremiumAmount, exactCalculatedAmount, and payoutAmount when their examples show premium totals.
+- Payable-attendance rows use the nullable currencyLabel snapshotted on their shift. A payout preview/request may contain only items with the same non-null label. The created PayoutRequest persists that one label, which is authoritative for all its items; PayoutRequestItem does not duplicate it because mixed-label requests are forbidden. Later company setting changes cannot relabel historical money.
+- currencyLabel remains display-only. Payroll never converts between labels or infers arithmetic rules from the text.
 - Preview and create use the same backend calculation rules. Preview is non-binding; create always revalidates and recalculates server-side.
 - Examples for payoutRoundedMinutes: 0 -> 0, 1 -> 5, 4 -> 5, 5 -> 5, 7 -> 5, 8 -> 10, 11 -> 10, 13 -> 15, 25 -> 25, 28 -> 30.
 
@@ -2516,6 +2705,7 @@ Rules:
 - The endpoint reads persisted workedMinutes and calculatedSalary. It does not recalculate close-time salary.
 - The endpoint calculates payoutRoundedMinutes and payoutAmount on the backend for display and selection.
 - The endpoint may include totalBaseAmount and totalPremiumAmount for detailed views as scale-8 audit components. They are distinct from the scale-2 calculatedSalary/payout basis when a rounding delta exists. For legacy CLOSED APPROVED attendance without a PayCalculation snapshot, totalBaseAmount equals persisted calculatedSalary and totalPremiumAmount is 0; its payout basis remains that persisted calculatedSalary. Payroll cards should keep showing raw payable time and final payoutAmount.
+- `currencyLabel` is the nullable ShiftSession snapshot. A legacy row with `currencyLabel: null` remains visible for historical transparency, but it cannot be submitted in a new payout request because the backend cannot truthfully snapshot a request currency.
 - Zero-minute, zero-amount attendance may be returned when it is otherwise payable so the worker can include it in a payout request and clear the payroll state.
 - Worker never receives foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary.
 
@@ -2529,6 +2719,7 @@ Status: 200 OK
     "shiftId": 100,
     "companyId": 10,
     "companyName": "Acme Construction",
+    "currencyLabel": "EUR",
     "title": "Tuesday 10:00 - Acme Construction",
     "location": "Cologne",
     "actualStartTime": "2026-07-01T08:05:00Z",
@@ -2547,6 +2738,7 @@ Status: 200 OK
     "shiftId": 101,
     "companyId": 10,
     "companyName": "Acme Construction",
+    "currencyLabel": "EUR",
     "title": "Wednesday 10:00 - Acme Construction",
     "location": "Cologne",
     "actualStartTime": "2026-07-02T10:00:00Z",
@@ -2618,6 +2810,8 @@ Rules:
 - Already PAID attendance cannot be previewed for a new request.
 - PAYMENT_REQUESTED attendance cannot be previewed for another pending request.
 - For the MVP, all selected attendance records must belong to shifts created by the same foreman so one foreman can approve the whole request.
+- Every selected attendance record must have a non-null shift currencyLabel. A null label is an unknown legacy value and returns 409 Conflict with the message `Attendance has no stored currency label and cannot be included in a payout request`; configuring the company now must not relabel that historical shift.
+- All selected attendance records must have exactly the same non-null shift currencyLabel. Different labels return 409 Conflict with code `MIXED_CURRENCY_LABELS`; the worker must create separate requests. Comparison is exact over the preserved post-boundary-trimming code-point sequence stored at label creation; the backend does not normalize case or convert labels.
 - Preview does not create PayoutRequest rows, does not create PayoutRequestItem rows, and does not change attendance paymentStatus.
 - Preview is non-binding. Create revalidates and recalculates server-side because attendance payment state can change after preview.
 
@@ -2626,6 +2820,7 @@ Response:
 Status: 200 OK
 
 {
+  "currencyLabel": "EUR",
   "rawPayableMinutes": 467,
   "payoutRoundedMinutes": 465,
   "exactCalculatedAmount": 116.75,
@@ -2667,6 +2862,8 @@ Status: 200 OK
 }
 
 Premium-aware preview responses may include item-level or request-level `payCalculation` details in a future detailed view. For legacy items without a snapshot, any such optional payCalculation/detailed breakdown remains null or absent according to the DTO convention. Payroll cards should continue to show raw payable time and final payoutAmount only.
+
+`currencyLabel` on this response is the one non-null label common to all selected shifts. It is the label that creation will snapshot on the PayoutRequest; item DTOs rely on that request-level label rather than repeat it.
 
 Validation error:
 
@@ -2776,6 +2973,33 @@ Status: 409 Conflict
   "path": "/api/v1/me/payout-requests/preview"
 }
 
+Selected attendances have different currency labels:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Payout request items must use the same currency label",
+  "path": "/api/v1/me/payout-requests/preview",
+  "code": "MIXED_CURRENCY_LABELS"
+}
+
+The create endpoint returns the same `MIXED_CURRENCY_LABELS` conflict with path `/api/v1/me/payout-requests` when the selected shift snapshots differ.
+
+Selected attendance has no stored currency label:
+
+Status: 409 Conflict
+
+{
+  "timestamp": "2026-07-06T20:00:00Z",
+  "status": 409,
+  "error": "Conflict",
+  "message": "Attendance has no stored currency label and cannot be included in a payout request",
+  "path": "/api/v1/me/payout-requests/preview"
+}
+
 ### Create my payout request
 
 Only WORKER.
@@ -2808,9 +3032,12 @@ Rules:
 - Already PAID attendance cannot be included in a new request.
 - PAYMENT_REQUESTED attendance cannot be included in another pending request.
 - For the MVP, all selected attendance records must belong to shifts created by the same foreman so one foreman can approve the whole request.
+- Every selected attendance record must have a non-null shift currencyLabel; an unknown legacy label returns the same 409 Conflict described for preview.
+- All selected attendance records must have exactly the same non-null shift currencyLabel, using the same exact comparison over the preserved post-boundary-trimming code-point sequence documented for preview. Mixed labels return 409 Conflict with code `MIXED_CURRENCY_LABELS`; the worker must create separate requests.
 - Creation is transactional. If any selected attendance is invalid, no request is created and no attendance paymentStatus changes.
 - Create recalculates all totals server-side and does not trust preview totals or client-side totals.
 - On success, the backend creates a PENDING payout request, creates payout request items, snapshots exact and rounded item values, and sets selected attendance paymentStatus to PAYMENT_REQUESTED.
+- On success, the backend also snapshots the selected common currencyLabel on PayoutRequest. Existing payout requests created before this feature keep `currencyLabel: null`; reads never infer a label from the current company.
 - Request totalBaseAmount and totalPremiumAmount are sums of the item totals, including the legacy fallback values; the request exactCalculatedAmount and payoutAmount use the same persisted legacy salary basis.
 - Premium totals and payCalculation references/snapshots may be included for detailed audit views.
 - requestedAt is set by the backend to the current server time in UTC.
@@ -2823,6 +3050,7 @@ Status: 201 Created
   "id": 900,
   "companyId": 10,
   "companyName": "Acme Construction",
+  "currencyLabel": "EUR",
   "workerId": 1,
   "workerFirstName": "John",
   "workerLastName": "Worker",
@@ -2996,6 +3224,7 @@ Rules:
 - Worker never receives foreman salary or rate fields.
 - Detailed views may include the worker's own premium totals and payCalculation snapshots after close.
 - Legacy items without a PayCalculation snapshot keep their persisted calculatedSalary as the final amount, totalBaseAmount equal to that amount, totalPremiumAmount 0, and an optional payCalculation/detailed breakdown null or absent; list responses must not manufacture a snapshot.
+- `currencyLabel` is the PayoutRequest's persisted label and is nullable only for a request created before the migration. It is never replaced with the current Company.currencyLabel.
 - Results are sorted by requestedAt descending, then request id descending.
 
 Response:
@@ -3007,6 +3236,7 @@ Status: 200 OK
     "id": 900,
     "companyId": 10,
     "companyName": "Acme Construction",
+    "currencyLabel": "EUR",
     "workerId": 1,
     "workerFirstName": "John",
     "workerLastName": "Worker",
@@ -3084,6 +3314,7 @@ Rules:
 - Worker identity, selected shifts/days, raw hours/minutes, exactCalculatedAmount, totalBaseAmount, totalPremiumAmount, payoutRoundedMinutes, and whole-number payoutAmount are available to the approving foreman through payroll DTOs for approval/audit data.
 - Foreman detailed views may include worker premium totals and payCalculation snapshots for managed shifts/payouts.
 - Legacy items without a PayCalculation snapshot use the same fallback in managed responses: persisted calculatedSalary is final, totalBaseAmount equals it, totalPremiumAmount is 0, and optional payCalculation/detailed breakdown is null or absent. Approval uses the payout request's persisted item/request amounts and does not recalculate or backfill legacy salary.
+- `currencyLabel` is the PayoutRequest's persisted label and is nullable only for a request created before the migration. It is never replaced with the current Company.currencyLabel.
 - Mobile request cards should display only raw payable time, whole-number payoutAmount, status, and selected days/items. They should hide exactCalculatedAmount and payoutRoundedMinutes unless a later detailed audit view is added.
 - Foreman never receives another foreman's private salary or rate fields through payroll request DTOs.
 - Results are sorted by requestedAt ascending, then request id ascending for PENDING requests.
@@ -3097,6 +3328,7 @@ Status: 200 OK
     "id": 900,
     "companyId": 10,
     "companyName": "Acme Construction",
+    "currencyLabel": "EUR",
     "workerId": 1,
     "workerFirstName": "John",
     "workerLastName": "Worker",
@@ -3185,6 +3417,7 @@ Status: 200 OK
   "id": 900,
   "companyId": 10,
   "companyName": "Acme Construction",
+  "currencyLabel": "EUR",
   "workerId": 1,
   "workerFirstName": "John",
   "workerLastName": "Worker",
@@ -3293,6 +3526,7 @@ All API errors should use this format:
 WORKER:
 - can see own profile
 - can join company by company join code
+- cannot read or update Company Settings or company default rates
 - can join OPEN shifts and ACTIVE shifts in their company
 - can see own shift history
 - can see own premium pay breakdown after close where exposed by backend
@@ -3303,6 +3537,7 @@ WORKER:
 
 FOREMAN:
 - can create own company
+- can get and update Company Settings only for own company through `GET`/`PUT /api/v1/me/company`
 - can manage pay policy for their current company
 - can create shift
 - can start shift
@@ -3325,5 +3560,6 @@ ADMIN:
 - does not receive foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary through the MVP REST/mobile API
 - cannot create or approve payout requests through the MVP REST/mobile API
 - cannot manage pay policies through the MVP REST/mobile API
+- cannot read or update Company Settings through the MVP REST/mobile API
 - full user management is deferred until after the mobile MVP and should be implemented through the Vaadin admin dashboard
 - mobile MVP has no ADMIN flow

@@ -57,6 +57,7 @@ Foreman tasks:
 - create a company if they do not have one
 - create a shift
 - manage company pay rules
+- manage company name, worker/foreman default rates, and currency label
 - see shifts they created and manage
 - see company name in the dashboard or main menu
 - share the join code with workers
@@ -82,6 +83,7 @@ the Vaadin admin dashboard.
 - Use cards only for repeated shift list items.
 - Do not create a landing page, marketing hero, or decorative onboarding.
 - Do not put business logic in UI components.
+- Render returned monetary amounts with the applicable backend currencyLabel as plain text, for example `20.00 EUR` or `20.00 грн`. Do not assume ISO codes, apply exchange rates, or replace historical labels with the current company label.
 - Screens should use the typed API client rather than calling `fetch` directly.
 
 ## 4. Navigation Model
@@ -129,6 +131,7 @@ Worker payroll navigation is centered on backend-owned payroll data from
 
 - `ForemanDashboardScreen`
 - `CompanyCreateScreen`
+- `ForemanCompanySettingsScreen`
 - `ForemanPayRulesScreen`
 - `CreateShiftScreen`
 - `ForemanShiftDetailsScreen`
@@ -143,7 +146,7 @@ Foreman navigation is centered on managed shifts from
 be routed to company creation before shift creation or shift start.
 Foreman payroll navigation shows payout requests from
 `GET /api/v1/me/managed-payout-requests`.
-Foreman pay rules navigation uses `GET /api/v1/me/pay-policy`,
+Company Settings navigation uses `GET/PUT /api/v1/me/company`. Pay Rules is opened from Company Settings and uses `GET /api/v1/me/pay-policy`,
 `PUT /api/v1/me/pay-policy`, and optionally
 `GET /api/v1/me/pay-policy/versions`.
 
@@ -220,6 +223,9 @@ Purpose:
 Fields:
 
 - company name
+- currency label
+- optional default worker hourly rate
+- optional default foreman hourly rate
 
 Actions:
 
@@ -234,6 +240,8 @@ Rules:
 
 - only FOREMAN uses this screen
 - FOREMAN cannot create or start shifts before company creation
+- currency label is required free-form display text; examples such as `EUR`, `€`, `USD`, `долар`, `грн`, or `元` are hints, not a closed list. Use the exact shared boundary algorithm: remove only leading/trailing code points in this set, U+0009–U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, and U+3000; reject a blank result; then limit it to 64 Unicode code points, not UTF-8 bytes or UTF-16 code units. Preserve all non-boundary Unicode/case without normalization. Do not rely on JavaScript `trim()`; backend validation is authoritative, and the screen must display a backend field-validation response if rejected
+- default rates may be left empty and configured later in Company Settings, but shift creation then requires explicit rates until defaults exist
 - show company join code after creation so it can be shared with workers
 
 ### CompanyJoinScreen
@@ -410,6 +418,7 @@ Content:
 - shift title, date, location, raw worked minutes or formatted hours/minutes
 - backend-calculated whole-number payout amount
 - selected total raw minutes and payout amount from backend preview
+- backend currency label beside each amount and preview/request total
 - own payout request history with status badges
 
 Actions:
@@ -432,6 +441,8 @@ Rules:
 - disable submit when no attendance is selected
 - call `POST /api/v1/me/payout-requests/preview` after selection changes before showing selected totals
 - selected total raw minutes and payout amount must come from the latest backend preview response
+- do not allow one selection to visually combine different currency labels. If the backend returns `MIXED_CURRENCY_LABELS`, keep the items separate and tell the worker to create separate requests
+- a payable legacy item with `currencyLabel: null` may be shown as an unknown historical label but cannot be submitted; show the backend conflict explaining that it has no stored currency label and must not be relabelled from current Company Settings
 - do not sum selected totals locally and do not calculate payroll locally
 - preview is non-binding; create can still fail or return changed totals because the backend revalidates and recalculates during creation
 - after successful request creation, refresh payable attendances and payout requests
@@ -457,7 +468,7 @@ Content:
 - company name
 - primary action to create a shift
 - managed shift list
-- shortcut to pay rules
+- shortcut to Company Settings; Pay Rules is nested there
 - shortcut to payroll requests
 - status labels for `OPEN`, `ACTIVE`, `CLOSED`, `CANCELLED`, and `DISCARDED`
 - pending payout request count if loaded
@@ -466,7 +477,7 @@ API calls:
 
 - `GET /api/v1/users/me`
 - `GET /api/v1/me/managed-shifts`
-- `GET /api/v1/me/pay-policy` if showing a pay rules summary
+- `GET /api/v1/me/company` if showing a company-settings summary
 - `GET /api/v1/me/managed-payout-requests` if showing pending request count or preview
 
 Rules:
@@ -475,6 +486,39 @@ Rules:
 - this screen should not use `GET /api/v1/me/shifts`
 - ADMIN users may use the same route only for shifts they personally created
   during the MVP
+
+### ForemanCompanySettingsScreen
+
+Purpose:
+
+- let a foreman manage the current company's basic settings and open Pay Rules
+
+Content:
+
+- editable company name
+- editable free-form currency label
+- optional default worker hourly rate
+- optional default foreman hourly rate
+- read-only company join code
+- read-only company timezone
+- Pay Rules navigation row/button
+- clear saved, loading, validation, and error states
+
+API calls:
+
+- `GET /api/v1/me/company`
+- `PUT /api/v1/me/company`
+
+Rules:
+
+- only FOREMAN sees or navigates to Company Settings; WORKER and ADMIN mobile navigation must not expose it
+- currency label is free-form Unicode display text up to 64 Unicode code points. Use the exact shared boundary algorithm: remove only leading/trailing code points in this set, U+0009–U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, and U+3000; reject blank input after removal; and count the result by Unicode code points, not UTF-8 bytes or UTF-16 code units. Preserve all non-boundary characters/case without normalization; do not use JavaScript `trim()`. Mobile may mirror this validation for immediate feedback, but backend validation is authoritative and its field-validation response must be displayed if rejected. Do not use a fixed currency picker or require an ISO code
+- explain that currency is a name shown beside amounts and that ShiftPay does not convert money
+- worker and foreman defaults are independent, optional, non-negative values with at most two decimal places
+- explain that defaults prefill/fallback for new shifts only and do not alter existing shifts or payroll history
+- if a migrated company returns `currencyLabel: null`, require a valid label to save before allowing a new shift; do not use the current label to repaint any legacy history
+- timeZone and joinCode are visible but read-only in this phase
+- Pay Rules is part of Company Settings navigation but remains saved through its separate immutable policy endpoint
 
 ### ForemanPayRulesScreen
 
@@ -485,14 +529,17 @@ Purpose:
 Content:
 
 - company name
+- read-only company default worker hourly rate and currency label used for examples
 - current policy version and company timezone
-- stacking strategy segmented control: `ADD` or `HIGHEST_ONLY`
+- “Week starts on” selector with helper text explaining that it is the first day of the working week and the weekly overtime counter resets at the beginning of that day in the company timezone
+- stacking strategy segmented control labelled `Combine all premiums` for backend `ADD` and `Use highest premium only` for backend `HIGHEST_ONLY`
 - enable/disable rule toggles
 - percentage inputs for each enabled rule
-- time inputs for `TIME_OF_DAY`
-- threshold inputs for `DAILY_OVERTIME` and `WEEKLY_OVERTIME`
-- weekday multi-select for `DAY_OF_WEEK`
-- holiday local date list with manual add/remove and optional labels
+- per-rule illustrative premium/rate preview when a company default worker rate exists
+- “Time of day” inputs for `TIME_OF_DAY`
+- “Daily overtime” and “Weekly overtime” threshold inputs for `DAILY_OVERTIME` and `WEEKLY_OVERTIME`
+- selected-weekday multi-select for `DAY_OF_WEEK`
+- manual holiday local-date list with add/remove and optional labels for `HOLIDAY`
 - validation, loading, error, and saved states
 
 API calls:
@@ -500,14 +547,22 @@ API calls:
 - `GET /api/v1/me/pay-policy`
 - `PUT /api/v1/me/pay-policy`
 - optional `GET /api/v1/me/pay-policy/versions`
+- `GET /api/v1/me/company` for preview/reference settings
 
 Rules:
 
 - only FOREMAN uses this screen
+- open this screen from Company Settings rather than treating it as a worker/admin or standalone payroll destination
 - if no company exists, route FOREMAN to `CompanyCreateScreen`
 - saving creates a new immutable policy version in the backend
 - show `Company.timeZone` as the source of day, week, and holiday boundaries
 - use `MONDAY` as the recommended default week start unless backend returns a different value
+- keep backend enum values and persisted policy model unchanged while presenting understandable labels: `ADD` is “Combine all premiums” and combines every matching percentage using the same base rate; `HIGHEST_ONLY` is “Use highest premium only” and applies only the largest matching percentage
+- label `TIME_OF_DAY` as `Time of day`, not `Time off`, and explain that it applies during a configured local-time window which may cross midnight
+- explain `DAILY_OVERTIME` as “Daily overtime”: premium work after the configured payable-hours threshold within one company-local calendar day
+- explain `WEEKLY_OVERTIME` as “Weekly overtime”: premium work after the configured payable-hours threshold from the selected week start
+- explain `DAY_OF_WEEK` as a premium on selected company-local weekdays
+- explain `HOLIDAY` as a premium on dates the foreman adds manually; the app does not import legal/country holiday calendars
 - do not hardcode Saturday, Sunday, night, overtime, holiday, country, or legal premium percentages
 - disabled rules do not apply
 - percentage values may include decimals, for example 37.5
@@ -515,11 +570,15 @@ Rules:
 - 0 is allowed for temporary/no-op enabled rules, but the UI may warn before save
 - invalid percentages should be shown as field validation errors
 - `TIME_OF_DAY` start and end cannot be equal and may cross midnight
-- overtime thresholds are shown as hours if useful but sent as backend contract values
+- overtime thresholds are shown as understandable hours in the UI but converted to/from backend thresholdMinutes without changing the API contract
 - `DAY_OF_WEEK` supports any weekday combination
 - holidays are manual local dates; do not use country holiday calendars
 - show backend 400 field validation errors next to the relevant control
-- mobile must not calculate premium pay, overtime, effective rates, or pay totals
+- when Company.defaultWorkerHourlyRate exists, entering a percentage may show `Premium: +5.00 EUR/hour` and `Rate with this rule only: 25.00 EUR/hour` for base 20.00 and 25%, using the current Company.currencyLabel
+- the preview is clearly labelled as an example using the company worker default. It does not promise that a rule applies to a real shift and does not combine stacking, evaluate overtime, segment work, or calculate salary, payroll, or payout totals
+- do not use defaultForemanHourlyRate for this preview because foreman premium pay remains deferred
+- no preview is shown when the company worker default is absent; direct the foreman to Company Settings
+- apart from this single-rule illustrative preview, mobile must not calculate premium pay, overtime, effective rates, or pay totals
 
 ### CreateShiftScreen
 
@@ -550,8 +609,13 @@ Rules:
 - do not show planned start or planned end time inputs for the mobile MVP
 - the backend generates the shift title from date/time and company name
 - exact generated title locale/format can be refined during backend implementation
-- default hourly rate is required
-- foreman hourly rate is required
+- load Company Settings before rendering defaults
+- prefill default hourly rate from Company.defaultWorkerHourlyRate and foreman hourly rate from Company.defaultForemanHourlyRate when present
+- either rate remains editable as a per-shift override
+- for each rate, an omitted request property or explicit JSON `null` means no per-shift override and falls back to the matching company default; a numeric value, including `0`, is the per-shift override. The typed API client must not treat zero as missing
+- a rate field may be omitted or sent as `null` when the matching company default exists; if neither the form nor company supplies it, block submission and explain which Company Setting or shift override is required. A stale request still receives the backend 400 field-validation error for the missing rate after fallback
+- show Company.currencyLabel beside both rate inputs; if a migrated company has no label, route to Company Settings before shift creation. Do not infer a label from locale, ISO code, or an old amount
+- if a stale submit receives the backend's 409 currency-label configuration conflict, return to Company Settings with its clear message; do not retry shift creation by silently assigning a label
 - default break minutes is optional and defaults to 0 in the backend
 - default break minutes cannot be negative when entered
 - dynamic pause tracking is separate from create shift and is managed only after the shift becomes `ACTIVE`
@@ -633,6 +697,7 @@ Content:
 - total workers
 - total worker salary
 - worker premium pay totals when returned by the backend
+- shift currency label beside worker and foreman monetary values
 - worker rows with pause minutes, worked minutes, and calculated salary
 - worker premium pay breakdown with base amount, premium amount, applied rules, effective premium percent, effective hourly rate, and segment amounts when returned by the backend
 - private foreman salary fields for the owner foreman:
@@ -669,6 +734,7 @@ Content:
 - selected shifts/days per request
 - raw payable minutes with hours/minutes formatting
 - backend-calculated whole-number payout amount
+- persisted payout-request currency label beside monetary values
 - request-level total base amount, premium amount, and calculated salary may appear in detail views when returned by the backend
 - request base/premium totals are scale-8 audit components; calculated salary and payout totals are currency-settlement values and can differ from the audit-component sum by a rounding delta
 - optional detailed premium breakdown in a separate detail view, not on request cards
@@ -705,6 +771,8 @@ Rules:
 - for legacy payout items without a payCalculation, use backend-returned calculatedSalary/payout values and fallback totals only; do not synthesize a breakdown or recalculate the payout basis
 - do not show exact calculated amount or rounded payable minutes on payout request cards unless a later detailed audit view is added
 - keep payroll cards focused on raw payable time, final payout amount, status, and selected days/items
+- compact payroll cards remain compact; adding currencyLabel means appending the returned text to existing amounts, not exposing hidden audit/rate fields
+- do not add a base-rate field to payroll cards. The existing payroll DTO `hourlyRate` remains available only where the existing detailed contract already exposes it; the Company worker base rate mentioned by Pay Rules is preview reference data, not a new payroll-card field
 
 ## 6. Shared States
 
@@ -754,6 +822,7 @@ Show success feedback for:
 - shift join
 - shift creation
 - company creation
+- company settings save
 - company join
 - attendance approval
 - shift start

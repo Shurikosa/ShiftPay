@@ -232,6 +232,63 @@ Phase 2D - Mobile pay rules and breakdown UI:
 - [x] Prevent stale overlapping `ForemanShiftDetailsScreen` loads from rendering an older attendance/payCalculation response
 - [x] Align mobile payroll DTOs with required totalBaseAmount and totalPremiumAmount fields without expanding payroll-card presentation
 
+Phase 2E - Company settings, rate defaults, currency labels, and Pay Rules clarity:
+
+Dependencies:
+
+Required Phase 2E workflow gates, in order:
+
+1. Canonical docs update.
+2. Independent canonical docs review with no findings.
+3. The user commits and pushes the canonical docs.
+4. Backend implementation.
+5. Independent backend review with no findings.
+6. The user commits and pushes the backend.
+7. Mobile implementation.
+8. Independent mobile review with no findings.
+9. The user commits and pushes the mobile.
+10. Android smoke test on Expo Go.
+
+The user-owned commit/push checkpoints above are workflow gates, not agent checkboxes. Backend implementation cannot start until the reviewed canonical docs have been committed and pushed by the user. Mobile implementation cannot start until reviewed backend work has been committed and pushed by the user. The Expo Go smoke test cannot start until reviewed mobile work has been committed and pushed by the user.
+
+Documentation:
+
+- [ ] Independently review the canonical Company Settings/default-rate/currency-history/Pay Rules documentation with no findings before the user commits and pushes the canonical docs
+
+Backend:
+
+- [ ] Add nullable Company.defaultWorkerHourlyRate/defaultForemanHourlyRate and nullable legacy Company.currencyLabel persistence; validate new/settings labels with the exact shared boundary-White_Space trim set, blank rule, and post-trim 64-code-point limit
+- [ ] Add nullable ShiftSession.currencyLabel snapshots for new shifts without backfilling legacy shifts; preserve nullable legacy labels in reads and require a company label before new shift creation
+- [ ] Add FOREMAN-only `GET /api/v1/me/company` and `PUT /api/v1/me/company` with `CompanySettingsResponse` and `UpdateCompanySettingsRequest`; allow name, currency label, and both optional defaults to change while join code/timezone remain read-only
+- [ ] Extend company creation/current-user/company-join DTOs with the current nullable currencyLabel while keeping default rates private to Company Settings; reject WORKER/ADMIN Company Settings access
+- [ ] Make create-shift worker/foreman rates optional request overrides resolved independently from company defaults: omitted and explicit-null properties fall back, numeric zero remains an override, a missing resolved rate returns its field-validation error, and resolved rate/currency snapshots are preserved
+- [ ] Expose nullable snapshotted currencyLabel on monetary shift, attendance, summary, history, and payable-attendance DTOs without read-time backfill of legacy rows
+- [ ] Add one persisted PayoutRequest currencyLabel snapshot; reject null-label legacy attendance and mixed-label preview/create selections, retaining `MIXED_CURRENCY_LABELS` for different non-null labels without duplicating the label on PayoutRequestItem
+- [ ] Add migration, authorization, validation (including the exact boundary trim set, blank rule, and post-trim code-point limit), omitted/null/zero fallback-override, immutability, legacy-unknown, mixed-currency, DTO, and OpenAPI tests for Company Settings/defaults/currency behavior
+
+Independent backend review:
+
+- [ ] Independently review the Phase 2E backend migration, authorization, API/OpenAPI contract, historical-snapshot behavior, and automated tests with no findings before the user commits and pushes backend work
+
+Mobile:
+
+- [ ] Add typed company-settings API support and a FOREMAN-only Company Settings screen; keep it absent from WORKER/ADMIN navigation and place Pay Rules inside it
+- [ ] Let FOREMAN edit company name, free-form currency label, and optional worker/foreman default hourly rates while showing join code/timezone read-only
+- [ ] Update company onboarding to collect currencyLabel and optional default rates with clear free-form currency copy
+- [ ] Prefill Create Shift rates from Company Settings, preserve per-shift overrides, and allow omission only when the matching company default exists
+- [ ] Render backend currencyLabel beside monetary values while preserving historical shift/request labels and keeping compact payroll cards otherwise unchanged
+- [ ] Replace Pay Rules enum/ambiguous copy with explanations for week start, stacking, time of day, daily/weekly overtime, weekday, and manual holiday behavior; show overtime thresholds as hours
+- [ ] Add the non-authoritative single-rule percentage preview from Company.defaultWorkerHourlyRate and currencyLabel, never defaultForemanHourlyRate, without calculating rule applicability, stacking, overtime, salary, payroll, payout, or totals
+- [ ] Add mobile tests for role-only navigation, settings validation/save, default/override shift behavior, free-form labels, historical labels, Pay Rules copy/preview, and mixed-label payout handling
+
+Independent mobile review:
+
+- [ ] Independently review Phase 2E mobile role visibility, Company Settings nesting, typed API use, historical-label display, compact payroll-card constraints, Pay Rules copy, preview boundaries, and automated tests with no findings before the user commits and pushes mobile work
+
+Android Expo Go smoke test:
+
+- [ ] Run and record an Android Expo Go smoke test after the reviewed mobile work has been committed and pushed by the user: FOREMAN Company Settings/Pay Rules, default-prefilled shift creation, free-form currency label display, historical-label handling, and compact payroll cards
+
 Future hardening:
 
 - [ ] Add batch recalculation/reopening of affected closed pay calculations when out-of-order shift closure would change overtime allocation
@@ -269,7 +326,7 @@ Follow-up backend tasks:
 - [x] Make `defaultBreakMinutes` optional and default it to 0
 - [x] Implement pause system for active shifts
 - [x] Allow late worker join/approval for ACTIVE shifts with payable-start salary calculation
-- [ ] Set default JWT expiration to 8 hours
+- [x] Set default JWT expiration to 8 hours
 
 Follow-up mobile tasks:
 
