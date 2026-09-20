@@ -14,6 +14,7 @@ import java.util.List;
  * @param id payout request id
  * @param companyId company id assigned to the request
  * @param companyName company display name
+ * @param currencyLabel nullable currency-label snapshot persisted on the payout request
  * @param workerId worker id
  * @param workerFirstName worker first name
  * @param workerLastName worker last name
@@ -33,6 +34,7 @@ public record PayoutRequestResponse(
 		Long id,
 		Long companyId,
 		String companyName,
+		String currencyLabel,
 		Long workerId,
 		String workerFirstName,
 		String workerLastName,
@@ -63,6 +65,7 @@ public record PayoutRequestResponse(
 				request.getId(),
 				request.getCompany().getId(),
 				request.getCompany().getName(),
+				request.getCurrencyLabel(),
 				request.getWorker().getId(),
 				request.getWorker().getFirstName(),
 				request.getWorker().getLastName(),

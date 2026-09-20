@@ -7,11 +7,13 @@ import com.shiftpay.mvp.entity.Company;
  *
  * @param id company id
  * @param name company display name
- * @param timeZone company IANA timezone id
+	 * @param currencyLabel nullable current company currency label
+	 * @param timeZone company IANA timezone id
  */
 public record JoinCompanyResponse(
 		Long id,
 		String name,
+		String currencyLabel,
 		String timeZone
 ) {
 
@@ -25,6 +27,7 @@ public record JoinCompanyResponse(
 		return new JoinCompanyResponse(
 				company.getId(),
 				company.getName(),
+				company.getCurrencyLabel(),
 				company.getTimeZone()
 		);
 	}

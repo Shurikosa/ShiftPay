@@ -141,10 +141,21 @@ public class GlobalExceptionHandler {
 	 * @return 409 Conflict error response
 	 */
 	@ExceptionHandler(PayoutRequestConflictException.class)
-	public ResponseEntity<ErrorResponse> handlePayoutRequestConflictException(
+	public ResponseEntity<?> handlePayoutRequestConflictException(
 			PayoutRequestConflictException exception,
 			HttpServletRequest request
 	) {
+		if (exception.getCode() != null) {
+			return ResponseEntity.status(HttpStatus.CONFLICT)
+					.body(new CodedErrorResponse(
+							Instant.now(),
+							HttpStatus.CONFLICT.value(),
+							HttpStatus.CONFLICT.getReasonPhrase(),
+							exception.getMessage(),
+							request.getRequestURI(),
+							exception.getCode()
+					));
+		}
 		return buildError(HttpStatus.CONFLICT, exception.getMessage(), request);
 	}
 

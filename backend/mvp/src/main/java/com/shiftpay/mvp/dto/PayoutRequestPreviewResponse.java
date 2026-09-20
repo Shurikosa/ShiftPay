@@ -8,6 +8,7 @@ import java.util.List;
 /**
  * Response DTO for payout preview totals.
  *
+ * @param currencyLabel common non-null currency-label snapshot for selected attendance
  * @param rawPayableMinutes total raw persisted worked minutes
  * @param payoutRoundedMinutes total backend-rounded payable minutes
  * @param exactCalculatedAmount total exact calculated salary
@@ -17,6 +18,7 @@ import java.util.List;
  * @param items selected attendance item previews
  */
 public record PayoutRequestPreviewResponse(
+		String currencyLabel,
 		Integer rawPayableMinutes,
 		Integer payoutRoundedMinutes,
 		BigDecimal exactCalculatedAmount,

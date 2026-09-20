@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.hamcrest.Matchers.hasItem;
 
 /**
  * Controller integration tests for Springdoc OpenAPI and Swagger UI exposure.
@@ -95,6 +96,26 @@ class OpenApiControllerTests {
 				.andExpect(jsonPath(
 						"$.paths['/api/v1/me/managed-payout-requests/{requestId}/approve'].post"
 				).exists());
+	}
+
+	/**
+	 * Company Settings and the nullable historical currency fields remain visible in generated OpenAPI schemas.
+	 */
+	@Test
+	void apiDocsExposeCompanySettingsAndCurrencyLabelContract() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.paths['/api/v1/me/company'].get").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/me/company'].put").exists())
+				.andExpect(jsonPath("$.components.schemas.CreateCompanyRequest.required", hasItem("currencyLabel")))
+				.andExpect(jsonPath("$.components.schemas.UpdateCompanySettingsRequest.required", hasItem("currencyLabel")))
+				.andExpect(jsonPath("$.components.schemas.CompanySettingsResponse.properties.currencyLabel").exists())
+				.andExpect(jsonPath("$.components.schemas.CompanySettingsResponse.properties.defaultWorkerHourlyRate").exists())
+				.andExpect(jsonPath("$.components.schemas.CompanySettingsResponse.properties.defaultForemanHourlyRate").exists())
+				.andExpect(jsonPath("$.components.schemas.ShiftResponse.properties.currencyLabel").exists())
+				.andExpect(jsonPath("$.components.schemas.AttendanceResponse.properties.currencyLabel").exists())
+				.andExpect(jsonPath("$.components.schemas.MyShiftHistoryResponse.properties.currencyLabel").exists())
+				.andExpect(jsonPath("$.components.schemas.PayoutRequestResponse.properties.currencyLabel").exists());
 	}
 
 	/**

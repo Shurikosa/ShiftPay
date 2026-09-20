@@ -18,6 +18,7 @@ import java.time.OffsetDateTime;
  * @param attendanceId attendance id belonging to the current user
  * @param companyId company assigned to the shift
  * @param companyName company display name assigned to the shift
+ * @param currencyLabel nullable shift currency-label snapshot for monetary values
  * @param title shift title
  * @param location optional shift location
  * @param status current shift status
@@ -39,6 +40,7 @@ public record MyShiftHistoryResponse(
 		Long attendanceId,
 		Long companyId,
 		String companyName,
+		String currencyLabel,
 		String title,
 		String location,
 		ShiftStatus status,

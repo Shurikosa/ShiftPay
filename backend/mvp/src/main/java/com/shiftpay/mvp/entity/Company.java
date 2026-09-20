@@ -11,6 +11,7 @@ import jakarta.persistence.Table;
 import lombok.Getter;
 import lombok.Setter;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 
 /**
@@ -36,6 +37,18 @@ public class Company {
 	@Setter
 	@Column(name = "time_zone", nullable = false, length = 64)
 	private String timeZone;
+
+	@Setter
+	@Column(name = "default_worker_hourly_rate", precision = 12, scale = 2)
+	private BigDecimal defaultWorkerHourlyRate;
+
+	@Setter
+	@Column(name = "default_foreman_hourly_rate", precision = 12, scale = 2)
+	private BigDecimal defaultForemanHourlyRate;
+
+	@Setter
+	@Column(name = "currency_label", length = 255)
+	private String currencyLabel;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;

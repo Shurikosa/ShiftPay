@@ -18,6 +18,7 @@ public record MyHistoryReadRow(
 	Long attendanceId,
 	Long companyId,
 	String companyName,
+	String currencyLabel,
 	String title,
 	String location,
 	ShiftStatus shiftStatus,

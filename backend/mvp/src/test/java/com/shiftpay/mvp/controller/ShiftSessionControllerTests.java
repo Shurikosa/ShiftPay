@@ -120,6 +120,7 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.id").isNumber())
 				.andExpect(jsonPath("$.companyId").isNumber())
 				.andExpect(jsonPath("$.companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"))
 				.andExpect(jsonPath("$.title").value(matchesPattern("[A-Za-z]+ \\d{2}:\\d{2} - Acme Construction")))
 				.andExpect(jsonPath("$.title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$.location").value("Cologne"))
@@ -130,11 +131,12 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.defaultBreakMinutes").value(60))
 				.andExpect(jsonPath("$.defaultHourlyRate").value(15.25))
 				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"))
 				.andExpect(jsonPath("$.payPolicyVersionId").value((Object) null))
 				.andExpect(jsonPath("$.createdBy").isNumber())
 				.andExpect(jsonPath("$.plannedStartTime").doesNotExist())
 				.andExpect(jsonPath("$.plannedEndTime").doesNotExist())
-				.andExpect(jsonPath("$.*", hasSize(14)));
+				.andExpect(jsonPath("$.*", hasSize(15)));
 
 		assertThat(shiftSessionRepository.count()).isEqualTo(1);
 		ShiftSession createdShift = shiftSessionRepository.findAll().getFirst();
@@ -156,6 +158,98 @@ class ShiftSessionControllerTests {
 		assertThat(createdShift.getActualEndTime()).isNull();
 		assertThat(createdShift.getDefaultHourlyRate()).isEqualByComparingTo("15.25");
 		assertThat(createdShift.getForemanHourlyRate()).isEqualByComparingTo("25.00");
+	}
+
+	/**
+	 * Omitted and explicit-null shift rates resolve independently from company defaults, while zero remains an override.
+	 */
+	@Test
+	void createShiftResolvesCompanyDefaultsIndependentlyAndPreservesZeroOverrides() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		Company company = companyRepository.findAll().getFirst();
+		company.setDefaultWorkerHourlyRate(new BigDecimal("20.00"));
+		company.setDefaultForemanHourlyRate(new BigDecimal("30.00"));
+		companyRepository.saveAndFlush(company);
+
+		createShiftWithPayload(accessToken, "{\"location\":\"Defaults\"}")
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.defaultHourlyRate").value(20.00))
+				.andExpect(jsonPath("$.foremanHourlyRate").value(30.00))
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"));
+
+		createShiftWithPayload(accessToken, """
+				{
+				  "location": "Explicit null defaults",
+				  "defaultHourlyRate": null,
+				  "foremanHourlyRate": null
+				}
+				""")
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.defaultHourlyRate").value(20.00))
+				.andExpect(jsonPath("$.foremanHourlyRate").value(30.00));
+
+		createShiftWithPayload(accessToken, """
+				{
+				  "location": "Zero overrides",
+				  "defaultHourlyRate": 0,
+				  "foremanHourlyRate": 0
+				}
+				""")
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.defaultHourlyRate").value(0))
+				.andExpect(jsonPath("$.foremanHourlyRate").value(0));
+	}
+
+	/**
+	 * Shift creation identifies the independently unresolved rate and refuses a migrated company with no label.
+	 */
+	@Test
+	void createShiftRejectsMissingResolvedRatesAndUnknownCompanyCurrencyLabel() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		Company company = companyRepository.findAll().getFirst();
+
+		createShiftWithPayload(accessToken, "{\"foremanHourlyRate\": 30.00}")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message").value("defaultHourlyRate: must not be null"));
+
+		createShiftWithPayload(accessToken, "{\"defaultHourlyRate\": 20.00}")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message").value("foremanHourlyRate: must not be null"));
+
+		company.setCurrencyLabel(null);
+		companyRepository.saveAndFlush(company);
+		createShiftWithPayload(accessToken, "{\"defaultHourlyRate\": 20.00, \"foremanHourlyRate\": 30.00}")
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.message")
+						.value("Company currency label must be configured before creating a shift"));
+	}
+
+	/**
+	 * Currency and rate snapshots remain on the shift after later mutable Company Settings changes.
+	 */
+	@Test
+	void createShiftSnapshotsCompanyRatesAndCurrencyLabelForFutureSettingsChanges() throws Exception {
+		String accessToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		Company company = companyRepository.findAll().getFirst();
+		company.setDefaultWorkerHourlyRate(new BigDecimal("20.00"));
+		company.setDefaultForemanHourlyRate(new BigDecimal("30.00"));
+		company.setCurrencyLabel("EUR");
+		companyRepository.saveAndFlush(company);
+
+		long shiftId = extractShiftId(createShiftWithPayload(accessToken, "{\"location\":\"Snapshot shift\"}")
+				.andExpect(status().isCreated())
+				.andReturn());
+		company.setDefaultWorkerHourlyRate(new BigDecimal("22.00"));
+		company.setDefaultForemanHourlyRate(new BigDecimal("33.00"));
+		company.setCurrencyLabel("USD");
+		companyRepository.saveAndFlush(company);
+
+		mockMvc.perform(get(CREATE_SHIFT_URL + "/" + shiftId)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.defaultHourlyRate").value(20.00))
+				.andExpect(jsonPath("$.foremanHourlyRate").value(30.00))
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"));
 	}
 
 	/**
@@ -320,6 +414,7 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.id").value(shiftId))
 				.andExpect(jsonPath("$.companyId").isNumber())
 				.andExpect(jsonPath("$.companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"))
 				.andExpect(jsonPath("$.title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$.location").value("Cologne"))
 				.andExpect(jsonPath("$.status").value("OPEN"))
@@ -338,7 +433,7 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.createdBy").isNumber())
 				.andExpect(jsonPath("$.plannedStartTime").doesNotExist())
 				.andExpect(jsonPath("$.plannedEndTime").doesNotExist())
-				.andExpect(jsonPath("$.*", hasSize(18)))
+				.andExpect(jsonPath("$.*", hasSize(19)))
 				.andExpect(jsonPath("$.company").doesNotExist())
 				.andExpect(jsonPath("$.createdAt").doesNotExist())
 				.andExpect(jsonPath("$.updatedAt").doesNotExist());
@@ -376,6 +471,7 @@ class ShiftSessionControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.id").value(shiftId))
 				.andExpect(jsonPath("$.companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"))
 				.andExpect(jsonPath("$.title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$.foremanHourlyRate").doesNotExist())
 				.andExpect(jsonPath("$.pauseState.allPaused").value(false))
@@ -383,7 +479,7 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.discardedBy").value(nullValue()))
 				.andExpect(jsonPath("$.discardReason").value(nullValue()))
 				.andExpect(jsonPath("$.payPolicyVersionId").value((Object) null))
-				.andExpect(jsonPath("$.*", hasSize(17)));
+				.andExpect(jsonPath("$.*", hasSize(18)));
 	}
 
 	/**
@@ -612,6 +708,7 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.id").value(shiftId))
 				.andExpect(jsonPath("$.companyId").isNumber())
 				.andExpect(jsonPath("$.companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"))
 				.andExpect(jsonPath("$.status").value("CANCELLED"))
 				.andExpect(jsonPath("$.actualStartTime").value(nullValue()))
 				.andExpect(jsonPath("$.actualEndTime").value(nullValue()))
@@ -621,7 +718,7 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.foremanHourlyRate").value(25.00))
 				.andExpect(jsonPath("$.payPolicyVersionId").value((Object) null))
 				.andExpect(jsonPath("$.pauseState.allPaused").value(false))
-				.andExpect(jsonPath("$.*", hasSize(18)));
+				.andExpect(jsonPath("$.*", hasSize(19)));
 
 		ShiftSession persistedShift = shiftSessionRepository.findById(shiftId).orElseThrow();
 		assertThat(persistedShift.getStatus()).isEqualTo(ShiftStatus.CANCELLED);
@@ -1522,7 +1619,8 @@ class ShiftSessionControllerTests {
 				.andExpect(jsonPath("$.workers[1].hourlyRate").value(18.50))
 				.andExpect(jsonPath("$.workers[1].salary")
 						.value(secondAttendance.getCalculatedSalary().doubleValue()))
-				.andExpect(jsonPath("$.*", hasSize(11)))
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"))
+				.andExpect(jsonPath("$.*", hasSize(12)))
 				.andExpect(jsonPath("$.workers[?(@.attendanceId == %d)]".formatted(joinedAttendanceId))
 						.isEmpty());
 		assertThat(joinedAttendance.getCalculatedSalary()).isNull();
@@ -1541,13 +1639,14 @@ class ShiftSessionControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.shiftId").value(shiftId))
 				.andExpect(jsonPath("$.status").value("CLOSED"))
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"))
 				.andExpect(jsonPath("$.totalWorkers").value(1))
 				.andExpect(jsonPath("$.foremanWorkedMinutes").doesNotExist())
 				.andExpect(jsonPath("$.foremanPauseMinutes").doesNotExist())
 				.andExpect(jsonPath("$.foremanHourlyRate").doesNotExist())
 				.andExpect(jsonPath("$.foremanSalary").doesNotExist())
 				.andExpect(jsonPath("$.workers[0].payCalculation").doesNotExist())
-				.andExpect(jsonPath("$.*", hasSize(7)));
+				.andExpect(jsonPath("$.*", hasSize(8)));
 	}
 
 	/**
@@ -1918,7 +2017,8 @@ class ShiftSessionControllerTests {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{
-								  "name": "%s"
+								  "name": "%s",
+								  "currencyLabel": "EUR"
 								}
 								""".formatted(companyName)))
 				.andExpect(status().isCreated())

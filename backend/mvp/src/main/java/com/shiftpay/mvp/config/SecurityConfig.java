@@ -59,6 +59,8 @@ public class SecurityConfig {
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/companies").hasRole("FOREMAN")
 						.requestMatchers(HttpMethod.POST, "/api/v1/companies/join").hasRole("WORKER")
+						.requestMatchers(HttpMethod.GET, "/api/v1/me/company").hasRole("FOREMAN")
+						.requestMatchers(HttpMethod.PUT, "/api/v1/me/company").hasRole("FOREMAN")
 						.requestMatchers(HttpMethod.GET, "/api/v1/me/pay-policy").hasRole("FOREMAN")
 						.requestMatchers(HttpMethod.PUT, "/api/v1/me/pay-policy").hasRole("FOREMAN")
 						.requestMatchers(HttpMethod.GET, "/api/v1/me/pay-policy/versions").hasRole("FOREMAN")

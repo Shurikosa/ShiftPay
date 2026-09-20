@@ -145,6 +145,7 @@ public class PayoutRequestService {
 		ShiftAttendance firstAttendance = previewItems.getFirst().attendance();
 		User managerForeman = firstAttendance.getShiftSession().getCreatedBy();
 		OffsetDateTime requestedAt = OffsetDateTime.now(ZoneOffset.UTC);
+		PayoutRequestPreviewResponse previewResponse = buildPreviewResponse(previewItems);
 
 		PayoutRequest payoutRequest = new PayoutRequest();
 		payoutRequest.setCompany(worker.getCompany());
@@ -152,7 +153,8 @@ public class PayoutRequestService {
 		payoutRequest.setManagerForeman(managerForeman);
 		payoutRequest.setStatus(PayoutRequestStatus.PENDING);
 		payoutRequest.setRequestedAt(requestedAt);
-		applyTotals(payoutRequest, previewItems);
+		payoutRequest.setCurrencyLabel(previewResponse.currencyLabel());
+		applyTotals(payoutRequest, previewResponse);
 
 		for (PayoutRequestPreviewItem previewItem : previewItems) {
 			ShiftAttendance attendance = previewItem.attendance();
@@ -344,6 +346,7 @@ public class PayoutRequestService {
 				})
 				.toList();
 		validateSingleManagerForeman(validatedAttendances);
+		validateCommonCurrencyLabel(validatedAttendances);
 		Map<Long, PayCalculation> calculationsByAttendanceId = loadPayCalculationsByAttendanceId(validatedAttendances);
 		List<PayoutRequestPreviewItem> previewItems = validatedAttendances.stream()
 				.map((attendance) -> withPayCalculation(
@@ -424,8 +427,28 @@ public class PayoutRequestService {
 		}
 	}
 
-	private void applyTotals(PayoutRequest payoutRequest, List<PayoutRequestPreviewItem> previewItems) {
-		PayoutRequestPreviewResponse totals = buildPreviewResponse(previewItems);
+	private void validateCommonCurrencyLabel(List<ShiftAttendance> attendances) {
+		String currencyLabel = null;
+		for (ShiftAttendance attendance : attendances) {
+			String currentCurrencyLabel = attendance.getShiftSession().getCurrencyLabel();
+			if (currentCurrencyLabel == null) {
+				throw new PayoutRequestConflictException(
+						"Attendance has no stored currency label and cannot be included in a payout request"
+				);
+			}
+			if (currencyLabel == null) {
+				currencyLabel = currentCurrencyLabel;
+			}
+			else if (!currencyLabel.equals(currentCurrencyLabel)) {
+				throw new PayoutRequestConflictException(
+						"Payout request items must use the same currency label",
+						"MIXED_CURRENCY_LABELS"
+				);
+			}
+		}
+	}
+
+	private void applyTotals(PayoutRequest payoutRequest, PayoutRequestPreviewResponse totals) {
 		payoutRequest.setRawPayableMinutesTotal(totals.rawPayableMinutes());
 		payoutRequest.setPayoutRoundedMinutesTotal(totals.payoutRoundedMinutes());
 		payoutRequest.setExactCalculatedAmountTotal(totals.exactCalculatedAmount());
@@ -469,6 +492,7 @@ public class PayoutRequestService {
 	}
 
 	private PayoutRequestPreviewResponse buildPreviewResponse(List<PayoutRequestPreviewItem> previewItems) {
+		String currencyLabel = previewItems.getFirst().attendance().getShiftSession().getCurrencyLabel();
 		Integer rawPayableMinutes = previewItems.stream()
 				.map((item) -> item.rounding().rawPayableMinutes())
 				.reduce(0, Integer::sum);
@@ -495,6 +519,7 @@ public class PayoutRequestService {
 				.map((item) -> PayoutRequestItemResponse.fromPreview(item, PaymentStatus.UNPAID))
 				.toList();
 		return new PayoutRequestPreviewResponse(
+				currencyLabel,
 				rawPayableMinutes,
 				payoutRoundedMinutes,
 				exactCalculatedAmount,

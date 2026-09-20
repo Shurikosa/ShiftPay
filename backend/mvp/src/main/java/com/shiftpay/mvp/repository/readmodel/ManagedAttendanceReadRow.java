@@ -21,6 +21,7 @@ public record ManagedAttendanceReadRow(
 	AttendanceStatus attendanceStatus,
 	PaymentStatus paymentStatus,
 	BigDecimal hourlyRate,
+	String currencyLabel,
 	Integer breakMinutes,
 	OffsetDateTime payableStartTime,
 	Integer pauseMinutes,

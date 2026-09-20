@@ -733,7 +733,7 @@ class PremiumCloseFlowAcceptanceTests {
 		String token = register(email, "FOREMAN");
 		mockMvc.perform(post(CREATE_COMPANY_URL).header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
 				.contentType(MediaType.APPLICATION_JSON)
-				.content("{\"name\":\"Acceptance Co\",\"timeZone\":\"" + timeZone + "\"}"))
+				.content("{\"name\":\"Acceptance Co\",\"timeZone\":\"" + timeZone + "\",\"currencyLabel\":\"EUR\"}"))
 				.andExpect(status().isCreated());
 		return token;
 	}

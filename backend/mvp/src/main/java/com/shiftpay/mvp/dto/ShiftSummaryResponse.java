@@ -15,6 +15,7 @@ import java.util.List;
  *
  * @param shiftId shift session id
  * @param status shift status, always {@code CLOSED} for successful summary responses
+ * @param currencyLabel nullable shift currency-label snapshot for summary monetary values
  * @param totalWorkers number of approved attendance rows included in the summary
  * @param totalSalary sum of included worker salaries with scale two
  * @param totalBaseAmount sum of included worker base pay totals
@@ -28,6 +29,7 @@ import java.util.List;
 public record ShiftSummaryResponse(
 		Long shiftId,
 		ShiftStatus status,
+		String currencyLabel,
 		int totalWorkers,
 		BigDecimal totalSalary,
 		@JsonSerialize(using = ScaleEightBigDecimalSerializer.class)

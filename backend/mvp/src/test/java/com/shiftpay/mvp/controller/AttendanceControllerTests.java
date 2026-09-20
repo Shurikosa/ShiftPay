@@ -137,7 +137,35 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$.workerId").isNumber())
 				.andExpect(jsonPath("$.status").value("JOINED"))
 				.andExpect(jsonPath("$.hourlyRate").value(17.50))
-				.andExpect(jsonPath("$.*", hasSize(5)));
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"))
+				.andExpect(jsonPath("$.*", hasSize(6)));
+	}
+
+	/**
+	 * Read paths return the shift snapshot unchanged and never replace an unknown legacy label with Company settings.
+	 */
+	@Test
+	void attendanceAndPersonalHistoryPreserveLegacyNullCurrencyLabel() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		CreatedShift shift = createShift(foremanToken, "Legacy currency label shift");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long attendanceId = joinAndGetAttendanceId(workerToken, shift.joinCode());
+		jdbcTemplate.update("update companies set currency_label = ?", "USD");
+		jdbcTemplate.update("update shift_sessions set currency_label = null where id = ?", shift.id());
+
+		mockMvc.perform(get(attendanceUrl(shift.id()))
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(1)))
+				.andExpect(jsonPath("$[0].attendanceId").value(attendanceId))
+				.andExpect(jsonPath("$[0].hourlyRate").value(15.25))
+				.andExpect(jsonPath("$[0].currencyLabel").value((Object) null));
+		getMyShiftHistory(workerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(1)))
+				.andExpect(jsonPath("$[0].attendanceId").value(attendanceId))
+				.andExpect(jsonPath("$[0].hourlyRate").value(15.25))
+				.andExpect(jsonPath("$[0].currencyLabel").value((Object) null));
 	}
 
 	/**
@@ -503,6 +531,7 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$[1].status").value("JOINED"))
 				.andExpect(jsonPath("$[1].paymentStatus").value("UNPAID"))
 				.andExpect(jsonPath("$[1].hourlyRate").value(15.00))
+				.andExpect(jsonPath("$[1].currencyLabel").value("EUR"))
 				.andExpect(jsonPath("$[1].breakMinutes").value(60))
 				.andExpect(jsonPath("$[1].payableStartTime").value((Object) null))
 				.andExpect(jsonPath("$[1].pauseMinutes").value((Object) null))
@@ -513,7 +542,7 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$[1].pauseState.personallyPaused").value(false))
 				.andExpect(jsonPath("$[1].joinedAt").value("2026-07-06T18:00:00Z"))
 				.andExpect(jsonPath("$[1].approvedAt").value((Object) null))
-				.andExpect(jsonPath("$[1].*", hasSize(15)))
+				.andExpect(jsonPath("$[1].*", hasSize(16)))
 				.andExpect(jsonPath("$[1].passwordHash").doesNotExist())
 				.andExpect(jsonPath("$[1].worker").doesNotExist())
 				.andExpect(jsonPath("$[1].email").doesNotExist());
@@ -1008,8 +1037,9 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$.attendanceId").value(attendanceId))
 				.andExpect(jsonPath("$.status").value("APPROVED"))
 				.andExpect(jsonPath("$.hourlyRate").value(16.75))
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"))
 				.andExpect(jsonPath("$.approvedAt").isString())
-				.andExpect(jsonPath("$.*", hasSize(4)));
+				.andExpect(jsonPath("$.*", hasSize(5)));
 
 		ShiftAttendance attendance = shiftAttendanceRepository.findById(attendanceId).orElseThrow();
 		assertThat(attendance.getStatus()).isEqualTo(AttendanceStatus.APPROVED);
@@ -1435,6 +1465,7 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$[0].attendanceId").value(attendanceId))
 				.andExpect(jsonPath("$[0].companyId").isNumber())
 				.andExpect(jsonPath("$[0].companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$[0].currencyLabel").value("EUR"))
 				.andExpect(jsonPath("$[0].title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$[0].location").value("Cologne"))
 				.andExpect(jsonPath("$[0].status").value("OPEN"))
@@ -1457,7 +1488,7 @@ class AttendanceControllerTests {
 				.andExpect(jsonPath("$[0].foremanWorkedMinutes").doesNotExist())
 				.andExpect(jsonPath("$[0].foremanPauseMinutes").doesNotExist())
 				.andExpect(jsonPath("$[0].foremanSalary").doesNotExist())
-				.andExpect(jsonPath("$[0].*", hasSize(18)))
+				.andExpect(jsonPath("$[0].*", hasSize(19)))
 				.andExpect(jsonPath("$[0].passwordHash").doesNotExist())
 				.andExpect(jsonPath("$[0].user").doesNotExist())
 				.andExpect(jsonPath("$[0].worker").doesNotExist())
@@ -1759,7 +1790,8 @@ class AttendanceControllerTests {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{
-								  "name": "%s"
+								  "name": "%s",
+								  "currencyLabel": "EUR"
 								}
 								""".formatted(companyName)))
 				.andExpect(status().isCreated())

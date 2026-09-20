@@ -83,6 +83,7 @@ class ManagedShiftControllerTests {
 				.andExpect(jsonPath("$", hasSize(2)))
 				.andExpect(jsonPath("$[0].id").value(secondShiftId))
 				.andExpect(jsonPath("$[0].companyName").value("Acme Construction"))
+				.andExpect(jsonPath("$[0].currencyLabel").value("EUR"))
 				.andExpect(jsonPath("$[0].title").value(containsString("Acme Construction")))
 				.andExpect(jsonPath("$[0].status").value("OPEN"))
 				.andExpect(jsonPath("$[1].id").value(firstShiftId))
@@ -196,7 +197,7 @@ class ManagedShiftControllerTests {
 					.andExpect(jsonPath("$[0].createdBy").isNumber())
 					.andExpect(jsonPath("$[0].plannedStartTime").doesNotExist())
 					.andExpect(jsonPath("$[0].plannedEndTime").doesNotExist())
-					.andExpect(jsonPath("$[0].*", hasSize(18)))
+					.andExpect(jsonPath("$[0].*", hasSize(19)))
 				.andExpect(jsonPath("$[0].company").doesNotExist())
 				.andExpect(jsonPath("$[0].createdByUser").doesNotExist())
 				.andExpect(jsonPath("$[0].createdAt").doesNotExist())
@@ -285,7 +286,8 @@ class ManagedShiftControllerTests {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{
-								  "name": "%s"
+								  "name": "%s",
+								  "currencyLabel": "EUR"
 								}
 								""".formatted(companyName)))
 				.andExpect(status().isCreated());

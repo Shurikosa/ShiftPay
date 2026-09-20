@@ -202,4 +202,76 @@ class PayPolicyMigrationTests {
 		assertThat(jdbcTemplate.queryForObject("select count(*) from pay_calculations", Integer.class)).isZero();
 		dataSource.destroy();
 	}
+
+	/**
+	 * V14 adds nullable company defaults and historical currency snapshots without deriving a value for legacy rows.
+	 */
+	@Test
+	void v14AddsNullableCompanySettingsAndPreservesLegacyUnknownCurrencyLabels() {
+		String databaseName = "currency_label_migration_" + UUID.randomUUID().toString().replace("-", "");
+		String jdbcUrl = "jdbc:h2:mem:" + databaseName
+				+ ";MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE";
+		SingleConnectionDataSource dataSource = new SingleConnectionDataSource(jdbcUrl, "sa", "", true);
+		JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+
+		Flyway.configure()
+				.dataSource(dataSource)
+				.locations("classpath:db/migration")
+				.placeholders(Map.of("default_timezone", "Europe/Berlin"))
+				.target("13")
+				.load()
+				.migrate();
+
+		jdbcTemplate.update(
+				"insert into companies (name, join_code, time_zone) values (?, ?, ?)",
+				"Legacy labels", "LABELS", "Europe/Berlin"
+		);
+		Long companyId = jdbcTemplate.queryForObject(
+				"select id from companies where join_code = ?", Long.class, "LABELS"
+		);
+		jdbcTemplate.update(
+				"insert into users (email, password_hash, first_name, last_name, role, company_id) values (?, ?, ?, ?, 'FOREMAN', ?)",
+				"labels.foreman@example.com", "hash", "Legacy", "Foreman", companyId
+		);
+		Long foremanId = jdbcTemplate.queryForObject(
+				"select id from users where email = ?", Long.class, "labels.foreman@example.com"
+		);
+		jdbcTemplate.update("""
+				insert into shift_sessions (
+					company_id, title, join_code, status, default_break_minutes, default_hourly_rate,
+					foreman_hourly_rate, created_by
+				) values (?, ?, ?, 'OPEN', 0, 15, 25, ?)
+				""", companyId, "Legacy label shift", "LABELS1", foremanId);
+		Long shiftId = jdbcTemplate.queryForObject(
+				"select id from shift_sessions where join_code = ?", Long.class, "LABELS1"
+		);
+		jdbcTemplate.update("""
+				insert into payout_requests (
+					company_id, worker_id, manager_foreman_id, status, raw_payable_minutes_total,
+					payout_rounded_minutes_total, exact_calculated_amount_total, total_base_amount,
+					total_premium_amount, payout_amount, requested_at
+				) values (?, ?, ?, 'PENDING', 0, 0, 0, 0, 0, 0, current_timestamp)
+				""", companyId, foremanId, foremanId);
+		Long payoutRequestId = jdbcTemplate.queryForObject("select max(id) from payout_requests", Long.class);
+
+		Flyway.configure()
+				.dataSource(dataSource)
+				.locations("classpath:db/migration")
+				.placeholders(Map.of("default_timezone", "Europe/Berlin"))
+				.load()
+				.migrate();
+
+		Map<String, Object> company = jdbcTemplate.queryForMap(
+				"select default_worker_hourly_rate, default_foreman_hourly_rate, currency_label from companies where id = ?",
+				companyId
+		);
+		assertThat(company.values()).containsOnlyNulls();
+		assertThat(jdbcTemplate.queryForObject(
+				"select currency_label from shift_sessions where id = ?", String.class, shiftId
+		)).isNull();
+		assertThat(jdbcTemplate.queryForObject(
+				"select currency_label from payout_requests where id = ?", String.class, payoutRequestId
+		)).isNull();
+		dataSource.destroy();
+	}
 }

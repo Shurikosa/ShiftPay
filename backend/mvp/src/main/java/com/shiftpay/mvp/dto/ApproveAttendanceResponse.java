@@ -12,12 +12,14 @@ import java.time.OffsetDateTime;
  * @param attendanceId approved attendance id
  * @param status resulting attendance status, normally {@code APPROVED}
  * @param hourlyRate hourly rate stored on this attendance after any override
+ * @param currencyLabel nullable shift currency-label snapshot for the hourly rate
  * @param approvedAt UTC timestamp when the backend approved the attendance
  */
 public record ApproveAttendanceResponse(
 		Long attendanceId,
 		AttendanceStatus status,
 		BigDecimal hourlyRate,
+		String currencyLabel,
 		OffsetDateTime approvedAt
 ) {
 
@@ -32,6 +34,7 @@ public record ApproveAttendanceResponse(
 				attendance.getId(),
 				attendance.getStatus(),
 				attendance.getHourlyRate(),
+				attendance.getShiftSession().getCurrencyLabel(),
 				attendance.getApprovedAt()
 		);
 	}

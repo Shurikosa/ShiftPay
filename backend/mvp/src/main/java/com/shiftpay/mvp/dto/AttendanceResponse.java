@@ -20,6 +20,7 @@ import java.time.OffsetDateTime;
  * @param status current attendance status
  * @param paymentStatus current payroll payment status
  * @param hourlyRate rate snapshot or approval override used for salary calculation
+ * @param currencyLabel nullable shift currency-label snapshot for monetary values
  * @param breakMinutes break minutes deducted from this attendance
  * @param payableStartTime effective worker payable start time, or null before it is known
  * @param pauseMinutes persisted pause minutes deducted after close, or null before salary calculation
@@ -38,6 +39,7 @@ public record AttendanceResponse(
 		AttendanceStatus status,
 		PaymentStatus paymentStatus,
 		BigDecimal hourlyRate,
+		String currencyLabel,
 		Integer breakMinutes,
 		OffsetDateTime payableStartTime,
 		Integer pauseMinutes,

@@ -1062,6 +1062,76 @@ class PayoutRequestControllerTests {
 		getManagedPayoutRequests(adminToken).andExpect(status().isForbidden());
 	}
 
+	/**
+	 * Payout selections require one known, exact shift-label snapshot and persist that common label on the request.
+	 */
+	@Test
+	void payoutPreviewAndCreationEnforceCurrencyLabelIntegrityAndPreserveRequestHistory() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		long firstAttendanceId = createClosedApprovedAttendance(
+				foremanToken, workerToken, "First label payout", 60, "15.00", "15.00"
+		);
+		long secondAttendanceId = createClosedApprovedAttendance(
+				foremanToken, workerToken, "Second label payout", 60, "15.00", "15.00"
+		);
+		Long firstShiftId = jdbcTemplate.queryForObject(
+				"select shift_session_id from shift_attendance where id = ?", Long.class, firstAttendanceId
+		);
+		Long secondShiftId = jdbcTemplate.queryForObject(
+				"select shift_session_id from shift_attendance where id = ?", Long.class, secondAttendanceId
+		);
+
+		jdbcTemplate.update("update shift_sessions set currency_label = null where id = ?", firstShiftId);
+		MvcResult payableWithLegacyLabel = getPayableAttendances(workerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$", hasSize(2)))
+				.andReturn();
+		assertThat(payableWithLegacyLabel.getResponse().getContentAsString())
+				.contains("\"attendanceId\":" + firstAttendanceId)
+				.contains("\"currencyLabel\":null");
+		previewPayoutRequest(workerToken, firstAttendanceId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.message")
+						.value("Attendance has no stored currency label and cannot be included in a payout request"));
+		createPayoutRequest(workerToken, firstAttendanceId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.message")
+						.value("Attendance has no stored currency label and cannot be included in a payout request"));
+		assertThat(payoutRequestRepository.count()).isZero();
+
+		jdbcTemplate.update("update shift_sessions set currency_label = ? where id = ?", "EUR", firstShiftId);
+		jdbcTemplate.update("update shift_sessions set currency_label = ? where id = ?", "eur", secondShiftId);
+		previewPayoutRequest(workerToken, firstAttendanceId, secondAttendanceId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.message").value("Payout request items must use the same currency label"))
+				.andExpect(jsonPath("$.code").value("MIXED_CURRENCY_LABELS"));
+		createPayoutRequest(workerToken, firstAttendanceId, secondAttendanceId)
+				.andExpect(status().isConflict())
+				.andExpect(jsonPath("$.message").value("Payout request items must use the same currency label"))
+				.andExpect(jsonPath("$.code").value("MIXED_CURRENCY_LABELS"));
+		assertThat(payoutRequestRepository.count()).isZero();
+
+		jdbcTemplate.update("update shift_sessions set currency_label = ? where id = ?", "EUR", secondShiftId);
+		previewPayoutRequest(workerToken, firstAttendanceId, secondAttendanceId)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"));
+		MvcResult created = createPayoutRequest(workerToken, firstAttendanceId, secondAttendanceId)
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"))
+				.andReturn();
+		long requestId = extractLong(created, PAYOUT_REQUEST_ID_PATTERN);
+		assertThat(payoutRequestRepository.findById(requestId).orElseThrow().getCurrencyLabel()).isEqualTo("EUR");
+
+		PayoutRequest request = payoutRequestRepository.findById(requestId).orElseThrow();
+		request.setCurrencyLabel(null);
+		payoutRequestRepository.saveAndFlush(request);
+		getPayoutRequests(workerToken)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].id").value(requestId))
+				.andExpect(jsonPath("$[0].currencyLabel").value((Object) null));
+	}
+
 	private String registerAndLogin(String email, String role) throws Exception {
 		String accessToken = registerAndLoginWithoutCompany(email, role);
 		if ("FOREMAN".equals(role)) {
@@ -1121,7 +1191,8 @@ class PayoutRequestControllerTests {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{
-								  "name": "%s"
+								  "name": "%s",
+								  "currencyLabel": "EUR"
 								}
 								""".formatted(companyName)))
 				.andExpect(status().isCreated())

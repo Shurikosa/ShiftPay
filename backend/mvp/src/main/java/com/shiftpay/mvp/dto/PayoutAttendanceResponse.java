@@ -15,6 +15,7 @@ import java.time.OffsetDateTime;
  * @param shiftId shift session id
  * @param companyId company id assigned to the shift
  * @param companyName company display name
+ * @param currencyLabel nullable shift currency-label snapshot for payroll values
  * @param title shift title
  * @param location optional shift location
  * @param actualStartTime actual shift start time
@@ -33,6 +34,7 @@ public record PayoutAttendanceResponse(
 		Long shiftId,
 		Long companyId,
 		String companyName,
+		String currencyLabel,
 		String title,
 		String location,
 		OffsetDateTime actualStartTime,
@@ -66,6 +68,7 @@ public record PayoutAttendanceResponse(
 				shiftSession.getId(),
 				shiftSession.getCompany().getId(),
 				shiftSession.getCompany().getName(),
+				shiftSession.getCurrencyLabel(),
 				shiftSession.getTitle(),
 				shiftSession.getLocation(),
 				shiftSession.getActualStartTime(),

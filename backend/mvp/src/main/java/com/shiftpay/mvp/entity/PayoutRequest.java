@@ -81,6 +81,10 @@ public class PayoutRequest {
 	private BigDecimal payoutAmount;
 
 	@Setter
+	@Column(name = "currency_label", length = 255)
+	private String currencyLabel;
+
+	@Setter
 	@Column(name = "requested_at", nullable = false)
 	private OffsetDateTime requestedAt;
 

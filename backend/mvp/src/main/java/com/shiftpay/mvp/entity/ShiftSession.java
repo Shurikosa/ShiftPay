@@ -99,6 +99,10 @@ public class ShiftSession {
 	private BigDecimal foremanHourlyRate;
 
 	@Setter
+	@Column(name = "currency_label", length = 255)
+	private String currencyLabel;
+
+	@Setter
 	@Column(name = "foreman_worked_minutes")
 	private Integer foremanWorkedMinutes;
 

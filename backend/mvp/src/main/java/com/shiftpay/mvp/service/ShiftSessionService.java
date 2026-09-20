@@ -24,6 +24,7 @@ import com.shiftpay.mvp.entity.ShiftSession;
 import com.shiftpay.mvp.entity.ShiftStatus;
 import com.shiftpay.mvp.entity.User;
 import com.shiftpay.mvp.exception.CompanyConflictException;
+import com.shiftpay.mvp.exception.BadRequestException;
 import com.shiftpay.mvp.exception.ForbiddenException;
 import com.shiftpay.mvp.exception.PayPolicyRequiredException;
 import com.shiftpay.mvp.exception.ShortShiftRequiresDecisionException;
@@ -155,6 +156,21 @@ public class ShiftSessionService {
 		if (company == null) {
 			throw new CompanyConflictException("Foreman must create a company before creating shifts");
 		}
+		if (company.getCurrencyLabel() == null) {
+			throw new CompanyConflictException("Company currency label must be configured before creating a shift");
+		}
+		BigDecimal defaultHourlyRate = request.defaultHourlyRate() == null
+				? company.getDefaultWorkerHourlyRate()
+				: request.defaultHourlyRate();
+		if (defaultHourlyRate == null) {
+			throw new BadRequestException("defaultHourlyRate: must not be null");
+		}
+		BigDecimal foremanHourlyRate = request.foremanHourlyRate() == null
+				? company.getDefaultForemanHourlyRate()
+				: request.foremanHourlyRate();
+		if (foremanHourlyRate == null) {
+			throw new BadRequestException("foremanHourlyRate: must not be null");
+		}
 
 		ShiftSession shiftSession = new ShiftSession();
 		shiftSession.setCompany(company);
@@ -163,8 +179,9 @@ public class ShiftSessionService {
 		shiftSession.setJoinCode(generateUniqueJoinCode());
 		shiftSession.setStatus(ShiftStatus.OPEN);
 		shiftSession.setDefaultBreakMinutes(request.defaultBreakMinutes() == null ? 0 : request.defaultBreakMinutes());
-		shiftSession.setDefaultHourlyRate(request.defaultHourlyRate());
-		shiftSession.setForemanHourlyRate(request.foremanHourlyRate());
+		shiftSession.setDefaultHourlyRate(defaultHourlyRate);
+		shiftSession.setForemanHourlyRate(foremanHourlyRate);
+		shiftSession.setCurrencyLabel(company.getCurrencyLabel());
 		shiftSession.setCreatedBy(createdBy);
 
 		return ShiftCreateResponse.from(
@@ -489,6 +506,7 @@ public class ShiftSessionService {
 		return new ShiftSummaryResponse(
 				shiftSession.getId(),
 				shiftSession.getStatus(),
+				shiftSession.getCurrencyLabel(),
 				workers.size(),
 				totalSalary,
 				totalBaseAmount,
