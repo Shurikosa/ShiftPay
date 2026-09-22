@@ -22,8 +22,28 @@ export function formatMoney(value: number | null): string {
   return value === null ? "Pending" : value.toFixed(2);
 }
 
+export function formatMoneyWithCurrencyLabel(
+  value: number | null,
+  currencyLabel: string | null
+): string {
+  const amount = formatMoney(value);
+  return currencyLabel === null
+    ? `${amount} (currency unavailable)`
+    : `${amount} ${currencyLabel}`;
+}
+
 export function formatWholeMoney(value: number | null): string {
   return value === null ? "Pending" : String(value);
+}
+
+export function formatWholeMoneyWithCurrencyLabel(
+  value: number | null,
+  currencyLabel: string | null
+): string {
+  const amount = formatWholeMoney(value);
+  return currencyLabel === null
+    ? `${amount} (currency unavailable)`
+    : `${amount} ${currencyLabel}`;
 }
 
 export function formatMinutes(value: number | null): string {

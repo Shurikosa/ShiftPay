@@ -73,7 +73,8 @@ function shiftFixture(
     workedMinutes: 60,
     calculatedSalary: 25,
     payCalculation,
-    ...overrides
+    ...overrides,
+    currencyLabel: overrides.currencyLabel ?? "EUR"
   };
 }
 

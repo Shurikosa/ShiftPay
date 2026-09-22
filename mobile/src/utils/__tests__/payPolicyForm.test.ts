@@ -5,6 +5,7 @@ import {
   createEmptyPayPolicyRule,
   hydratePayPolicyForm,
   mapPayPolicySaveError,
+  parseThresholdHours,
   reconcilePayPolicyFormErrors,
   serializePayPolicyForm,
   validatePayPolicyForm,
@@ -27,6 +28,71 @@ function emptyPolicy(overrides: Partial<PayPolicy> = {}): PayPolicy {
 }
 
 describe("pay policy form mapping and validation", () => {
+  it("converts decimal hours as exact rationals, not binary floating point", () => {
+    expect(parseThresholdHours("0")).toBeNull();
+    expect(parseThresholdHours("-1")).toBeNull();
+    expect(parseThresholdHours("8.2")).toBe(492);
+    expect(parseThresholdHours("2.05")).toBe(123);
+    expect(parseThresholdHours("35791394.1")).toBe(2_147_483_646);
+    expect(parseThresholdHours("35791395")).toBeNull();
+    expect(parseThresholdHours("8.333")).toBeNull();
+    expect(parseThresholdHours("8.")).toBeNull();
+  });
+
+  it("accepts the Java Integer maximum when loaded and rejects edited values above it", () => {
+    const form = hydratePayPolicyForm(
+      emptyPolicy({
+        rules: [
+          { id: 1, name: "Weekly", type: "WEEKLY_OVERTIME", enabled: true, premiumPercent: 25, condition: { thresholdMinutes: 2_147_483_647 } }
+        ]
+      })
+    );
+    expect(validatePayPolicyForm(form)).toEqual({});
+    expect(serializePayPolicyForm(form).rules[0]).toMatchObject({
+      condition: { thresholdMinutes: 2_147_483_647 }
+    });
+    expect(parseThresholdHours("35791394.11666666666666666667")).toBeNull();
+  });
+
+  it("keeps untouched loaded overtime minutes authoritative, including non-terminating hours", () => {
+    const form = hydratePayPolicyForm(
+      emptyPolicy({
+        rules: [
+          { id: 1, name: "Daily", type: "DAILY_OVERTIME", enabled: true, premiumPercent: 25, condition: { thresholdMinutes: 31 } },
+          { id: 2, name: "Weekly", type: "WEEKLY_OVERTIME", enabled: true, premiumPercent: 25, condition: { thresholdMinutes: 123 } }
+        ]
+      })
+    );
+
+    expect(form.rules[0]?.type === "DAILY_OVERTIME" && form.rules[0].condition.thresholdHours).toBe(String(31 / 60));
+    expect(validatePayPolicyForm(form)).toEqual({});
+    expect(serializePayPolicyForm(form).rules.map((rule) => rule.condition)).toEqual([
+      { thresholdMinutes: 31 },
+      { thresholdMinutes: 123 }
+    ]);
+  });
+
+  it("keeps an untouched one-minute backend threshold valid", () => {
+    const form = hydratePayPolicyForm(
+      emptyPolicy({
+        rules: [
+          {
+            id: 1,
+            name: "Daily",
+            type: "DAILY_OVERTIME",
+            enabled: true,
+            premiumPercent: 25,
+            condition: { thresholdMinutes: 1 }
+          }
+        ]
+      })
+    );
+
+    expect(validatePayPolicyForm(form)).toEqual({});
+    expect(serializePayPolicyForm(form).rules[0]).toMatchObject({
+      condition: { thresholdMinutes: 1 }
+    });
+  });
   it("round-trips an empty policy and preserves a backend-returned week start", () => {
     const form = hydratePayPolicyForm(
       emptyPolicy({
@@ -157,7 +223,7 @@ describe("pay policy form mapping and validation", () => {
         {
           ...rule,
           premiumPercent: "0.0000",
-          condition: { thresholdMinutes: "480" }
+          condition: { thresholdMinutes: "480", thresholdHours: "8" }
         }
       ]
     };
@@ -222,7 +288,7 @@ describe("pay policy form mapping and validation", () => {
       weekStartsOn: "SUNDAY",
       stackingStrategy: "HIGHEST_ONLY",
       rules: [
-        { ...daily, premiumPercent: "50", condition: { thresholdMinutes: "0" } },
+        { ...daily, premiumPercent: "50", condition: { thresholdMinutes: "", thresholdHours: "" } },
         {
           ...weekdays,
           premiumPercent: "12.5",
@@ -243,7 +309,7 @@ describe("pay policy form mapping and validation", () => {
     expect(errors["rules[2].condition.dates[0].date"]).toBeDefined();
     expect(errors["rules[1].condition.weekdays"]).toBeUndefined();
 
-    form.rules[0] = { ...daily, premiumPercent: "50", condition: { thresholdMinutes: "1" } };
+    form.rules[0] = { ...daily, premiumPercent: "50", condition: { thresholdMinutes: "1", thresholdHours: "1" } };
     form.rules[2] = {
       ...holiday,
       premiumPercent: "100",

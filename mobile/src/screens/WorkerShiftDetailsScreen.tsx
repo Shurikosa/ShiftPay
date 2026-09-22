@@ -13,7 +13,7 @@ import { useWorkerShiftHistory } from "../hooks/useWorkerShiftHistory";
 import type { WorkerStackParamList } from "../types/navigation";
 import {
   formatDateTime,
-  formatMoney,
+  formatMoneyWithCurrencyLabel,
   formatMinutes,
   formatOptionalLocation,
   formatRate
@@ -212,7 +212,7 @@ export function WorkerShiftDetailsScreen({
           <DetailRow label="Company" value={shift.companyName} />
           <DetailRow label="Actual start" value={formatDateTime(shift.actualStartTime)} />
           <DetailRow label="Actual end" value={formatDateTime(shift.actualEndTime)} />
-          <DetailRow label="Hourly rate" value={formatRate(shift.hourlyRate)} />
+          <DetailRow label="Hourly rate" value={`${formatRate(shift.hourlyRate)} ${shift.currencyLabel ?? "currency unavailable"}`} />
           <DetailRow label="Break" value={`${shift.breakMinutes} min`} />
           {isDiscarded ? (
             <DetailRow label="Payroll" value="Not payable" />
@@ -228,7 +228,7 @@ export function WorkerShiftDetailsScreen({
               <DetailRow label="Worked time" value={formatMinutes(shift.workedMinutes)} />
               <DetailRow
                 label="Calculated salary"
-                value={formatMoney(shift.calculatedSalary)}
+                value={formatMoneyWithCurrencyLabel(shift.calculatedSalary, shift.currencyLabel)}
               />
               {shift.paymentStatus ? (
                 <DetailRow
@@ -245,7 +245,7 @@ export function WorkerShiftDetailsScreen({
 
         {canShowFinalPayBreakdown ? (
           shift.payCalculation ? (
-            <PayCalculationBreakdown calculation={shift.payCalculation} />
+            <PayCalculationBreakdown calculation={shift.payCalculation} currencyLabel={shift.currencyLabel} />
           ) : (
             <StateMessage
               title="Historical breakdown unavailable"

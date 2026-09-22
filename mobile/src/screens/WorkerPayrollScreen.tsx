@@ -26,7 +26,7 @@ import {
   formatMinutes,
   formatOptionalLocation,
   formatRate,
-  formatWholeMoney
+  formatWholeMoneyWithCurrencyLabel
 } from "../utils/format";
 import { getErrorMessage } from "../api/errors";
 import {
@@ -86,6 +86,12 @@ export function WorkerPayrollScreen({ navigation }: WorkerPayrollScreenProps) {
     () => new Set(selectedAttendanceIds),
     [selectedAttendanceIds]
   );
+  const selectedCurrencyLabel = useMemo(() => {
+    const selected = payableAttendances.find((attendance) =>
+      selectedIds.has(attendance.attendanceId)
+    );
+    return selected?.currencyLabel ?? null;
+  }, [payableAttendances, selectedIds]);
 
   const loadPayroll = useCallback(async () => {
     setLoading(true);
@@ -154,6 +160,17 @@ export function WorkerPayrollScreen({ navigation }: WorkerPayrollScreenProps) {
   };
 
   const handleToggleAttendance = (attendanceId: number) => {
+    const attendance = payableAttendances.find((item) => item.attendanceId === attendanceId);
+    if (!attendance) return;
+    const isSelected = selectedIds.has(attendanceId);
+    if (!isSelected && attendance.currencyLabel === null) {
+      setError("Historical currency label is unavailable. This attendance cannot be submitted for payout.");
+      return;
+    }
+    if (!isSelected && selectedCurrencyLabel !== null && attendance.currencyLabel !== selectedCurrencyLabel) {
+      setError("Select attendance with one currency label per payout request. Create separate requests for different labels.");
+      return;
+    }
     setCreatedRequest(null);
     setSuccessMessage(null);
     setError(null);
@@ -316,12 +333,17 @@ export function WorkerPayrollScreen({ navigation }: WorkerPayrollScreenProps) {
             <View style={styles.list}>
               {payableAttendances.map((attendance) => {
                 const selected = selectedIds.has(attendance.attendanceId);
+                const unavailableCurrency = attendance.currencyLabel === null;
+                const mixedCurrency =
+                  !selected &&
+                  selectedCurrencyLabel !== null &&
+                  attendance.currencyLabel !== selectedCurrencyLabel;
 
                 return (
                   <Pressable
                     accessibilityRole="checkbox"
-                    accessibilityState={{ checked: selected }}
-                    disabled={isMutating || loading}
+                    accessibilityState={{ checked: selected, disabled: isMutating || loading || unavailableCurrency || mixedCurrency }}
+                    disabled={isMutating || loading || unavailableCurrency || mixedCurrency}
                     key={attendance.attendanceId}
                     onPress={() => {
                       handleToggleAttendance(attendance.attendanceId);
@@ -329,7 +351,8 @@ export function WorkerPayrollScreen({ navigation }: WorkerPayrollScreenProps) {
                     style={({ pressed }) => [
                       styles.attendanceCard,
                       selected && styles.selectedCard,
-                      pressed && !isMutating && styles.pressed
+                      pressed && !isMutating && styles.pressed,
+                      (unavailableCurrency || mixedCurrency) && styles.disabledCard
                     ]}
                   >
                     <View style={styles.attendanceHeader}>
@@ -362,12 +385,14 @@ export function WorkerPayrollScreen({ navigation }: WorkerPayrollScreenProps) {
                         label="Payable end"
                         value={formatDateTime(attendance.actualEndTime)}
                       />
-                      <DetailRow label="Hourly rate" value={formatRate(attendance.hourlyRate)} />
+                      <DetailRow label="Hourly rate" value={`${formatRate(attendance.hourlyRate)} ${attendance.currencyLabel ?? "currency unavailable"}`} />
                       <DetailRow
                         label="Final payout amount"
-                        value={formatWholeMoney(attendance.payoutAmount)}
+                        value={formatWholeMoneyWithCurrencyLabel(attendance.payoutAmount, attendance.currencyLabel)}
                       />
                     </View>
+                    {unavailableCurrency ? <Text style={styles.currencyWarning}>Historical currency unavailable. This row cannot be selected for payout.</Text> : null}
+                    {mixedCurrency ? <Text style={styles.currencyWarning}>Select this currency in a separate payout request.</Text> : null}
                   </Pressable>
                 );
               })}
@@ -390,7 +415,7 @@ export function WorkerPayrollScreen({ navigation }: WorkerPayrollScreenProps) {
               />
               <DetailRow
                 label="Final payout amount"
-                value={formatWholeMoney(preview.payoutAmount)}
+                value={formatWholeMoneyWithCurrencyLabel(preview.payoutAmount, preview.currencyLabel)}
               />
             </View>
           ) : (
@@ -516,6 +541,13 @@ const styles = StyleSheet.create({
   selectedCard: {
     borderColor: colors.primary,
     backgroundColor: colors.primarySoft
+  },
+  disabledCard: {
+    opacity: 0.6
+  },
+  currencyWarning: {
+    ...typography.caption,
+    color: colors.warning
   },
   pressed: {
     opacity: 0.88

@@ -111,7 +111,8 @@ function shiftFixture(overrides: Partial<ManagedShift> = {}): ManagedShift {
     defaultHourlyRate: 20,
     foremanHourlyRate: 25,
     createdBy: 5,
-    ...overrides
+    ...overrides,
+    currencyLabel: overrides.currencyLabel ?? "EUR"
   };
 }
 
@@ -134,7 +135,8 @@ function attendanceFixture(
     payCalculation: calculationFixture(),
     joinedAt: "2026-07-05T21:45:00Z",
     approvedAt: "2026-07-05T21:50:00Z",
-    ...overrides
+    ...overrides,
+    currencyLabel: overrides.currencyLabel ?? "EUR"
   };
 }
 

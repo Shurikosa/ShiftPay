@@ -1,8 +1,9 @@
 import { useFocusEffect } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { getMyPayPolicy, updateMyPayPolicy } from "../api/payPolicy";
+import { getMyCompany } from "../api/companies";
 import { Button } from "../components/Button";
 import { DetailRow } from "../components/DetailRow";
 import { PayPolicyRuleEditor } from "../components/PayPolicyRuleEditor";
@@ -19,6 +20,7 @@ import type {
   PayPolicyStackingStrategy,
   PayPolicyWeekday
 } from "../types/payPolicy";
+import type { CompanySettingsResponse } from "../types/company";
 import { PAY_POLICY_WEEKDAYS } from "../types/payPolicy";
 import {
   createEmptyPayPolicyRule,
@@ -43,9 +45,23 @@ interface PayPolicyEditorState {
   fieldErrors: PayPolicyFormErrors;
 }
 
+interface PayPolicyOperation {
+  sequence: number;
+  type: "load" | "save";
+  focusGeneration: number;
+}
+
+interface QueuedPayPolicyLoad {
+  focusGeneration: number;
+  required: boolean;
+}
+
+type VisualLoadMode = "blocking" | "refreshing" | "idle";
+type FreshnessState = "current" | "required-pending" | "required-failed";
+
 const STACKING_OPTIONS: readonly SegmentedControlOption<PayPolicyStackingStrategy>[] = [
-  { value: "ADD", label: "ADD" },
-  { value: "HIGHEST_ONLY", label: "HIGHEST_ONLY" }
+  { value: "ADD", label: "Combine all premiums" },
+  { value: "HIGHEST_ONLY", label: "Use highest premium only" }
 ];
 
 const WEEK_START_OPTIONS: readonly SegmentedControlOption<PayPolicyWeekday>[] =
@@ -57,45 +73,169 @@ const WEEK_START_OPTIONS: readonly SegmentedControlOption<PayPolicyWeekday>[] =
 export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps) {
   const { authenticatedRequest, user } = useAuth();
   const [policy, setPolicy] = useState<PayPolicy | null>(null);
+  const [companySettings, setCompanySettings] = useState<CompanySettingsResponse | null>(null);
   const [editor, setEditor] = useState<PayPolicyEditorState>({
     form: null,
     fieldErrors: {}
   });
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [visualLoadMode, setVisualLoadMode] = useState<VisualLoadMode>("blocking");
+  const [freshnessState, setFreshnessState] = useState<FreshnessState>("required-pending");
+  const [saveTransportInFlight, setSaveTransportInFlight] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const operationSequenceRef = useRef(0);
+  const activeOperationRef = useRef<PayPolicyOperation | null>(null);
+  const focusedRef = useRef(false);
+  const focusGenerationRef = useRef(0);
+  const hasCoherentPairRef = useRef(false);
+  const freshnessRef = useRef<FreshnessState>("required-pending");
+  const loadTransportSequencesRef = useRef(new Set<number>());
+  const saveInFlightRef = useRef(false);
+  const queuedLoadRef = useRef<QueuedPayPolicyLoad | null>(null);
+  const savedPolicyVersionRef = useRef<number | null>(null);
   const { form, fieldErrors } = editor;
+  const editingDisabled =
+    saveTransportInFlight || freshnessState !== "current" || !isFocused;
 
-  const loadPolicy = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
+  const loadPolicy = useCallback(async (requestedRequired = false) => {
+    if (!focusedRef.current) return;
+
+    const focusGeneration = focusGenerationRef.current;
+    const requiredFreshness =
+      requestedRequired || freshnessRef.current !== "current";
+    const blockingVisual = !hasCoherentPairRef.current;
+
+    if (requiredFreshness) {
+      freshnessRef.current = "required-pending";
+      setFreshnessState("required-pending");
+    }
+
+    if (saveInFlightRef.current) {
+      const queuedLoad = queuedLoadRef.current;
+      queuedLoadRef.current = {
+        focusGeneration,
+        required:
+          queuedLoad?.focusGeneration === focusGeneration
+            ? queuedLoad.required || requiredFreshness
+            : requiredFreshness
+      };
+      if (blockingVisual) {
+        setVisualLoadMode("blocking");
+        setLoadError(null);
+      } else {
+        setVisualLoadMode("refreshing");
+        setRefreshError(null);
+      }
+      return;
+    }
+
+    const operation: PayPolicyOperation = {
+      sequence: ++operationSequenceRef.current,
+      type: "load",
+      focusGeneration
+    };
+
+    activeOperationRef.current = operation;
+    loadTransportSequencesRef.current.add(operation.sequence);
+    setSaveTransportInFlight(saveInFlightRef.current);
+    if (blockingVisual) {
+      setVisualLoadMode("blocking");
+      setLoadError(null);
+    } else {
+      setVisualLoadMode("refreshing");
+      setRefreshError(null);
+    }
 
     try {
-      const nextPolicy = await authenticatedRequest((token) => getMyPayPolicy(token));
+      const [nextPolicy, nextCompanySettings] = await authenticatedRequest((token) =>
+        Promise.all([getMyPayPolicy(token), getMyCompany(token)])
+      );
+      if (
+        activeOperationRef.current !== operation ||
+        operation.sequence !== operationSequenceRef.current ||
+        operation.focusGeneration !== focusGenerationRef.current ||
+        !focusedRef.current
+      ) return;
+      hasCoherentPairRef.current = true;
+      if (requiredFreshness) {
+        freshnessRef.current = "current";
+        setFreshnessState("current");
+      }
       setPolicy(nextPolicy);
+      setCompanySettings(nextCompanySettings);
       setEditor({
         form: hydratePayPolicyForm(nextPolicy),
         fieldErrors: {}
       });
-      setSaveError(null);
-      setSavedMessage(null);
+      setLoadError(null);
+      setRefreshError(null);
+      if (
+        savedPolicyVersionRef.current !== null &&
+        savedPolicyVersionRef.current !== nextPolicy.version
+      ) {
+        savedPolicyVersionRef.current = null;
+        setSavedMessage(null);
+      }
     } catch {
-      setLoadError("Could not load pay rules. Check your connection and try again.");
+      if (
+        activeOperationRef.current !== operation ||
+        operation.sequence !== operationSequenceRef.current ||
+        operation.focusGeneration !== focusGenerationRef.current ||
+        !focusedRef.current
+      ) return;
+      if (blockingVisual) {
+        setLoadError("Could not load pay rules. Check your connection and try again.");
+      } else {
+        setRefreshError("Existing policy and company settings are still shown.");
+      }
+      if (requiredFreshness) {
+        freshnessRef.current = "required-failed";
+        setFreshnessState("required-failed");
+      }
     } finally {
-      setLoading(false);
+      loadTransportSequencesRef.current.delete(operation.sequence);
+      if (
+        activeOperationRef.current !== operation ||
+        operation.sequence !== operationSequenceRef.current ||
+        operation.focusGeneration !== focusGenerationRef.current ||
+        !focusedRef.current
+      ) return;
+      activeOperationRef.current = null;
+      setSaveTransportInFlight(saveInFlightRef.current);
+      setVisualLoadMode("idle");
     }
   }, [authenticatedRequest]);
 
   useFocusEffect(
     useCallback(() => {
-      void loadPolicy();
-      return undefined;
+      const focusGeneration = ++focusGenerationRef.current;
+      focusedRef.current = true;
+      setIsFocused(true);
+      setSaveTransportInFlight(saveInFlightRef.current);
+      void loadPolicy(true);
+      return () => {
+        if (focusGeneration !== focusGenerationRef.current) return;
+        focusedRef.current = false;
+        setIsFocused(false);
+        queuedLoadRef.current = null;
+        operationSequenceRef.current += 1;
+        activeOperationRef.current = null;
+      };
     }, [loadPolicy])
   );
 
   const updateForm = (updater: (current: PayPolicyForm) => PayPolicyForm) => {
+    if (
+      !focusedRef.current ||
+      saveInFlightRef.current ||
+      freshnessRef.current !== "current"
+    ) {
+      return;
+    }
+
     setEditor((current) => {
       if (!current.form) {
         return current;
@@ -113,6 +253,7 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
     });
     setSaveError(null);
     setSavedMessage(null);
+    savedPolicyVersionRef.current = null;
   };
 
   const updateRule = (index: number, rule: PayPolicyRuleForm) => {
@@ -125,7 +266,12 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
   };
 
   const handleSave = () => {
-    if (!form || saving) {
+    if (
+      !form ||
+      saveInFlightRef.current ||
+      freshnessRef.current !== "current" ||
+      !focusedRef.current
+    ) {
       return;
     }
 
@@ -138,13 +284,30 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
     }
 
     const payload = serializePayPolicyForm(form);
-    setSaving(true);
+    const operation: PayPolicyOperation = {
+      sequence: ++operationSequenceRef.current,
+      type: "save",
+      focusGeneration: focusGenerationRef.current
+    };
+    activeOperationRef.current = operation;
+    saveInFlightRef.current = true;
+    setSaveTransportInFlight(true);
+    setVisualLoadMode("idle");
+    setRefreshError(null);
     setEditor((current) => ({ ...current, fieldErrors: {} }));
     setSaveError(null);
     setSavedMessage(null);
+    savedPolicyVersionRef.current = null;
 
     void authenticatedRequest((token) => updateMyPayPolicy(token, payload))
       .then((updatedPolicy) => {
+        if (
+          activeOperationRef.current !== operation ||
+          operation.sequence !== operationSequenceRef.current ||
+          operation.focusGeneration !== focusGenerationRef.current ||
+          !focusedRef.current
+        ) return;
+        hasCoherentPairRef.current = true;
         setPolicy(updatedPolicy);
         setEditor({
           form: hydratePayPolicyForm(updatedPolicy),
@@ -153,17 +316,58 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
         setSavedMessage(
           `Version ${updatedPolicy.version} is now current. Earlier versions remain unchanged.`
         );
+        savedPolicyVersionRef.current = updatedPolicy.version;
       })
       .catch((caughtError) => {
+        if (
+          activeOperationRef.current !== operation ||
+          operation.sequence !== operationSequenceRef.current ||
+          operation.focusGeneration !== focusGenerationRef.current ||
+          !focusedRef.current
+        ) return;
         const mappedError = mapPayPolicySaveError(caughtError, form);
         setEditor((current) => ({
           ...current,
           fieldErrors: mappedError.fieldErrors
         }));
-        setSaveError(mappedError.generalError ?? "Review the highlighted field.");
+        const fieldErrorDetails = Object.entries(mappedError.fieldErrors)
+          .map(([path, message]) => `${path}: ${message}`)
+          .join(" ");
+        setSaveError(
+          mappedError.generalError ??
+            (fieldErrorDetails
+              ? `Could not save pay rules: ${fieldErrorDetails}`
+              : "Could not save pay rules. Review the form and try again.")
+        );
       })
       .finally(() => {
-        setSaving(false);
+        const isCurrentFocusedOperation =
+          activeOperationRef.current === operation &&
+          operation.sequence === operationSequenceRef.current &&
+          operation.focusGeneration === focusGenerationRef.current &&
+          focusedRef.current;
+        saveInFlightRef.current = false;
+
+        if (isCurrentFocusedOperation) {
+          activeOperationRef.current = null;
+          setSaveTransportInFlight(false);
+        }
+
+        const queuedLoad = queuedLoadRef.current;
+        if (!focusedRef.current) {
+          if (queuedLoad?.focusGeneration === operation.focusGeneration) {
+            queuedLoadRef.current = null;
+          }
+          return;
+        }
+
+        if (
+          queuedLoad?.focusGeneration === focusGenerationRef.current &&
+          activeOperationRef.current === null
+        ) {
+          queuedLoadRef.current = null;
+          void loadPolicy(queuedLoad.required);
+        }
       });
   };
 
@@ -172,7 +376,7 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
       <Screen>
         <View style={styles.container}>
           <View style={styles.header}>
-            <Text style={styles.kicker}>Foreman settings</Text>
+            <Text style={styles.kicker}>Company settings</Text>
             <Text style={styles.title}>Pay rules</Text>
           </View>
           <StateMessage
@@ -180,7 +384,7 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
             message="Create your company before configuring pay rules."
             tone="error"
           />
-          <Button label="Back to dashboard" onPress={navigation.goBack} variant="ghost" />
+          <Button label="Back to company settings" onPress={navigation.goBack} variant="ghost" />
         </View>
       </Screen>
     );
@@ -190,24 +394,24 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
     <Screen>
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.kicker}>Foreman settings</Text>
+          <Text style={styles.kicker}>Company settings</Text>
           <Text style={styles.title}>Pay rules</Text>
           <Text style={styles.subtitle}>
             Configure percentage premiums. Pay results are calculated by the backend.
           </Text>
         </View>
 
-        {loading ? (
+        {visualLoadMode === "blocking" ? (
           <StateMessage loading title="Loading pay rules" message="Fetching current policy." />
-        ) : loadError || !form || !policy ? (
+        ) : loadError || !form || !policy || !companySettings ? (
           <View style={styles.stateBlock}>
             <StateMessage
               title="Could not load pay rules"
               message={loadError ?? "The current policy was unavailable."}
               tone="error"
             />
-            <Button label="Retry" onPress={() => void loadPolicy()} variant="secondary" />
-            <Button label="Back to dashboard" onPress={navigation.goBack} variant="ghost" />
+            <Button label="Retry" onPress={() => void loadPolicy(true)} variant="secondary" />
+            <Button label="Back to company settings" onPress={navigation.goBack} variant="ghost" />
           </View>
         ) : (
           <>
@@ -223,6 +427,27 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
             {saveError ? (
               <StateMessage title="Could not save pay rules" message={saveError} tone="error" />
             ) : null}
+            {visualLoadMode === "refreshing" ? (
+              <StateMessage
+                loading
+                title="Refreshing pay rules"
+                message="Checking for the latest policy and company settings."
+              />
+            ) : null}
+            {refreshError ? (
+              <StateMessage
+                title="Could not refresh pay rules"
+                message={refreshError}
+                tone="error"
+              />
+            ) : null}
+            {freshnessState === "required-failed" ? (
+              <Button
+                label="Retry refresh"
+                onPress={() => void loadPolicy(true)}
+                variant="secondary"
+              />
+            ) : null}
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Policy settings</Text>
@@ -231,7 +456,7 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
                 <Text style={styles.fieldLabel}>Week starts on</Text>
                 <SegmentedControl
                   accessibilityLabel="Week starts on"
-                  disabled={saving}
+                  disabled={editingDisabled}
                   onChange={(weekStartsOn) => {
                     updateForm((current) => ({ ...current, weekStartsOn }));
                   }}
@@ -239,6 +464,9 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
                   value={form.weekStartsOn}
                   wrap
                 />
+                <Text style={styles.helpText}>
+                  Weekly overtime resets at the selected week start in the company timezone.
+                </Text>
                 {fieldErrors.weekStartsOn ? (
                   <Text style={styles.error}>{fieldErrors.weekStartsOn}</Text>
                 ) : null}
@@ -248,7 +476,7 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
                 <Text style={styles.fieldLabel}>Stacking strategy</Text>
                 <SegmentedControl
                   accessibilityLabel="Stacking strategy"
-                  disabled={saving}
+                  disabled={editingDisabled}
                   onChange={(stackingStrategy) => {
                     updateForm((current) => ({ ...current, stackingStrategy }));
                   }}
@@ -256,8 +484,8 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
                   value={form.stackingStrategy}
                 />
                 <Text style={styles.helpText}>
-                  ADD combines matching premiums. HIGHEST_ONLY uses the largest matching
-                  premium.
+                  Combine all premiums adds every matching premium. Use highest premium only
+                  applies just the largest matching premium.
                 </Text>
                 {fieldErrors.stackingStrategy ? (
                   <Text style={styles.error}>{fieldErrors.stackingStrategy}</Text>
@@ -274,7 +502,7 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
                   </Text>
                 </View>
                 <Button
-                  disabled={saving}
+                  disabled={editingDisabled}
                   label="Add rule"
                   onPress={() => {
                     updateForm((current) => ({
@@ -295,7 +523,7 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
                 <View style={styles.ruleList}>
                   {form.rules.map((rule, index) => (
                     <PayPolicyRuleEditor
-                      disabled={saving}
+                      disabled={editingDisabled}
                       errors={fieldErrors}
                       index={index}
                       key={rule.clientId}
@@ -310,6 +538,9 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
                           )
                         }));
                       }}
+                      onOpenCompanySettings={navigation.goBack}
+                      companyDefaultWorkerHourlyRate={companySettings?.defaultWorkerHourlyRate ?? null}
+                      currencyLabel={companySettings?.currencyLabel ?? null}
                       rule={rule}
                     />
                   ))}
@@ -318,16 +549,20 @@ export function ForemanPayRulesScreen({ navigation }: ForemanPayRulesScreenProps
             </View>
 
             <View style={styles.actions}>
-              <Button label="Save as new version" loading={saving} onPress={handleSave} />
               <Button
-                disabled={saving}
+                disabled={editingDisabled}
+                label="Save as new version"
+                loading={saveTransportInFlight}
+                onPress={handleSave}
+              />
+              <Button
+                disabled={false}
                 label="Reload current policy"
                 onPress={() => void loadPolicy()}
                 variant="secondary"
               />
               <Button
-                disabled={saving}
-                label="Back to dashboard"
+                label="Back to company settings"
                 onPress={navigation.goBack}
                 variant="ghost"
               />

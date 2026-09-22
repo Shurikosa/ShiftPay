@@ -15,7 +15,7 @@ import type { ForemanStackParamList } from "../types/navigation";
 import type { ShiftSummary } from "../types/shifts";
 import {
   formatAuditDecimal,
-  formatMoney,
+  formatMoneyWithCurrencyLabel,
   formatMinutes,
   formatRate
 } from "../utils/format";
@@ -98,14 +98,14 @@ export function ShiftSummaryScreen({ navigation, route }: ShiftSummaryScreenProp
 
             <View style={styles.panel}>
               <DetailRow label="Total workers" value={String(summary.totalWorkers)} />
-              <DetailRow label="Total worker salary" value={formatMoney(summary.totalSalary)} />
+              <DetailRow label="Total worker salary" value={formatMoneyWithCurrencyLabel(summary.totalSalary, summary.currencyLabel)} />
               <DetailRow
                 label="Total base amount (audit)"
-                value={formatAuditDecimal(summary.totalBaseAmount)}
+                value={`${formatAuditDecimal(summary.totalBaseAmount)} ${summary.currencyLabel ?? "currency unavailable"}`}
               />
               <DetailRow
                 label="Total premium amount (audit)"
-                value={formatAuditDecimal(summary.totalPremiumAmount)}
+                value={`${formatAuditDecimal(summary.totalPremiumAmount)} ${summary.currencyLabel ?? "currency unavailable"}`}
               />
             </View>
             <Text style={styles.auditNote}>
@@ -133,11 +133,11 @@ export function ShiftSummaryScreen({ navigation, route }: ShiftSummaryScreenProp
                   {summary.foremanHourlyRate !== undefined ? (
                     <DetailRow
                       label="Hourly rate"
-                      value={formatRate(summary.foremanHourlyRate)}
+                      value={`${formatRate(summary.foremanHourlyRate)} ${summary.currencyLabel ?? "currency unavailable"}`}
                     />
                   ) : null}
                   {summary.foremanSalary !== undefined ? (
-                    <DetailRow label="Salary" value={formatMoney(summary.foremanSalary)} />
+                    <DetailRow label="Salary" value={formatMoneyWithCurrencyLabel(summary.foremanSalary, summary.currencyLabel)} />
                   ) : null}
                 </View>
               </View>
@@ -163,12 +163,13 @@ export function ShiftSummaryScreen({ navigation, route }: ShiftSummaryScreenProp
                           label="Pause time"
                           value={formatPauseMinutes(worker.pauseMinutes)}
                         />
-                        <DetailRow label="Hourly rate" value={formatRate(worker.hourlyRate)} />
-                        <DetailRow label="Salary" value={formatMoney(worker.salary)} />
+                        <DetailRow label="Hourly rate" value={`${formatRate(worker.hourlyRate)} ${summary.currencyLabel ?? "currency unavailable"}`} />
+                        <DetailRow label="Salary" value={formatMoneyWithCurrencyLabel(worker.salary, summary.currencyLabel)} />
                       </View>
                       {worker.payCalculation ? (
                         <PayCalculationBreakdown
                           calculation={worker.payCalculation}
+                          currencyLabel={summary.currencyLabel}
                         />
                       ) : (
                         <StateMessage

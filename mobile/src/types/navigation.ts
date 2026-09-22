@@ -20,6 +20,9 @@ export type WorkerStackParamList = {
 
 export type ForemanStackParamList = {
   ForemanDashboard: undefined;
+  ForemanCompanySettings: {
+    notice?: string;
+  } | undefined;
   ForemanPayRules: undefined;
   CreateShift: undefined;
   ForemanPayrollRequests: undefined;

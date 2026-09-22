@@ -1,7 +1,9 @@
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
-import { getErrorMessage } from "../api/errors";
+import { getMyCompany } from "../api/companies";
+import { ApiError, getErrorMessage } from "../api/errors";
 import { createShift } from "../api/shifts";
 import { Button } from "../components/Button";
 import { FormField } from "../components/FormField";
@@ -10,6 +12,7 @@ import { StateMessage } from "../components/StateMessage";
 import { useAuth } from "../context/AuthContext";
 import { useForemanManagedShifts } from "../hooks/useForemanManagedShifts";
 import type { ForemanStackParamList } from "../types/navigation";
+import type { CompanySettingsResponse } from "../types/company";
 import { colors, spacing, typography } from "../utils/theme";
 
 type CreateShiftScreenProps = NativeStackScreenProps<
@@ -23,6 +26,11 @@ type CreateShiftErrors = {
   foremanHourlyRate?: string;
 };
 
+type RateOverride =
+  | { state: "empty" }
+  | { state: "valid"; value: number }
+  | { state: "invalid" };
+
 function parseNumber(value: string): number | null {
   const normalized = value.trim().replace(",", ".");
 
@@ -32,6 +40,19 @@ function parseNumber(value: string): number | null {
 
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseRateOverride(value: string): RateOverride {
+  const normalized = value.trim().replace(",", ".");
+  if (normalized.length === 0) return { state: "empty" };
+  if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return { state: "invalid" };
+
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < 0 || /^\d{11,}/.test(normalized)) {
+    return { state: "invalid" };
+  }
+
+  return { state: "valid", value: parsed };
 }
 
 function parseInteger(value: string): number | null {
@@ -51,37 +72,77 @@ export function CreateShiftScreen({ navigation }: CreateShiftScreenProps) {
   const [defaultBreakMinutes, setDefaultBreakMinutes] = useState("");
   const [defaultHourlyRate, setDefaultHourlyRate] = useState("");
   const [foremanHourlyRate, setForemanHourlyRate] = useState("");
+  const [companySettings, setCompanySettings] = useState<CompanySettingsResponse | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(true);
   const [errors, setErrors] = useState<CreateShiftErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadSequenceRef = useRef(0);
+  const workerRateEditedRef = useRef(false);
+  const foremanRateEditedRef = useRef(false);
+
+  const loadSettings = useCallback(async () => {
+    const sequence = ++loadSequenceRef.current;
+    setSettingsLoading(true);
+    try {
+      const settings = await authenticatedRequest((token) => getMyCompany(token));
+      if (sequence !== loadSequenceRef.current) return;
+      if (settings.currencyLabel === null) {
+        navigation.replace("ForemanCompanySettings", {
+          notice: "Company currency label must be configured before creating a shift."
+        });
+        return;
+      }
+      setCompanySettings(settings);
+      if (!workerRateEditedRef.current && settings.defaultWorkerHourlyRate !== null) {
+        setDefaultHourlyRate(String(settings.defaultWorkerHourlyRate));
+      }
+      if (!foremanRateEditedRef.current && settings.defaultForemanHourlyRate !== null) {
+        setForemanHourlyRate(String(settings.defaultForemanHourlyRate));
+      }
+    } catch (caughtError) {
+      if (sequence === loadSequenceRef.current) setError(getErrorMessage(caughtError));
+    } finally {
+      if (sequence === loadSequenceRef.current) setSettingsLoading(false);
+    }
+  }, [authenticatedRequest, navigation]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadSettings();
+      return () => {
+        loadSequenceRef.current += 1;
+      };
+    }, [loadSettings])
+  );
 
   const validate = (): {
     valid: boolean;
     breakMinutes?: number;
-    defaultRate: number;
-    foremanRate: number;
+    defaultRate: number | null;
+    foremanRate: number | null;
   } => {
     const nextErrors: CreateShiftErrors = {};
     const trimmedBreakMinutes = defaultBreakMinutes.trim();
     const breakMinutes =
       trimmedBreakMinutes.length === 0 ? undefined : parseInteger(defaultBreakMinutes);
-    const defaultRate = parseNumber(defaultHourlyRate);
-    const foremanRate = parseNumber(foremanHourlyRate);
+    const defaultRate = parseRateOverride(defaultHourlyRate);
+    const foremanRate = parseRateOverride(foremanHourlyRate);
 
     if (breakMinutes === null || (breakMinutes !== undefined && breakMinutes < 0)) {
       nextErrors.defaultBreakMinutes = "Enter a whole number 0 or greater.";
     }
 
-    if (defaultRate === null || defaultRate < 0) {
-      nextErrors.defaultHourlyRate = "Enter a rate 0 or greater.";
-    } else if (!/^\d+([.,]\d{1,2})?$/.test(defaultHourlyRate.trim())) {
-      nextErrors.defaultHourlyRate = "Use up to two decimal places.";
+    if (defaultRate.state === "invalid") {
+      nextErrors.defaultHourlyRate = "Use a non-negative rate with up to two decimal places.";
+    } else if (defaultRate.state === "empty" && companySettings?.defaultWorkerHourlyRate === null) {
+      nextErrors.defaultHourlyRate = "Enter a worker rate or set a company default.";
     }
 
-    if (foremanRate === null || foremanRate < 0) {
-      nextErrors.foremanHourlyRate = "Enter a rate 0 or greater.";
-    } else if (!/^\d+([.,]\d{1,2})?$/.test(foremanHourlyRate.trim())) {
-      nextErrors.foremanHourlyRate = "Use up to two decimal places.";
+    if (foremanRate.state === "invalid") {
+      nextErrors.foremanHourlyRate = "Use a non-negative rate with up to two decimal places.";
+    } else if (foremanRate.state === "empty" && companySettings?.defaultForemanHourlyRate === null) {
+      nextErrors.foremanHourlyRate = "Enter a foreman rate or set a company default.";
     }
 
     setErrors(nextErrors);
@@ -89,14 +150,19 @@ export function CreateShiftScreen({ navigation }: CreateShiftScreenProps) {
     return {
       valid: Object.keys(nextErrors).length === 0,
       breakMinutes: breakMinutes ?? undefined,
-      defaultRate: defaultRate ?? 0,
-      foremanRate: foremanRate ?? 0
+      defaultRate: defaultRate.state === "valid" ? defaultRate.value : null,
+      foremanRate: foremanRate.state === "valid" ? foremanRate.value : null
     };
   };
 
   const handleSubmit = () => {
     if (!user?.company) {
       setError("Create your company before creating shifts.");
+      return;
+    }
+
+    if (!companySettings) {
+      setError("Company settings are still loading. Try again in a moment.");
       return;
     }
 
@@ -114,8 +180,8 @@ export function CreateShiftScreen({ navigation }: CreateShiftScreenProps) {
       ...(result.breakMinutes === undefined
         ? {}
         : { defaultBreakMinutes: result.breakMinutes }),
-      defaultHourlyRate: result.defaultRate,
-      foremanHourlyRate: result.foremanRate
+      ...(result.defaultRate === null ? {} : { defaultHourlyRate: result.defaultRate }),
+      ...(result.foremanRate === null ? {} : { foremanHourlyRate: result.foremanRate })
     };
 
     void authenticatedRequest((token) =>
@@ -128,6 +194,14 @@ export function CreateShiftScreen({ navigation }: CreateShiftScreenProps) {
         });
       })
       .catch((caughtError) => {
+        if (
+          caughtError instanceof ApiError &&
+          caughtError.status === 409 &&
+          getErrorMessage(caughtError).includes("currency label must be configured")
+        ) {
+          navigation.replace("ForemanCompanySettings", { notice: getErrorMessage(caughtError) });
+          return;
+        }
         setError(getErrorMessage(caughtError));
       })
       .finally(() => {
@@ -172,6 +246,7 @@ export function CreateShiftScreen({ navigation }: CreateShiftScreenProps) {
           <Text style={styles.subtitle}>Set worker and foreman rates for this shift.</Text>
         </View>
 
+        {settingsLoading ? <StateMessage loading title="Loading company settings" message="Fetching rate defaults." /> : null}
         {error ? <StateMessage title="Could not create shift" message={error} tone="error" /> : null}
 
         <View style={styles.form}>
@@ -195,8 +270,11 @@ export function CreateShiftScreen({ navigation }: CreateShiftScreenProps) {
             error={errors.defaultHourlyRate}
             inputMode="decimal"
             keyboardType="decimal-pad"
-            label="Default hourly rate"
-            onChangeText={setDefaultHourlyRate}
+            label={`Default hourly rate (${companySettings?.currencyLabel ?? "currency unavailable"})`}
+            onChangeText={(value) => {
+              workerRateEditedRef.current = true;
+              setDefaultHourlyRate(value);
+            }}
             placeholder="15.00"
             value={defaultHourlyRate}
           />
@@ -204,8 +282,11 @@ export function CreateShiftScreen({ navigation }: CreateShiftScreenProps) {
             error={errors.foremanHourlyRate}
             inputMode="decimal"
             keyboardType="decimal-pad"
-            label="Foreman hourly rate"
-            onChangeText={setForemanHourlyRate}
+            label={`Foreman hourly rate (${companySettings?.currencyLabel ?? "currency unavailable"})`}
+            onChangeText={(value) => {
+              foremanRateEditedRef.current = true;
+              setForemanHourlyRate(value);
+            }}
             placeholder="25.00"
             value={foremanHourlyRate}
           />

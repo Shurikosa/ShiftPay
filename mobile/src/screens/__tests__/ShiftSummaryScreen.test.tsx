@@ -129,7 +129,8 @@ function summaryFixture(overrides: Partial<ShiftSummary> = {}): ShiftSummary {
     foremanHourlyRate: 25,
     foremanSalary: 196.88,
     workers: [workerFixture()],
-    ...overrides
+    ...overrides,
+    currencyLabel: overrides.currencyLabel ?? "EUR"
   };
 }
 

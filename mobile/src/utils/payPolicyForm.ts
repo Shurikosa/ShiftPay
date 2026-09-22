@@ -30,6 +30,9 @@ export type DailyOvertimeRuleForm = PayPolicyRuleFormBase<
   "DAILY_OVERTIME",
   {
     thresholdMinutes: string;
+    thresholdHours: string;
+    /** Loaded minutes remain authoritative until the displayed hours are edited. */
+    thresholdHoursEdited?: boolean;
   }
 >;
 
@@ -37,6 +40,8 @@ export type WeeklyOvertimeRuleForm = PayPolicyRuleFormBase<
   "WEEKLY_OVERTIME",
   {
     thresholdMinutes: string;
+    thresholdHours: string;
+    thresholdHoursEdited?: boolean;
   }
 >;
 
@@ -86,6 +91,7 @@ interface ChangedFieldPaths {
 }
 
 let nextClientId = 0;
+const MAX_THRESHOLD_MINUTES = 2_147_483_647n;
 
 function createClientId(prefix: string): string {
   nextClientId += 1;
@@ -94,6 +100,31 @@ function createClientId(prefix: string): string {
 
 function numberInputValue(value: number): string {
   return String(value);
+}
+
+export function formatThresholdHours(minutes: number): string {
+  return String(minutes / 60);
+}
+
+/** Parses editable hours only when they represent an in-range whole-minute API value. */
+export function parseThresholdHours(value: string): number | null {
+  const normalized = value.trim().replace(",", ".");
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(normalized);
+  if (!match) return null;
+
+  // Decimal input is a rational number, not a binary floating-point value.
+  // This makes 8.2 × 60 exactly 492 and rejects true fractional minutes
+  // without an arbitrary tolerance.
+  const whole = match[1] ?? "";
+  const fraction = match[2] ?? "";
+  const numerator = BigInt(`${whole}${fraction}`);
+  const denominator = 10n ** BigInt(fraction.length);
+  const minuteNumerator = numerator * 60n;
+
+  if (minuteNumerator % denominator !== 0n) return null;
+
+  const minutes = minuteNumerator / denominator;
+  return minutes >= 1n && minutes <= MAX_THRESHOLD_MINUTES ? Number(minutes) : null;
 }
 
 function ruleBase(rule: PayPolicyRule, index: number) {
@@ -124,7 +155,9 @@ function toRuleForm(rule: PayPolicyRule, index: number): PayPolicyRuleForm {
         ...base,
         type: rule.type,
         condition: {
-          thresholdMinutes: numberInputValue(rule.condition.thresholdMinutes)
+          thresholdMinutes: numberInputValue(rule.condition.thresholdMinutes),
+          thresholdHours: formatThresholdHours(rule.condition.thresholdMinutes),
+          thresholdHoursEdited: false
         }
       };
     case "DAY_OF_WEEK":
@@ -184,7 +217,9 @@ export function createEmptyPayPolicyRule(
         ...base,
         type,
         condition: {
-          thresholdMinutes: ""
+          thresholdMinutes: "",
+          thresholdHours: "",
+          thresholdHoursEdited: true
         }
       };
     case "DAY_OF_WEEK":
@@ -279,8 +314,8 @@ function parseThresholdMinutes(value: string): number | null {
     return null;
   }
 
-  const parsed = Number(normalized);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  const parsed = BigInt(normalized);
+  return parsed >= 1n && parsed <= MAX_THRESHOLD_MINUTES ? Number(parsed) : null;
 }
 
 function validateTimeOfDayRule(
@@ -309,9 +344,13 @@ function validateOvertimeRule(
   path: string,
   errors: PayPolicyFormErrors
 ): void {
-  if (parseThresholdMinutes(rule.condition.thresholdMinutes) === null) {
+  const minutes = rule.condition.thresholdHoursEdited !== true
+    ? parseThresholdMinutes(rule.condition.thresholdMinutes)
+    : parseThresholdHours(rule.condition.thresholdHours);
+
+  if (minutes === null) {
     errors[`${path}.condition.thresholdMinutes`] =
-      "Enter a threshold greater than zero in whole minutes.";
+      "Enter hours from 1 through 2147483647 minutes with no fractional minutes.";
   }
 }
 
@@ -397,7 +436,10 @@ function serializeRule(rule: PayPolicyRuleForm): UpdatePayPolicyRule {
         ...base,
         type: rule.type,
         condition: {
-          thresholdMinutes: parseThresholdMinutes(rule.condition.thresholdMinutes) ?? 0
+          thresholdMinutes:
+            rule.condition.thresholdHoursEdited !== true
+              ? parseThresholdMinutes(rule.condition.thresholdMinutes) ?? 0
+              : parseThresholdHours(rule.condition.thresholdHours) ?? 0
         }
       };
     case "DAY_OF_WEEK":
@@ -443,7 +485,7 @@ function conditionPathExists(rule: PayPolicyRuleForm, suffix: string): boolean {
       return suffix === "condition.startTime" || suffix === "condition.endTime";
     case "DAILY_OVERTIME":
     case "WEEKLY_OVERTIME":
-      return suffix === "condition.thresholdMinutes";
+      return suffix === "condition.thresholdMinutes" || suffix === "condition.thresholdHours";
     case "DAY_OF_WEEK":
       return suffix === "condition.weekdays";
     case "HOLIDAY": {
@@ -632,8 +674,9 @@ function collectChangedFieldPaths(
         case "WEEKLY_OVERTIME":
           if (
             nextRule.type === previousRule.type &&
-            previousRule.condition.thresholdMinutes !==
-              nextRule.condition.thresholdMinutes
+            (previousRule.condition.thresholdMinutes !== nextRule.condition.thresholdMinutes ||
+              previousRule.condition.thresholdHours !== nextRule.condition.thresholdHours ||
+              previousRule.condition.thresholdHoursEdited !== nextRule.condition.thresholdHoursEdited)
           ) {
             markConditionField("thresholdMinutes");
           }

@@ -61,9 +61,9 @@ export function ForemanDashboardScreen({ navigation }: ForemanDashboardScreenPro
         />
         <Button
           disabled={!company}
-          label="Pay rules"
+          label="Company settings"
           onPress={() => {
-            navigation.navigate("ForemanPayRules");
+            navigation.navigate("ForemanCompanySettings");
           }}
           variant="secondary"
         />

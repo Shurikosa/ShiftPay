@@ -17,6 +17,7 @@ function requestWithForbiddenDetailFields(): PayoutRequestWithDetailedSnapshots 
     id: 900,
     companyId: 10,
     companyName: "Acme Construction",
+    currencyLabel: "EUR",
     workerId: 1,
     workerFirstName: "John",
     workerLastName: "Worker",

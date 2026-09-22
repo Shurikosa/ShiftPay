@@ -11,6 +11,7 @@ export interface PayableAttendance {
   shiftId: number;
   companyId: number;
   companyName: string;
+  currencyLabel: string | null;
   title: string;
   location: string | null;
   actualStartTime: string | null;
@@ -54,6 +55,7 @@ export interface PayoutRequestTotals {
 }
 
 export interface PayoutRequestPreview extends PayoutRequestTotals {
+  currencyLabel: string;
   items: PayoutRequestItem[];
 }
 
@@ -61,6 +63,7 @@ export interface PayoutRequest extends PayoutRequestTotals {
   id: number;
   companyId: number;
   companyName: string;
+  currencyLabel: string | null;
   workerId: number;
   workerFirstName: string;
   workerLastName: string;

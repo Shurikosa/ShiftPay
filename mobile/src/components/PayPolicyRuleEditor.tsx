@@ -5,10 +5,12 @@ import {
   changePayPolicyRuleType,
   createEmptyHolidayDate,
   isZeroPremiumPercent,
+  parseThresholdHours,
   type HolidayRuleForm,
   type PayPolicyFormErrors,
   type PayPolicyRuleForm
 } from "../utils/payPolicyForm";
+import { trimCurrencyLabelBoundaries } from "../utils/companySettings";
 import { colors, radii, spacing, typography } from "../utils/theme";
 import { Button } from "./Button";
 import { FormField } from "./FormField";
@@ -33,10 +35,13 @@ const WEEKDAY_LABELS: Record<PayPolicyWeekday, string> = {
 };
 
 interface PayPolicyRuleEditorProps {
+  companyDefaultWorkerHourlyRate: number | null;
+  currencyLabel: string | null;
   disabled?: boolean;
   errors: PayPolicyFormErrors;
   index: number;
   onChange: (rule: PayPolicyRuleForm) => void;
+  onOpenCompanySettings?: () => void;
   onRemove: () => void;
   rule: PayPolicyRuleForm;
 }
@@ -61,14 +66,30 @@ function updateHolidayDate(
 }
 
 export function PayPolicyRuleEditor({
+  companyDefaultWorkerHourlyRate,
+  currencyLabel,
   disabled = false,
   errors,
   index,
   onChange,
+  onOpenCompanySettings,
   onRemove,
   rule
 }: PayPolicyRuleEditorProps) {
   const path = `rules[${index}]`;
+  const normalizedPremiumPercent = rule.premiumPercent.trim().replace(",", ".");
+  const premiumPercent = Number(normalizedPremiumPercent);
+  const validPremiumPercent =
+    /^\d+(?:\.\d{1,4})?$/.test(normalizedPremiumPercent) &&
+    Number.isFinite(premiumPercent) &&
+    premiumPercent >= 0 &&
+    premiumPercent <= 1000;
+  const canShowPreview =
+    companyDefaultWorkerHourlyRate !== null &&
+    Number.isFinite(companyDefaultWorkerHourlyRate) &&
+    currencyLabel !== null &&
+    trimCurrencyLabelBoundaries(currencyLabel).length > 0 &&
+    validPremiumPercent;
 
   const renderCondition = () => {
     switch (rule.type) {
@@ -109,28 +130,42 @@ export function PayPolicyRuleEditor({
           </View>
         );
       case "DAILY_OVERTIME":
-      case "WEEKLY_OVERTIME":
+      case "WEEKLY_OVERTIME": {
         return (
-          <FormField
-            editable={!disabled}
-            error={errors[`${path}.condition.thresholdMinutes`]}
-            inputMode="numeric"
-            keyboardType="number-pad"
-            label="Threshold minutes"
-            onChangeText={(thresholdMinutes) => {
-              onChange({
-                ...rule,
-                condition: { thresholdMinutes }
-              });
-            }}
-            placeholder={rule.type === "DAILY_OVERTIME" ? "480" : "2400"}
-            value={rule.condition.thresholdMinutes}
-          />
+          <View style={styles.conditionFields}>
+            <FormField
+              editable={!disabled}
+              error={errors[`${path}.condition.thresholdMinutes`]}
+              inputMode="decimal"
+              keyboardType="decimal-pad"
+              label="Threshold hours"
+              onChangeText={(hours) => {
+                const minutes = parseThresholdHours(hours);
+                onChange({
+                  ...rule,
+                  condition: {
+                    thresholdHours: hours,
+                    thresholdMinutes: minutes === null ? "" : String(minutes),
+                    thresholdHoursEdited: true
+                  }
+                });
+              }}
+              placeholder={rule.type === "DAILY_OVERTIME" ? "8" : "40"}
+              value={rule.condition.thresholdHours}
+            />
+            <Text style={styles.helpText}>
+              {rule.type === "DAILY_OVERTIME"
+                ? "Applies after this many payable hours in one company-timezone day."
+                : "Applies after this many payable hours since the selected company-timezone week start."}
+            </Text>
+          </View>
         );
+      }
       case "DAY_OF_WEEK":
         return (
           <View style={styles.conditionFields}>
             <Text style={styles.fieldLabel}>Weekdays</Text>
+            <Text style={styles.helpText}>Choose every weekday this premium can match.</Text>
             <View style={styles.weekdayGrid}>
               {PAY_POLICY_WEEKDAYS.map((weekday) => {
                 const selected = rule.condition.weekdays.includes(weekday);
@@ -181,7 +216,7 @@ export function PayPolicyRuleEditor({
           <View style={styles.conditionFields}>
             <Text style={styles.fieldLabel}>Manual local dates</Text>
             <Text style={styles.helpText}>
-              Dates are interpreted in the company timezone shown above.
+              Enter holidays manually in the company timezone. ShiftPay has no automatic legal or country calendar.
             </Text>
             {rule.condition.dates.map((holiday, holidayIndex) => (
               <View key={holiday.clientId} style={styles.holidayRow}>
@@ -310,6 +345,23 @@ export function PayPolicyRuleEditor({
       {isZeroPremiumPercent(rule.premiumPercent) ? (
         <Text style={styles.warning}>A 0% premium is allowed and has no pay effect.</Text>
       ) : null}
+      {canShowPreview ? (
+        <View style={styles.preview}>
+          <Text style={styles.fieldLabel}>Illustrative single-rule example</Text>
+          <Text style={styles.helpText}>
+            Premium: +{(companyDefaultWorkerHourlyRate * premiumPercent / 100).toFixed(2)} {currencyLabel}/hour
+          </Text>
+          <Text style={styles.helpText}>
+            Rate with this rule only: {(companyDefaultWorkerHourlyRate * (1 + premiumPercent / 100)).toFixed(2)} {currencyLabel}/hour
+          </Text>
+          <Text style={styles.helpText}>This does not determine rule matches, stacking, overtime, salary, or payout.</Text>
+        </View>
+      ) : companyDefaultWorkerHourlyRate === null ? (
+        <View style={styles.conditionFields}>
+          <Text style={styles.helpText}>Set a default worker hourly rate in Company Settings to see an illustrative example.</Text>
+          {onOpenCompanySettings ? <Button label="Open Company Settings" onPress={onOpenCompanySettings} variant="ghost" /> : null}
+        </View>
+      ) : null}
 
       <FieldError message={errors[`${path}.condition`]} />
       {renderCondition()}
@@ -365,6 +417,12 @@ const styles = StyleSheet.create({
   warning: {
     ...typography.caption,
     color: colors.warning
+  },
+  preview: {
+    gap: spacing.xs,
+    borderRadius: radii.control,
+    backgroundColor: colors.surface,
+    padding: spacing.sm
   },
   weekdayGrid: {
     flexDirection: "row",

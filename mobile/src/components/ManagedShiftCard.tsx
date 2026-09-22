@@ -63,7 +63,7 @@ export function ManagedShiftCard({ shift, onPress }: ManagedShiftCardProps) {
         </View>
         <View style={styles.metaItem}>
           <Text style={styles.metaLabel}>Default rate</Text>
-          <Text style={styles.metaValue}>{formatRate(shift.defaultHourlyRate)}</Text>
+          <Text style={styles.metaValue}>{formatRate(shift.defaultHourlyRate)} {shift.currencyLabel ?? "currency unavailable"}</Text>
         </View>
         {isDiscarded ? (
           <View style={styles.metaItem}>
@@ -74,7 +74,7 @@ export function ManagedShiftCard({ shift, onPress }: ManagedShiftCardProps) {
         {shift.foremanHourlyRate !== undefined ? (
           <View style={styles.metaItem}>
             <Text style={styles.metaLabel}>Foreman rate</Text>
-            <Text style={styles.metaValue}>{formatRate(shift.foremanHourlyRate)}</Text>
+            <Text style={styles.metaValue}>{formatRate(shift.foremanHourlyRate)} {shift.currencyLabel ?? "currency unavailable"}</Text>
           </View>
         ) : null}
       </View>

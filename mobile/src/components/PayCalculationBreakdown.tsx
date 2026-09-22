@@ -8,6 +8,7 @@ import { StateMessage } from "./StateMessage";
 
 type PayCalculationBreakdownProps = {
   calculation: PayCalculation;
+  currencyLabel?: string | null;
 };
 
 function formatSeconds(value: number): string {
@@ -20,6 +21,10 @@ function formatExactMinutes(value: number): string {
 
 function formatPercentage(value: number): string {
   return `${formatAuditDecimal(value)}%`;
+}
+
+function formatAuditAmount(value: number, currencyLabel: string | null | undefined): string {
+  return `${formatAuditDecimal(value)} ${currencyLabel ?? "currency unavailable"}`;
 }
 
 function SegmentRules({ segment }: { segment: PaySegment }) {
@@ -59,7 +64,8 @@ function SegmentRules({ segment }: { segment: PaySegment }) {
 }
 
 export function PayCalculationBreakdown({
-  calculation
+  calculation,
+  currencyLabel
 }: PayCalculationBreakdownProps) {
   return (
     <View style={styles.container}>
@@ -90,15 +96,15 @@ export function PayCalculationBreakdown({
         />
         <DetailRow
           label="Total base amount (audit)"
-          value={formatAuditDecimal(calculation.totalBaseAmount)}
+          value={formatAuditAmount(calculation.totalBaseAmount, currencyLabel)}
         />
         <DetailRow
           label="Total premium amount (audit)"
-          value={formatAuditDecimal(calculation.totalPremiumAmount)}
+          value={formatAuditAmount(calculation.totalPremiumAmount, currencyLabel)}
         />
         <DetailRow
           label="Total amount (audit)"
-          value={formatAuditDecimal(calculation.totalAmount)}
+          value={formatAuditAmount(calculation.totalAmount, currencyLabel)}
         />
       </View>
 
@@ -126,7 +132,7 @@ export function PayCalculationBreakdown({
             />
             <DetailRow
               label="Base hourly rate"
-              value={formatAuditDecimal(segment.baseHourlyRate)}
+              value={formatAuditAmount(segment.baseHourlyRate, currencyLabel)}
             />
             <DetailRow
               label="Stacking strategy"
@@ -138,19 +144,19 @@ export function PayCalculationBreakdown({
             />
             <DetailRow
               label="Effective hourly rate"
-              value={formatAuditDecimal(segment.effectiveHourlyRate)}
+              value={formatAuditAmount(segment.effectiveHourlyRate, currencyLabel)}
             />
             <DetailRow
               label="Base amount (audit)"
-              value={formatAuditDecimal(segment.baseAmount)}
+              value={formatAuditAmount(segment.baseAmount, currencyLabel)}
             />
             <DetailRow
               label="Premium amount (audit)"
-              value={formatAuditDecimal(segment.premiumAmount)}
+              value={formatAuditAmount(segment.premiumAmount, currencyLabel)}
             />
             <DetailRow
               label="Total amount (audit)"
-              value={formatAuditDecimal(segment.totalAmount)}
+              value={formatAuditAmount(segment.totalAmount, currencyLabel)}
             />
             <SegmentRules segment={segment} />
           </View>

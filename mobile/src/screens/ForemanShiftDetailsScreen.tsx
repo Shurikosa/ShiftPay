@@ -28,7 +28,7 @@ import type { ForemanStackParamList } from "../types/navigation";
 import type { ManagedShift, ShiftAttendance } from "../types/shifts";
 import {
   formatDateTime,
-  formatMoney,
+  formatMoneyWithCurrencyLabel,
   formatMinutes,
   formatOptionalLocation,
   formatRate
@@ -562,11 +562,11 @@ export function ForemanShiftDetailsScreen({
                 <DetailRow label="Discard reason" value={formatStatusLabel(shift.discardReason)} />
               ) : null}
               <DetailRow label="Default break" value={`${shift.defaultBreakMinutes} min`} />
-              <DetailRow label="Worker hourly rate" value={formatRate(shift.defaultHourlyRate)} />
+              <DetailRow label="Worker hourly rate" value={`${formatRate(shift.defaultHourlyRate)} ${shift.currencyLabel ?? "currency unavailable"}`} />
               {shift.foremanHourlyRate !== undefined ? (
                 <DetailRow
                   label="Foreman hourly rate"
-                  value={formatRate(shift.foremanHourlyRate)}
+                  value={`${formatRate(shift.foremanHourlyRate)} ${shift.currencyLabel ?? "currency unavailable"}`}
                 />
               ) : null}
             </View>
@@ -698,7 +698,7 @@ export function ForemanShiftDetailsScreen({
                         <View style={styles.compactRows}>
                           <DetailRow label="Joined" value={formatDateTime(item.joinedAt)} />
                           <DetailRow label="Approved" value={formatDateTime(item.approvedAt)} />
-                          <DetailRow label="Hourly rate" value={formatRate(item.hourlyRate)} />
+                          <DetailRow label="Hourly rate" value={`${formatRate(item.hourlyRate)} ${item.currencyLabel ?? "currency unavailable"}`} />
                           <DetailRow label="Break" value={`${item.breakMinutes} min`} />
                           {isDiscarded ? (
                             <DetailRow label="Payroll" value="Not payable" />
@@ -720,7 +720,7 @@ export function ForemanShiftDetailsScreen({
                               />
                               <DetailRow
                                 label="Calculated salary"
-                                value={formatMoney(item.calculatedSalary)}
+                                value={formatMoneyWithCurrencyLabel(item.calculatedSalary, item.currencyLabel)}
                               />
                               {item.paymentStatus ? (
                                 <DetailRow
@@ -739,6 +739,7 @@ export function ForemanShiftDetailsScreen({
                           item.payCalculation ? (
                             <PayCalculationBreakdown
                               calculation={item.payCalculation}
+                              currencyLabel={item.currencyLabel}
                             />
                           ) : (
                             <StateMessage

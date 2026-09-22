@@ -23,8 +23,9 @@ const mockedUseAuth = jest.mocked(useAuth);
 const historyItem: WorkerShiftHistoryItem = {
   shiftId: 100,
   attendanceId: 500,
-  companyId: 10,
-  companyName: "Acme Construction",
+      companyId: 10,
+      companyName: "Acme Construction",
+      currencyLabel: "EUR",
   title: "Sunday night shift",
   location: "Cologne",
   status: "CLOSED",

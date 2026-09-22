@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { WorkerShiftHistoryItem } from "../types/shifts";
 import {
   formatDateTime,
-  formatMoney,
+  formatMoneyWithCurrencyLabel,
   formatMinutes,
   formatOptionalLocation
 } from "../utils/format";
@@ -103,7 +103,7 @@ export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
               <Text style={styles.metaText}>
                 {shift.calculatedSalary === null
                   ? "Salary pending"
-                  : `Salary ${formatMoney(shift.calculatedSalary)}`}
+                  : `Salary ${formatMoneyWithCurrencyLabel(shift.calculatedSalary, shift.currencyLabel)}`}
               </Text>
             </>
           )}

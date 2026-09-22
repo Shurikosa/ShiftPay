@@ -6,6 +6,8 @@ export interface Company {
   id: number;
   name: string;
   joinCode?: string;
+  currencyLabel: string | null;
+  timeZone: string;
 }
 
 export interface User {

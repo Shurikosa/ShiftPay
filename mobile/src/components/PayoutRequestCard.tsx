@@ -4,7 +4,7 @@ import type { PayoutRequest } from "../types/payroll";
 import {
   formatDateTime,
   formatMinutes,
-  formatWholeMoney
+  formatWholeMoneyWithCurrencyLabel
 } from "../utils/format";
 import {
   formatStatusLabel,
@@ -55,7 +55,7 @@ export function PayoutRequestCard({
         />
         <DetailRow
           label="Final payout amount"
-          value={formatWholeMoney(request.payoutAmount)}
+          value={formatWholeMoneyWithCurrencyLabel(request.payoutAmount, request.currencyLabel)}
         />
       </View>
 
@@ -84,7 +84,7 @@ export function PayoutRequestCard({
               />
               <DetailRow
                 label="Final payout"
-                value={formatWholeMoney(item.payoutAmount)}
+                value={formatWholeMoneyWithCurrencyLabel(item.payoutAmount, request.currencyLabel)}
               />
             </View>
           </View>

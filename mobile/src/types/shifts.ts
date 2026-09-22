@@ -31,6 +31,7 @@ export interface JoinShiftResponse {
   workerId: number;
   status: AttendanceStatus;
   hourlyRate: number;
+  currencyLabel: string | null;
 }
 
 export interface WorkerShiftHistoryItem {
@@ -38,6 +39,7 @@ export interface WorkerShiftHistoryItem {
   attendanceId: number;
   companyId: number;
   companyName: string;
+  currencyLabel: string | null;
   title: string;
   location: string | null;
   status: ShiftStatus;
@@ -63,6 +65,7 @@ export interface ManagedShift {
   id: number;
   companyId: number;
   companyName: string;
+  currencyLabel: string | null;
   title: string;
   location: string | null;
   status: ShiftStatus;
@@ -82,14 +85,15 @@ export interface ManagedShift {
 export interface CreateShiftRequest {
   location: string;
   defaultBreakMinutes?: number;
-  defaultHourlyRate: number;
-  foremanHourlyRate: number;
+  defaultHourlyRate?: number | null;
+  foremanHourlyRate?: number | null;
 }
 
 export interface CreateShiftResponse {
   id: number;
   companyId: number;
   companyName: string;
+  currencyLabel: string;
   title: string;
   location: string | null;
   joinCode: string;
@@ -119,6 +123,7 @@ export interface ShiftAttendance {
   paymentStatus?: PaymentStatus | null;
   paidAt?: string | null;
   hourlyRate: number;
+  currencyLabel: string | null;
   breakMinutes: number;
   payableStartTime?: string | null;
   pauseMinutes?: number | null;
@@ -138,6 +143,7 @@ export interface ApproveAttendanceResponse {
   attendanceId: number;
   status: AttendanceStatus;
   hourlyRate: number;
+  currencyLabel: string | null;
   approvedAt: string;
 }
 
@@ -187,6 +193,7 @@ export interface ShiftSummaryWorker {
 export interface ShiftSummary {
   shiftId: number;
   status: ShiftStatus;
+  currencyLabel: string | null;
   totalWorkers: number;
   totalSalary: number;
   totalBaseAmount: number;
