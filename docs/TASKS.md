@@ -253,41 +253,42 @@ The user-owned commit/push checkpoints above are workflow gates, not agent check
 
 Documentation:
 
-- [ ] Independently review the canonical Company Settings/default-rate/currency-history/Pay Rules documentation with no findings before the user commits and pushes the canonical docs
+- [x] Independently review the canonical Company Settings/default-rate/currency-history/Pay Rules documentation with no findings before the user commits and pushes the canonical docs
 
 Backend:
 
-- [ ] Add nullable Company.defaultWorkerHourlyRate/defaultForemanHourlyRate and nullable legacy Company.currencyLabel persistence; validate new/settings labels with the exact shared boundary-White_Space trim set, blank rule, and post-trim 64-code-point limit
-- [ ] Add nullable ShiftSession.currencyLabel snapshots for new shifts without backfilling legacy shifts; preserve nullable legacy labels in reads and require a company label before new shift creation
-- [ ] Add FOREMAN-only `GET /api/v1/me/company` and `PUT /api/v1/me/company` with `CompanySettingsResponse` and `UpdateCompanySettingsRequest`; allow name, currency label, and both optional defaults to change while join code/timezone remain read-only
-- [ ] Extend company creation/current-user/company-join DTOs with the current nullable currencyLabel while keeping default rates private to Company Settings; reject WORKER/ADMIN Company Settings access
-- [ ] Make create-shift worker/foreman rates optional request overrides resolved independently from company defaults: omitted and explicit-null properties fall back, numeric zero remains an override, a missing resolved rate returns its field-validation error, and resolved rate/currency snapshots are preserved
-- [ ] Expose nullable snapshotted currencyLabel on monetary shift, attendance, summary, history, and payable-attendance DTOs without read-time backfill of legacy rows
-- [ ] Add one persisted PayoutRequest currencyLabel snapshot; reject null-label legacy attendance and mixed-label preview/create selections, retaining `MIXED_CURRENCY_LABELS` for different non-null labels without duplicating the label on PayoutRequestItem
-- [ ] Add migration, authorization, validation (including the exact boundary trim set, blank rule, and post-trim code-point limit), omitted/null/zero fallback-override, immutability, legacy-unknown, mixed-currency, DTO, and OpenAPI tests for Company Settings/defaults/currency behavior
+- [x] Add nullable Company.defaultWorkerHourlyRate/defaultForemanHourlyRate and nullable legacy Company.currencyLabel persistence; validate new/settings labels with the exact shared boundary-White_Space trim set, blank rule, and post-trim 64-code-point limit
+- [x] Add nullable ShiftSession.currencyLabel snapshots for new shifts without backfilling legacy shifts; preserve nullable legacy labels in reads and require a company label before new shift creation
+- [x] Add FOREMAN-only `GET /api/v1/me/company` and `PUT /api/v1/me/company` with `CompanySettingsResponse` and `UpdateCompanySettingsRequest`; allow name, currency label, and both optional defaults to change while join code/timezone remain read-only
+- [x] Extend company creation/current-user/company-join DTOs with the current nullable currencyLabel while keeping default rates private to Company Settings; reject WORKER/ADMIN Company Settings access
+- [x] Make create-shift worker/foreman rates optional request overrides resolved independently from company defaults: omitted and explicit-null properties fall back, numeric zero remains an override, a missing resolved rate returns its field-validation error, and resolved rate/currency snapshots are preserved
+- [x] Expose nullable snapshotted currencyLabel on monetary shift, attendance, summary, history, and payable-attendance DTOs without read-time backfill of legacy rows
+- [x] Add one persisted PayoutRequest currencyLabel snapshot; reject null-label legacy attendance and mixed-label preview/create selections, retaining `MIXED_CURRENCY_LABELS` for different non-null labels without duplicating the label on PayoutRequestItem
+- [x] Add migration, authorization, validation (including the exact boundary trim set, blank rule, and post-trim code-point limit), omitted/null/zero fallback-override, immutability, legacy-unknown, mixed-currency, DTO, and OpenAPI tests for Company Settings/defaults/currency behavior
 
 Independent backend review:
 
-- [ ] Independently review the Phase 2E backend migration, authorization, API/OpenAPI contract, historical-snapshot behavior, and automated tests with no findings before the user commits and pushes backend work
+- [x] Independently review the Phase 2E backend migration, authorization, API/OpenAPI contract, historical-snapshot behavior, and automated tests with no findings before the user commits and pushes backend work
 
 Mobile:
 
-- [ ] Add typed company-settings API support and a FOREMAN-only Company Settings screen; keep it absent from WORKER/ADMIN navigation and place Pay Rules inside it
-- [ ] Let FOREMAN edit company name, free-form currency label, and optional worker/foreman default hourly rates while showing join code/timezone read-only
-- [ ] Update company onboarding to collect currencyLabel and optional default rates with clear free-form currency copy
-- [ ] Prefill Create Shift rates from Company Settings, preserve per-shift overrides, and allow omission only when the matching company default exists
-- [ ] Render backend currencyLabel beside monetary values while preserving historical shift/request labels and keeping compact payroll cards otherwise unchanged
-- [ ] Replace Pay Rules enum/ambiguous copy with explanations for week start, stacking, time of day, daily/weekly overtime, weekday, and manual holiday behavior; show overtime thresholds as hours
-- [ ] Add the non-authoritative single-rule percentage preview from Company.defaultWorkerHourlyRate and currencyLabel, never defaultForemanHourlyRate, without calculating rule applicability, stacking, overtime, salary, payroll, payout, or totals
-- [ ] Add mobile tests for role-only navigation, settings validation/save, default/override shift behavior, free-form labels, historical labels, Pay Rules copy/preview, and mixed-label payout handling
+- [x] Add typed company-settings API support and a FOREMAN-only Company Settings screen; keep it absent from WORKER/ADMIN navigation and place Pay Rules inside it
+- [x] Let FOREMAN edit company name, free-form currency label, and optional worker/foreman default hourly rates while showing join code/timezone read-only
+- [x] Update company onboarding to collect currencyLabel and optional default rates with clear free-form currency copy
+- [x] Prefill Create Shift rates from Company Settings, preserve per-shift overrides, and allow omission only when the matching company default exists
+- [x] Render backend currencyLabel beside monetary values while preserving historical shift/request labels and keeping compact payroll cards otherwise unchanged
+- [x] Replace Pay Rules enum/ambiguous copy with explanations for week start, stacking, time of day, daily/weekly overtime, weekday, and manual holiday behavior; show overtime thresholds as hours
+- [x] Add the non-authoritative single-rule percentage preview from Company.defaultWorkerHourlyRate and currencyLabel, never defaultForemanHourlyRate, without calculating rule applicability, stacking, overtime, salary, payroll, payout, or totals
+- [x] Add mobile tests for role-only navigation, settings validation/save, default/override shift behavior, free-form labels, historical labels, Pay Rules copy/preview, and mixed-label payout handling
 
 Independent mobile review:
 
-- [ ] Independently review Phase 2E mobile role visibility, Company Settings nesting, typed API use, historical-label display, compact payroll-card constraints, Pay Rules copy, preview boundaries, and automated tests with no findings before the user commits and pushes mobile work
+- [x] Independently review Phase 2E mobile role visibility, Company Settings nesting, typed API use, historical-label display, compact payroll-card constraints, Pay Rules copy, preview boundaries, and automated tests with no findings before the user commits and pushes mobile work
 
 Android Expo Go smoke test:
 
-- [ ] Run and record an Android Expo Go smoke test after the reviewed mobile work has been committed and pushed by the user: FOREMAN Company Settings/Pay Rules, default-prefilled shift creation, free-form currency label display, historical-label handling, and compact payroll cards
+- [x] Run and record an Android Expo Go smoke test after the reviewed mobile work has been committed and pushed by the user: FOREMAN Company Settings/Pay Rules, default-prefilled shift creation, free-form currency label display, historical-label handling, and compact payroll cards
+  Evidence: 2026-09-23 — Motorola g86; Android 16; Expo Go 57.0.0; backend d086d01; mobile 82c55c0; all listed Phase 2E smoke scenarios passed.
 
 Future hardening:
 
