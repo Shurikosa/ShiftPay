@@ -12,6 +12,7 @@ export type WorkerStackParamList = {
   WorkerDashboard: undefined;
   JoinShift: undefined;
   MyShiftHistory: undefined;
+  WorkerPayroll: undefined;
   WorkerShiftDetails: {
     shift: WorkerShiftHistoryItem;
   };
@@ -19,7 +20,12 @@ export type WorkerStackParamList = {
 
 export type ForemanStackParamList = {
   ForemanDashboard: undefined;
+  ForemanCompanySettings: {
+    notice?: string;
+  } | undefined;
+  ForemanPayRules: undefined;
   CreateShift: undefined;
+  ForemanPayrollRequests: undefined;
   ForemanShiftDetails: {
     shiftId: number;
     initialShift?: ManagedShift;

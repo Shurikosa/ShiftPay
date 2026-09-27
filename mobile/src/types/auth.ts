@@ -6,6 +6,8 @@ export interface Company {
   id: number;
   name: string;
   joinCode?: string;
+  currencyLabel: string | null;
+  timeZone: string;
 }
 
 export interface User {
@@ -42,6 +44,9 @@ export interface ApiErrorResponse {
   error: string;
   message: string;
   path?: string;
+  code?: string;
+  actualDurationMinutes?: number;
+  minimumDurationMinutes?: number;
 }
 
 export interface Session {

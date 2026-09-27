@@ -69,6 +69,14 @@ export function WorkerDashboardScreen({ navigation }: WorkerDashboardScreenProps
             }}
             variant="secondary"
           />
+          <Button
+            disabled={!company}
+            label="Payroll"
+            onPress={() => {
+              navigation.navigate("WorkerPayroll");
+            }}
+            variant="secondary"
+          />
         </View>
 
         <View style={styles.section}>

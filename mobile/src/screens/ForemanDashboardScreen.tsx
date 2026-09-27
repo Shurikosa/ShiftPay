@@ -59,6 +59,22 @@ export function ForemanDashboardScreen({ navigation }: ForemanDashboardScreenPro
             navigation.navigate("CreateShift");
           }}
         />
+        <Button
+          disabled={!company}
+          label="Company settings"
+          onPress={() => {
+            navigation.navigate("ForemanCompanySettings");
+          }}
+          variant="secondary"
+        />
+        <Button
+          disabled={!company}
+          label="Payroll requests"
+          onPress={() => {
+            navigation.navigate("ForemanPayrollRequests");
+          }}
+          variant="secondary"
+        />
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>

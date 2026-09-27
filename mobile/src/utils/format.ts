@@ -22,12 +22,55 @@ export function formatMoney(value: number | null): string {
   return value === null ? "Pending" : value.toFixed(2);
 }
 
+export function formatMoneyWithCurrencyLabel(
+  value: number | null,
+  currencyLabel: string | null
+): string {
+  const amount = formatMoney(value);
+  return currencyLabel === null
+    ? `${amount} (currency unavailable)`
+    : `${amount} ${currencyLabel}`;
+}
+
+export function formatWholeMoney(value: number | null): string {
+  return value === null ? "Pending" : String(value);
+}
+
+export function formatWholeMoneyWithCurrencyLabel(
+  value: number | null,
+  currencyLabel: string | null
+): string {
+  const amount = formatWholeMoney(value);
+  return currencyLabel === null
+    ? `${amount} (currency unavailable)`
+    : `${amount} ${currencyLabel}`;
+}
+
 export function formatMinutes(value: number | null): string {
-  return value === null ? "Pending" : `${value} min`;
+  if (value === null) {
+    return "Pending";
+  }
+
+  const hours = Math.floor(value / 60);
+  const minutes = value % 60;
+
+  if (hours === 0) {
+    return `${minutes} min`;
+  }
+
+  if (minutes === 0) {
+    return `${hours} h 0 min`;
+  }
+
+  return `${hours} h ${minutes} min`;
 }
 
 export function formatRate(value: number): string {
   return value.toFixed(2);
+}
+
+export function formatAuditDecimal(value: number): string {
+  return value.toFixed(8).replace(/\.?0+$/, "");
 }
 
 export function formatOptionalLocation(value: string | null | undefined): string {

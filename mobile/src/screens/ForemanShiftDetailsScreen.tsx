@@ -6,6 +6,7 @@ import {
   approveAttendance,
   cancelShift,
   closeShift,
+  discardShift,
   endAllPause,
   endMyPause,
   getShiftAttendance,
@@ -17,6 +18,7 @@ import {
 import { ApiError, getErrorMessage } from "../api/errors";
 import { Button } from "../components/Button";
 import { DetailRow } from "../components/DetailRow";
+import { PayCalculationBreakdown } from "../components/PayCalculationBreakdown";
 import { Screen } from "../components/Screen";
 import { StateMessage } from "../components/StateMessage";
 import { StatusBadge } from "../components/StatusBadge";
@@ -26,7 +28,7 @@ import type { ForemanStackParamList } from "../types/navigation";
 import type { ManagedShift, ShiftAttendance } from "../types/shifts";
 import {
   formatDateTime,
-  formatMoney,
+  formatMoneyWithCurrencyLabel,
   formatMinutes,
   formatOptionalLocation,
   formatRate
@@ -37,7 +39,12 @@ import {
   isPaused,
   missingPauseStateMessage
 } from "../utils/pauseDisplay";
-import { getAttendanceStatusTone, getShiftStatusTone } from "../utils/status";
+import {
+  formatStatusLabel,
+  getAttendanceStatusTone,
+  getPaymentStatusTone,
+  getShiftStatusTone
+} from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
 
 type ForemanShiftDetailsScreenProps = NativeStackScreenProps<
@@ -50,8 +57,19 @@ type MutationName =
   | "start"
   | "cancel"
   | "close"
+  | "discard"
   | "pause-self"
   | "pause-all";
+
+const shortShiftDecisionCode = "SHORT_SHIFT_REQUIRES_DECISION";
+
+function isShortShiftDecisionError(error: unknown): error is ApiError {
+  return (
+    error instanceof ApiError &&
+    error.status === 409 &&
+    error.details?.code === shortShiftDecisionCode
+  );
+}
 
 function getShiftActionErrorMessage(error: unknown): string {
   if (error instanceof ApiError) {
@@ -83,13 +101,28 @@ export function ForemanShiftDetailsScreen({
     type: MutationName;
     attendanceId?: number;
   } | null>(null);
+  const [shortShiftDecisionOpen, setShortShiftDecisionOpen] = useState(false);
   const mutationInFlightRef = useRef(false);
+  const shortShiftDecisionOpenRef = useRef(false);
+  const detailsLoadSequenceRef = useRef(0);
+  const isDetailsScreenFocusedRef = useRef(false);
 
-  const beginMutation = (nextMutation: {
-    type: MutationName;
-    attendanceId?: number;
-  }): boolean => {
-    if (mutationInFlightRef.current) {
+  const setShortShiftDecisionGuard = (isOpen: boolean) => {
+    shortShiftDecisionOpenRef.current = isOpen;
+    setShortShiftDecisionOpen(isOpen);
+  };
+
+  const beginMutation = (
+    nextMutation: {
+      type: MutationName;
+      attendanceId?: number;
+    },
+    options: { allowDuringShortShiftDecision?: boolean } = {}
+  ): boolean => {
+    if (
+      mutationInFlightRef.current ||
+      (shortShiftDecisionOpenRef.current && !options.allowDuringShortShiftDecision)
+    ) {
       return false;
     }
 
@@ -104,6 +137,15 @@ export function ForemanShiftDetailsScreen({
   };
 
   const loadDetails = useCallback(async () => {
+    if (!isDetailsScreenFocusedRef.current) {
+      return;
+    }
+
+    const loadSequence = ++detailsLoadSequenceRef.current;
+    const isCurrentLoad = () =>
+      isDetailsScreenFocusedRef.current &&
+      detailsLoadSequenceRef.current === loadSequence;
+
     setLoading(true);
     setError(null);
 
@@ -114,25 +156,104 @@ export function ForemanShiftDetailsScreen({
           getShiftAttendance(token, shiftId)
         ])
       );
-      setShift(nextShift);
-      setAttendance(nextAttendance);
+
+      if (isCurrentLoad()) {
+        setShift(nextShift);
+        setAttendance(nextAttendance);
+      }
     } catch (caughtError) {
-      setError(getErrorMessage(caughtError));
+      if (isCurrentLoad()) {
+        setError(getErrorMessage(caughtError));
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentLoad()) {
+        setLoading(false);
+      }
     }
   }, [authenticatedRequest, shiftId]);
 
   useFocusEffect(
     useCallback(() => {
+      isDetailsScreenFocusedRef.current = true;
       void loadDetails();
-      return undefined;
+      return () => {
+        isDetailsScreenFocusedRef.current = false;
+        detailsLoadSequenceRef.current += 1;
+      };
     }, [loadDetails])
   );
 
   const refreshAfterMutation = async () => {
     await loadDetails();
     void refreshManagedShifts().catch(() => undefined);
+  };
+
+  const runClose = (saveShortShift = false, allowDuringShortShiftDecision = false) => {
+    if (
+      !beginMutation(
+        { type: "close" },
+        { allowDuringShortShiftDecision }
+      )
+    ) {
+      return;
+    }
+
+    setError(null);
+    setSuccessMessage(null);
+
+    void authenticatedRequest((token) =>
+      closeShift(
+        token,
+        shiftId,
+        saveShortShift ? { saveShortShift: true } : undefined
+      )
+    )
+      .then(() => {
+        setSuccessMessage("Shift closed. Summary is available.");
+        return refreshAfterMutation();
+      })
+      .catch((caughtError) => {
+        if (!saveShortShift && isShortShiftDecisionError(caughtError)) {
+          const actualDuration = formatMinutes(
+            caughtError.details?.actualDurationMinutes ?? null
+          );
+          const minimumDuration = formatMinutes(
+            caughtError.details?.minimumDurationMinutes ?? null
+          );
+
+          setShortShiftDecisionGuard(true);
+          Alert.alert(
+            "Short shift",
+            `Backend measured this shift at ${actualDuration}. Minimum is ${minimumDuration}. Save it for payroll or discard it?`,
+            [
+              {
+                text: "Keep active",
+                style: "cancel",
+                onPress: handleKeepShortShiftActive
+              },
+              {
+                text: "Discard",
+                style: "destructive",
+                onPress: handleDiscardShortShift
+              },
+              {
+                text: "Save shift",
+                onPress: handleSaveShortShift
+              }
+            ],
+            { cancelable: false }
+          );
+          return;
+        }
+
+        setError(getErrorMessage(caughtError));
+      })
+      .finally(() => {
+        if (allowDuringShortShiftDecision) {
+          setShortShiftDecisionGuard(false);
+        }
+        finishMutation();
+      });
   };
 
   const handleApprove = (attendanceId: number) => {
@@ -180,24 +301,61 @@ export function ForemanShiftDetailsScreen({
   };
 
   const handleClose = () => {
-    if (!beginMutation({ type: "close" })) {
+    runClose();
+  };
+
+  const handleKeepShortShiftActive = () => {
+    if (!shortShiftDecisionOpenRef.current) {
+      return;
+    }
+
+    setShortShiftDecisionGuard(false);
+    void refreshAfterMutation().catch(() => undefined);
+  };
+
+  const handleSaveShortShift = () => {
+    if (!shortShiftDecisionOpenRef.current) {
+      return;
+    }
+
+    runClose(true, true);
+  };
+
+  const handleDiscard = (allowDuringShortShiftDecision = false) => {
+    if (
+      !beginMutation(
+        { type: "discard" },
+        { allowDuringShortShiftDecision }
+      )
+    ) {
       return;
     }
 
     setError(null);
     setSuccessMessage(null);
 
-    void authenticatedRequest((token) => closeShift(token, shiftId))
+    void authenticatedRequest((token) => discardShift(token, shiftId))
       .then(() => {
-        setSuccessMessage("Shift closed. Summary is available.");
+        setSuccessMessage("Short shift discarded.");
         return refreshAfterMutation();
       })
       .catch((caughtError) => {
         setError(getErrorMessage(caughtError));
       })
       .finally(() => {
+        if (allowDuringShortShiftDecision) {
+          setShortShiftDecisionGuard(false);
+        }
         finishMutation();
       });
+  };
+
+  const handleDiscardShortShift = () => {
+    if (!shortShiftDecisionOpenRef.current) {
+      return;
+    }
+
+    handleDiscard(true);
   };
 
   const handleCancel = () => {
@@ -223,6 +381,10 @@ export function ForemanShiftDetailsScreen({
   };
 
   const handleToggleSelfPause = () => {
+    if (shortShiftDecisionOpenRef.current) {
+      return;
+    }
+
     if (!shift) {
       return;
     }
@@ -257,6 +419,10 @@ export function ForemanShiftDetailsScreen({
   };
 
   const handleToggleAllPause = () => {
+    if (shortShiftDecisionOpenRef.current) {
+      return;
+    }
+
     if (!shift) {
       return;
     }
@@ -293,7 +459,7 @@ export function ForemanShiftDetailsScreen({
   };
 
   const handleConfirmCancel = () => {
-    if (mutationInFlightRef.current) {
+    if (mutationInFlightRef.current || shortShiftDecisionOpenRef.current) {
       return;
     }
 
@@ -315,7 +481,11 @@ export function ForemanShiftDetailsScreen({
   };
 
   const handleOpenSummary = () => {
-    if (mutationInFlightRef.current || !shift) {
+    if (
+      mutationInFlightRef.current ||
+      shortShiftDecisionOpenRef.current ||
+      !shift
+    ) {
       return;
     }
 
@@ -325,7 +495,17 @@ export function ForemanShiftDetailsScreen({
     });
   };
 
+  const handleRefresh = () => {
+    if (mutationInFlightRef.current || shortShiftDecisionOpenRef.current) {
+      return;
+    }
+
+    void loadDetails();
+  };
+
   const isMutating = mutation !== null;
+  const isActionBlocked = isMutating || shortShiftDecisionOpen;
+  const isDiscarded = shift?.status === "DISCARDED";
   const canCancel = user?.role === "FOREMAN" && shift?.status === "OPEN";
   const canStart = shift?.status === "OPEN";
   const canClose = shift?.status === "ACTIVE";
@@ -358,22 +538,35 @@ export function ForemanShiftDetailsScreen({
           <>
             <View style={styles.badges}>
               <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
-              {isPaused(shift.pauseState) ? (
+              {isPaused(shift.pauseState) && !isDiscarded ? (
                 <StatusBadge label="PAUSED" tone="warning" />
               ) : null}
             </View>
+
+            {isDiscarded ? (
+              <StateMessage
+                title="Discarded shift"
+                message="This short shift was not saved for payroll and cannot be summarized."
+              />
+            ) : null}
 
             <View style={styles.panel}>
               <DetailRow label="Company" value={shift.companyName} />
               <DetailRow label="Join code" value={shift.joinCode} />
               <DetailRow label="Actual start" value={formatDateTime(shift.actualStartTime)} />
               <DetailRow label="Actual end" value={formatDateTime(shift.actualEndTime)} />
+              {shift.discardedAt ? (
+                <DetailRow label="Discarded" value={formatDateTime(shift.discardedAt)} />
+              ) : null}
+              {shift.discardReason ? (
+                <DetailRow label="Discard reason" value={formatStatusLabel(shift.discardReason)} />
+              ) : null}
               <DetailRow label="Default break" value={`${shift.defaultBreakMinutes} min`} />
-              <DetailRow label="Worker hourly rate" value={formatRate(shift.defaultHourlyRate)} />
+              <DetailRow label="Worker hourly rate" value={`${formatRate(shift.defaultHourlyRate)} ${shift.currencyLabel ?? "currency unavailable"}`} />
               {shift.foremanHourlyRate !== undefined ? (
                 <DetailRow
                   label="Foreman hourly rate"
-                  value={formatRate(shift.foremanHourlyRate)}
+                  value={`${formatRate(shift.foremanHourlyRate)} ${shift.currencyLabel ?? "currency unavailable"}`}
                 />
               ) : null}
             </View>
@@ -381,7 +574,7 @@ export function ForemanShiftDetailsScreen({
             <View style={styles.actions}>
               {canStart ? (
                 <Button
-                  disabled={isMutating}
+                  disabled={isActionBlocked}
                   label="Start shift"
                   loading={mutation?.type === "start"}
                   onPress={handleStart}
@@ -389,7 +582,7 @@ export function ForemanShiftDetailsScreen({
               ) : null}
               {canCancel ? (
                 <Button
-                  disabled={isMutating}
+                  disabled={isActionBlocked}
                   label="Cancel shift"
                   loading={mutation?.type === "cancel"}
                   onPress={handleConfirmCancel}
@@ -399,7 +592,7 @@ export function ForemanShiftDetailsScreen({
               {canPause ? (
                 <>
                   <Button
-                    disabled={isMutating}
+                    disabled={isActionBlocked}
                     label={
                       shift.pauseState?.personallyPaused
                         ? "Resume myself"
@@ -410,7 +603,7 @@ export function ForemanShiftDetailsScreen({
                     variant="secondary"
                   />
                   <Button
-                    disabled={isMutating}
+                    disabled={isActionBlocked}
                     label={
                       shift.pauseState?.allPaused
                         ? "Resume everyone"
@@ -430,7 +623,7 @@ export function ForemanShiftDetailsScreen({
               ) : null}
               {canClose ? (
                 <Button
-                  disabled={isMutating}
+                  disabled={isActionBlocked}
                   label="Close shift"
                   loading={mutation?.type === "close"}
                   onPress={handleClose}
@@ -438,17 +631,16 @@ export function ForemanShiftDetailsScreen({
               ) : null}
               {canShowSummary ? (
                 <Button
-                  disabled={isMutating}
+                  disabled={isActionBlocked}
                   label="Open summary"
                   onPress={handleOpenSummary}
                   variant="secondary"
                 />
               ) : null}
               <Button
+                disabled={isActionBlocked}
                 label="Refresh"
-                onPress={() => {
-                  void loadDetails();
-                }}
+                onPress={handleRefresh}
                 variant="secondary"
               />
             </View>
@@ -472,6 +664,10 @@ export function ForemanShiftDetailsScreen({
                   {attendance.map((item) => {
                     const canApprove =
                       canApproveAttendance && item.status === "JOINED";
+                    const canShowFinalPayBreakdown =
+                      shift.status === "CLOSED" &&
+                      item.status === "APPROVED" &&
+                      item.calculatedSalary !== null;
 
                     return (
                       <View key={item.attendanceId} style={styles.attendanceCard}>
@@ -487,7 +683,13 @@ export function ForemanShiftDetailsScreen({
                               label={item.status}
                               tone={getAttendanceStatusTone(item.status)}
                             />
-                            {isPaused(item.pauseState) ? (
+                            {item.paymentStatus && !isDiscarded ? (
+                              <StatusBadge
+                                label={formatStatusLabel(item.paymentStatus)}
+                                tone={getPaymentStatusTone(item.paymentStatus)}
+                              />
+                            ) : null}
+                            {isPaused(item.pauseState) && !isDiscarded ? (
                               <StatusBadge label="PAUSED" tone="warning" />
                             ) : null}
                           </View>
@@ -496,28 +698,60 @@ export function ForemanShiftDetailsScreen({
                         <View style={styles.compactRows}>
                           <DetailRow label="Joined" value={formatDateTime(item.joinedAt)} />
                           <DetailRow label="Approved" value={formatDateTime(item.approvedAt)} />
-                          {item.payableStartTime !== undefined ? (
-                            <DetailRow
-                              label="Payable start"
-                              value={formatDateTime(item.payableStartTime)}
-                            />
-                          ) : null}
-                          <DetailRow label="Hourly rate" value={formatRate(item.hourlyRate)} />
+                          <DetailRow label="Hourly rate" value={`${formatRate(item.hourlyRate)} ${item.currencyLabel ?? "currency unavailable"}`} />
                           <DetailRow label="Break" value={`${item.breakMinutes} min`} />
-                          <DetailRow
-                            label="Pause time"
-                            value={formatPauseMinutes(item.pauseMinutes)}
-                          />
-                          <DetailRow label="Worked time" value={formatMinutes(item.workedMinutes)} />
-                          <DetailRow
-                            label="Calculated salary"
-                            value={formatMoney(item.calculatedSalary)}
-                          />
+                          {isDiscarded ? (
+                            <DetailRow label="Payroll" value="Not payable" />
+                          ) : (
+                            <>
+                              {item.payableStartTime !== undefined ? (
+                                <DetailRow
+                                  label="Payable start"
+                                  value={formatDateTime(item.payableStartTime)}
+                                />
+                              ) : null}
+                              <DetailRow
+                                label="Pause time"
+                                value={formatPauseMinutes(item.pauseMinutes)}
+                              />
+                              <DetailRow
+                                label="Worked time"
+                                value={formatMinutes(item.workedMinutes)}
+                              />
+                              <DetailRow
+                                label="Calculated salary"
+                                value={formatMoneyWithCurrencyLabel(item.calculatedSalary, item.currencyLabel)}
+                              />
+                              {item.paymentStatus ? (
+                                <DetailRow
+                                  label="Payment status"
+                                  value={formatStatusLabel(item.paymentStatus)}
+                                />
+                              ) : null}
+                              {item.paidAt ? (
+                                <DetailRow label="Paid" value={formatDateTime(item.paidAt)} />
+                              ) : null}
+                            </>
+                          )}
                         </View>
+
+                        {canShowFinalPayBreakdown ? (
+                          item.payCalculation ? (
+                            <PayCalculationBreakdown
+                              calculation={item.payCalculation}
+                              currencyLabel={item.currencyLabel}
+                            />
+                          ) : (
+                            <StateMessage
+                              title="Historical breakdown unavailable"
+                              message="This closed attendance has no calculation snapshot. The stored calculated salary remains the authoritative final amount."
+                            />
+                          )
+                        ) : null}
 
                         {canApprove ? (
                           <Button
-                            disabled={isMutating}
+                            disabled={isActionBlocked}
                             label="Approve"
                             loading={
                               mutation?.type === "approve" &&

@@ -2,12 +2,17 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { WorkerShiftHistoryItem } from "../types/shifts";
 import {
   formatDateTime,
-  formatMoney,
+  formatMoneyWithCurrencyLabel,
   formatMinutes,
   formatOptionalLocation
 } from "../utils/format";
 import { getWorkerPauseBadgeLabel } from "../utils/pauseDisplay";
-import { getAttendanceStatusTone, getShiftStatusTone } from "../utils/status";
+import {
+  formatStatusLabel,
+  getAttendanceStatusTone,
+  getPaymentStatusTone,
+  getShiftStatusTone
+} from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
 import { StatusBadge } from "./StatusBadge";
 
@@ -17,15 +22,19 @@ type WorkerShiftCardProps = {
 };
 
 export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
+  const isDiscarded = shift.status === "DISCARDED";
   const startTime = shift.actualStartTime ?? null;
-  const payableStartTime = shift.payableStartTime ?? null;
+  const payableStartTime = isDiscarded ? null : shift.payableStartTime ?? null;
   const approvalLabel =
-    shift.attendanceStatus === "JOINED" ? "Waiting for foreman approval" : null;
-  const pauseBadgeLabel = getWorkerPauseBadgeLabel(shift.pauseState);
-  const salaryLabel =
-    shift.calculatedSalary === null ? "Salary pending" : `Salary ${formatMoney(shift.calculatedSalary)}`;
-  const workedLabel =
-    shift.workedMinutes === null ? "Worked time pending" : `Worked ${formatMinutes(shift.workedMinutes)}`;
+    !isDiscarded && shift.attendanceStatus === "JOINED"
+      ? "Waiting for foreman approval"
+      : null;
+  const pauseBadgeLabel = isDiscarded ? null : getWorkerPauseBadgeLabel(shift.pauseState);
+  const hasPayBreakdown =
+    shift.status === "CLOSED" &&
+    shift.attendanceStatus === "APPROVED" &&
+    shift.calculatedSalary !== null &&
+    shift.payCalculation != null;
 
   return (
     <Pressable
@@ -51,8 +60,17 @@ export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
         </View>
         <View style={styles.badges}>
           <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
+          {shift.paymentStatus && !isDiscarded ? (
+            <StatusBadge
+              label={formatStatusLabel(shift.paymentStatus)}
+              tone={getPaymentStatusTone(shift.paymentStatus)}
+            />
+          ) : null}
           {pauseBadgeLabel ? (
             <StatusBadge label={pauseBadgeLabel} tone="warning" />
+          ) : null}
+          {hasPayBreakdown ? (
+            <StatusBadge label="Pay breakdown" tone="primary" />
           ) : null}
         </View>
       </View>
@@ -73,8 +91,25 @@ export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
               Pay starts {formatDateTime(payableStartTime)}
             </Text>
           ) : null}
-          <Text style={styles.metaText}>{workedLabel}</Text>
-          <Text style={styles.metaText}>{salaryLabel}</Text>
+          {isDiscarded ? (
+            <Text style={styles.metaText}>Discarded short shift. No payroll.</Text>
+          ) : (
+            <>
+              <Text style={styles.metaText}>
+                {shift.workedMinutes === null
+                  ? "Worked time pending"
+                  : `Worked ${formatMinutes(shift.workedMinutes)}`}
+              </Text>
+              <Text style={styles.metaText}>
+                {shift.calculatedSalary === null
+                  ? "Salary pending"
+                  : `Salary ${formatMoneyWithCurrencyLabel(shift.calculatedSalary, shift.currencyLabel)}`}
+              </Text>
+            </>
+          )}
+          {shift.paidAt && !isDiscarded ? (
+            <Text style={styles.metaText}>Paid {formatDateTime(shift.paidAt)}</Text>
+          ) : null}
         </View>
       </View>
     </Pressable>
