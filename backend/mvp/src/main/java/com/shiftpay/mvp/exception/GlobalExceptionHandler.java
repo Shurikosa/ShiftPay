@@ -1,10 +1,13 @@
 package com.shiftpay.mvp.exception;
 
+import com.shiftpay.mvp.dto.CodedErrorResponse;
 import com.shiftpay.mvp.dto.ErrorResponse;
+import com.shiftpay.mvp.dto.ShortShiftConflictResponse;
 import com.shiftpay.mvp.security.JwtAuthenticationException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -53,6 +56,21 @@ public class GlobalExceptionHandler {
 			HttpServletRequest request
 	) {
 		return buildError(HttpStatus.BAD_REQUEST, exception.getMessage(), request);
+	}
+
+	/**
+	 * Handles malformed JSON and invalid enum/date/time values in request bodies.
+	 *
+	 * @param exception unreadable request body exception
+	 * @param request current HTTP request
+	 * @return 400 Bad Request error response
+	 */
+	@ExceptionHandler(HttpMessageNotReadableException.class)
+	public ResponseEntity<ErrorResponse> handleHttpMessageNotReadableException(
+			HttpMessageNotReadableException exception,
+			HttpServletRequest request
+	) {
+		return buildError(HttpStatus.BAD_REQUEST, "Request body is invalid", request);
 	}
 
 	/**
@@ -116,6 +134,62 @@ public class GlobalExceptionHandler {
 	}
 
 	/**
+	 * Handles payout request state conflicts.
+	 *
+	 * @param exception payout request conflict exception
+	 * @param request current HTTP request
+	 * @return 409 Conflict error response
+	 */
+	@ExceptionHandler(PayoutRequestConflictException.class)
+	public ResponseEntity<?> handlePayoutRequestConflictException(
+			PayoutRequestConflictException exception,
+			HttpServletRequest request
+	) {
+		if (exception.getCode() != null) {
+			return ResponseEntity.status(HttpStatus.CONFLICT)
+					.body(new CodedErrorResponse(
+							Instant.now(),
+							HttpStatus.CONFLICT.value(),
+							HttpStatus.CONFLICT.getReasonPhrase(),
+							exception.getMessage(),
+							request.getRequestURI(),
+							exception.getCode()
+					));
+		}
+		return buildError(HttpStatus.CONFLICT, exception.getMessage(), request);
+	}
+
+	/**
+	 * Handles missing payout request rows.
+	 *
+	 * @param exception payout request not found exception
+	 * @param request current HTTP request
+	 * @return 404 Not Found error response
+	 */
+	@ExceptionHandler(PayoutRequestNotFoundException.class)
+	public ResponseEntity<ErrorResponse> handlePayoutRequestNotFoundException(
+			PayoutRequestNotFoundException exception,
+			HttpServletRequest request
+	) {
+		return buildError(HttpStatus.NOT_FOUND, exception.getMessage(), request);
+	}
+
+	/**
+	 * Handles inconsistent pay policy state outside the shift-start coded invariant.
+	 *
+	 * @param exception pay policy conflict
+	 * @param request current HTTP request
+	 * @return 409 Conflict error response
+	 */
+	@ExceptionHandler(PayPolicyConflictException.class)
+	public ResponseEntity<ErrorResponse> handlePayPolicyConflictException(
+			PayPolicyConflictException exception,
+			HttpServletRequest request
+	) {
+		return buildError(HttpStatus.CONFLICT, exception.getMessage(), request);
+	}
+
+	/**
 	 * Handles registration attempts with an already registered email.
 	 *
 	 * @param exception duplicate email exception
@@ -173,6 +247,54 @@ public class GlobalExceptionHandler {
 			HttpServletRequest request
 	) {
 		return buildError(HttpStatus.CONFLICT, exception.getMessage(), request);
+	}
+
+	/**
+	 * Handles broken company pay policy invariants at shift start.
+	 *
+	 * @param exception pay policy required exception
+	 * @param request current HTTP request
+	 * @return 409 Conflict response with machine-readable code
+	 */
+	@ExceptionHandler(PayPolicyRequiredException.class)
+	public ResponseEntity<CodedErrorResponse> handlePayPolicyRequiredException(
+			PayPolicyRequiredException exception,
+			HttpServletRequest request
+	) {
+		return ResponseEntity.status(HttpStatus.CONFLICT)
+				.body(new CodedErrorResponse(
+						Instant.now(),
+						HttpStatus.CONFLICT.value(),
+						HttpStatus.CONFLICT.getReasonPhrase(),
+						exception.getMessage(),
+						request.getRequestURI(),
+						PayPolicyRequiredException.CODE
+				));
+	}
+
+	/**
+	 * Handles short active shifts that require an explicit save/discard decision.
+	 *
+	 * @param exception short-shift decision exception
+	 * @param request current HTTP request
+	 * @return 409 Conflict response with machine-readable decision code and duration data
+	 */
+	@ExceptionHandler(ShortShiftRequiresDecisionException.class)
+	public ResponseEntity<ShortShiftConflictResponse> handleShortShiftRequiresDecisionException(
+			ShortShiftRequiresDecisionException exception,
+			HttpServletRequest request
+	) {
+		return ResponseEntity.status(HttpStatus.CONFLICT)
+				.body(new ShortShiftConflictResponse(
+						Instant.now(),
+						HttpStatus.CONFLICT.value(),
+						HttpStatus.CONFLICT.getReasonPhrase(),
+						exception.getMessage(),
+						request.getRequestURI(),
+						ShortShiftRequiresDecisionException.CODE,
+						exception.getDurationMinutes(),
+						exception.getThresholdMinutes()
+				));
 	}
 
 	/**

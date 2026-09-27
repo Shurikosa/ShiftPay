@@ -11,6 +11,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.hamcrest.Matchers.hasItem;
 
 /**
  * Controller integration tests for Springdoc OpenAPI and Swagger UI exposure.
@@ -36,8 +37,11 @@ class OpenApiControllerTests {
 				.andExpect(jsonPath("$.info.title").value("ShiftPay API"))
 				.andExpect(jsonPath("$.info.version").value("v1"))
 				.andExpect(jsonPath("$.info.description").value("OpenAPI documentation for the ShiftPay backend MVP: "
-						+ "authentication, current user, shift sessions, shift cancellation, active-shift pause tracking, "
-						+ "attendance, salary summary, and personal shift history."))
+						+ "authentication, current user, shift sessions, shift cancellation/discard, active-shift pause "
+						+ "tracking, attendance, salary summary, personal shift history, payroll requests, and company pay policies."))
+				.andExpect(jsonPath("$.paths['/api/v1/me/pay-policy'].get").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/me/pay-policy'].put").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/me/pay-policy/versions'].get").exists())
 				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.type").value("http"))
 				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.scheme").value("bearer"))
 				.andExpect(jsonPath("$.components.securitySchemes.bearerAuth.bearerFormat").value("JWT"))
@@ -55,6 +59,16 @@ class OpenApiControllerTests {
 	}
 
 	/**
+	 * Reads generated docs and expects discard to be exposed as an implemented POST endpoint.
+	 */
+	@Test
+	void apiDocsExposeImplementedShiftDiscardEndpoint() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.paths['/api/v1/shifts/{shiftId}/discard'].post").exists());
+	}
+
+	/**
 	 * Reads generated docs and expects pause to be exposed as implemented POST endpoints.
 	 */
 	@Test
@@ -65,6 +79,43 @@ class OpenApiControllerTests {
 				.andExpect(jsonPath("$.paths['/api/v1/shifts/{shiftId}/pauses/me/end'].post").exists())
 				.andExpect(jsonPath("$.paths['/api/v1/shifts/{shiftId}/pauses/all/start'].post").exists())
 				.andExpect(jsonPath("$.paths['/api/v1/shifts/{shiftId}/pauses/all/end'].post").exists());
+	}
+
+	/**
+	 * Reads generated docs and expects payroll request endpoints to be exposed.
+	 */
+	@Test
+	void apiDocsExposeImplementedPayrollEndpoints() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.paths['/api/v1/me/payable-attendances'].get").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/me/payout-requests/preview'].post").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/me/payout-requests'].post").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/me/payout-requests'].get").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/me/managed-payout-requests'].get").exists())
+				.andExpect(jsonPath(
+						"$.paths['/api/v1/me/managed-payout-requests/{requestId}/approve'].post"
+				).exists());
+	}
+
+	/**
+	 * Company Settings and the nullable historical currency fields remain visible in generated OpenAPI schemas.
+	 */
+	@Test
+	void apiDocsExposeCompanySettingsAndCurrencyLabelContract() throws Exception {
+		mockMvc.perform(get("/v3/api-docs"))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.paths['/api/v1/me/company'].get").exists())
+				.andExpect(jsonPath("$.paths['/api/v1/me/company'].put").exists())
+				.andExpect(jsonPath("$.components.schemas.CreateCompanyRequest.required", hasItem("currencyLabel")))
+				.andExpect(jsonPath("$.components.schemas.UpdateCompanySettingsRequest.required", hasItem("currencyLabel")))
+				.andExpect(jsonPath("$.components.schemas.CompanySettingsResponse.properties.currencyLabel").exists())
+				.andExpect(jsonPath("$.components.schemas.CompanySettingsResponse.properties.defaultWorkerHourlyRate").exists())
+				.andExpect(jsonPath("$.components.schemas.CompanySettingsResponse.properties.defaultForemanHourlyRate").exists())
+				.andExpect(jsonPath("$.components.schemas.ShiftResponse.properties.currencyLabel").exists())
+				.andExpect(jsonPath("$.components.schemas.AttendanceResponse.properties.currencyLabel").exists())
+				.andExpect(jsonPath("$.components.schemas.MyShiftHistoryResponse.properties.currencyLabel").exists())
+				.andExpect(jsonPath("$.components.schemas.PayoutRequestResponse.properties.currencyLabel").exists());
 	}
 
 	/**

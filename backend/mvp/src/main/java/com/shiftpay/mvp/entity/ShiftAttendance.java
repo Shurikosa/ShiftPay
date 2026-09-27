@@ -10,6 +10,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
@@ -71,6 +72,15 @@ public class ShiftAttendance {
 	private BigDecimal calculatedSalary;
 
 	@Setter
+	@Enumerated(EnumType.STRING)
+	@Column(name = "payment_status", nullable = false, length = 32)
+	private PaymentStatus paymentStatus = PaymentStatus.UNPAID;
+
+	@Setter
+	@Column(name = "paid_at")
+	private OffsetDateTime paidAt;
+
+	@Setter
 	@Column(name = "joined_at", nullable = false)
 	private OffsetDateTime joinedAt;
 
@@ -81,6 +91,10 @@ public class ShiftAttendance {
 	@Setter
 	@Column(name = "payable_start_time")
 	private OffsetDateTime payableStartTime;
+
+	@Setter
+	@OneToOne(mappedBy = "attendance", fetch = FetchType.LAZY)
+	private PayCalculation payCalculation;
 
 	@Column(name = "created_at", nullable = false, updatable = false)
 	private Instant createdAt;

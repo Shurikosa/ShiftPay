@@ -609,7 +609,8 @@ class PauseControllerTests {
 						.contentType(MediaType.APPLICATION_JSON)
 						.content("""
 								{
-								  "name": "%s"
+								  "name": "%s",
+								  "currencyLabel": "EUR"
 								}
 								""".formatted(companyName)))
 				.andExpect(status().isCreated())

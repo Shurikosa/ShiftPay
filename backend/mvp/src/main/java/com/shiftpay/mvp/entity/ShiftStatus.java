@@ -25,6 +25,11 @@ public enum ShiftStatus {
 	CLOSED,
 
 	/**
+	 * Terminal state for active short shifts explicitly not saved by the owner foreman.
+	 */
+	DISCARDED,
+
+	/**
 	 * Terminal state for open shifts cancelled before they start.
 	 */
 	CANCELLED

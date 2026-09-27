@@ -4,6 +4,8 @@ import com.shiftpay.mvp.dto.CreateCompanyRequest;
 import com.shiftpay.mvp.dto.CreateCompanyResponse;
 import com.shiftpay.mvp.dto.JoinCompanyRequest;
 import com.shiftpay.mvp.dto.JoinCompanyResponse;
+import com.shiftpay.mvp.dto.CompanySettingsResponse;
+import com.shiftpay.mvp.dto.UpdateCompanySettingsRequest;
 import com.shiftpay.mvp.entity.Company;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.User;
@@ -34,18 +36,32 @@ public class CompanyService {
 	private static final int JOIN_CODE_MAX_ATTEMPTS = 20;
 
 	private final CompanyRepository companyRepository;
+	private final CompanyTimeZoneService companyTimeZoneService;
+	private final PayPolicyService payPolicyService;
 	private final UserRepository userRepository;
+	private final CurrencyLabelValidator currencyLabelValidator;
 	private final SecureRandom secureRandom;
 
 	/**
 	 * Creates the service with repositories and secure join code generation.
 	 *
 	 * @param companyRepository company repository
+	 * @param companyTimeZoneService timezone resolver
+	 * @param payPolicyService pay policy service used for default policy creation
 	 * @param userRepository user repository used for company assignment
 	 */
-	public CompanyService(CompanyRepository companyRepository, UserRepository userRepository) {
+	public CompanyService(
+			CompanyRepository companyRepository,
+			CompanyTimeZoneService companyTimeZoneService,
+			PayPolicyService payPolicyService,
+			UserRepository userRepository,
+			CurrencyLabelValidator currencyLabelValidator
+	) {
 		this.companyRepository = companyRepository;
+		this.companyTimeZoneService = companyTimeZoneService;
+		this.payPolicyService = payPolicyService;
 		this.userRepository = userRepository;
+		this.currencyLabelValidator = currencyLabelValidator;
 		this.secureRandom = new SecureRandom();
 	}
 
@@ -74,9 +90,14 @@ public class CompanyService {
 		Company company = new Company();
 		company.setName(request.name().trim());
 		company.setJoinCode(generateUniqueJoinCode());
+		company.setTimeZone(companyTimeZoneService.resolveForCreate(request.timeZone()));
+		company.setCurrencyLabel(currencyLabelValidator.normalizeRequired(request.currencyLabel()));
+		company.setDefaultWorkerHourlyRate(request.defaultWorkerHourlyRate());
+		company.setDefaultForemanHourlyRate(request.defaultForemanHourlyRate());
 
 		try {
 			Company savedCompany = companyRepository.saveAndFlush(company);
+			payPolicyService.initializeDefaultPolicy(savedCompany, foreman);
 			foreman.setCompany(savedCompany);
 			userRepository.save(foreman);
 			return CreateCompanyResponse.from(savedCompany);
@@ -84,6 +105,40 @@ public class CompanyService {
 		catch (DataIntegrityViolationException exception) {
 			throw new CompanyConflictException("Company join code already exists");
 		}
+	}
+
+	@Transactional(readOnly = true)
+	public CompanySettingsResponse getMyCompany(AuthenticatedUserPrincipal principal) {
+		User foreman = userRepository.findWithCompanyById(principal.id())
+				.orElseThrow(() -> new JwtAuthenticationException("Authenticated user not found"));
+		if (foreman.getRole() != Role.FOREMAN) {
+			throw new com.shiftpay.mvp.exception.ForbiddenException();
+		}
+		if (foreman.getCompany() == null) {
+			throw new CompanyConflictException("Foreman must create a company before managing settings");
+		}
+		return CompanySettingsResponse.from(foreman.getCompany());
+	}
+
+	@Transactional
+	public CompanySettingsResponse updateMyCompany(
+			UpdateCompanySettingsRequest request,
+			AuthenticatedUserPrincipal principal
+	) {
+		User foreman = userRepository.findByIdWithCompanyForUpdate(principal.id())
+				.orElseThrow(() -> new JwtAuthenticationException("Authenticated user not found"));
+		if (foreman.getRole() != Role.FOREMAN) {
+			throw new com.shiftpay.mvp.exception.ForbiddenException();
+		}
+		Company company = foreman.getCompany();
+		if (company == null) {
+			throw new CompanyConflictException("Foreman must create a company before managing settings");
+		}
+		company.setName(request.name().trim());
+		company.setCurrencyLabel(currencyLabelValidator.normalizeRequired(request.currencyLabel()));
+		company.setDefaultWorkerHourlyRate(request.defaultWorkerHourlyRate());
+		company.setDefaultForemanHourlyRate(request.defaultForemanHourlyRate());
+		return CompanySettingsResponse.from(companyRepository.save(company));
 	}
 
 	/**

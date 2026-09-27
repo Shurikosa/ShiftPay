@@ -20,9 +20,13 @@ import java.time.OffsetDateTime;
  * @param joinCode code workers use to join while the shift is open
  * @param actualStartTime actual start time in UTC, if started
  * @param actualEndTime actual end time in UTC, if closed
+ * @param discardedAt discard audit timestamp, if discarded
+ * @param discardedBy user id that discarded the shift, if discarded
+ * @param discardReason discard audit reason, if discarded
  * @param defaultBreakMinutes default break minutes copied to attendance
  * @param defaultHourlyRate default hourly rate copied to attendance
  * @param foremanHourlyRate private owner-foreman rate, omitted for admins
+ * @param payPolicyVersionId frozen pay policy version id, null until start for new shifts
  * @param pauseState pause state for the current user's shift-detail perspective
  * @param createdBy user id of the creator
  */
@@ -30,16 +34,21 @@ public record ShiftResponse(
 		Long id,
 		Long companyId,
 		String companyName,
+		String currencyLabel,
 		String title,
 		String location,
 		ShiftStatus status,
 		String joinCode,
 		OffsetDateTime actualStartTime,
 		OffsetDateTime actualEndTime,
+		OffsetDateTime discardedAt,
+		Long discardedBy,
+		String discardReason,
 		Integer defaultBreakMinutes,
 		BigDecimal defaultHourlyRate,
 		@JsonInclude(JsonInclude.Include.NON_NULL)
 		BigDecimal foremanHourlyRate,
+		Long payPolicyVersionId,
 		PauseStateResponse pauseState,
 		Long createdBy
 ) {
@@ -72,15 +81,20 @@ public record ShiftResponse(
 				shiftSession.getId(),
 				shiftSession.getCompany().getId(),
 				shiftSession.getCompany().getName(),
+				shiftSession.getCurrencyLabel(),
 				shiftSession.getTitle(),
 				shiftSession.getLocation(),
 				shiftSession.getStatus(),
 				shiftSession.getJoinCode(),
 				shiftSession.getActualStartTime(),
 				shiftSession.getActualEndTime(),
+				shiftSession.getDiscardedAt(),
+				shiftSession.getDiscardedBy() == null ? null : shiftSession.getDiscardedBy().getId(),
+				shiftSession.getDiscardReason(),
 				shiftSession.getDefaultBreakMinutes(),
 				shiftSession.getDefaultHourlyRate(),
 				includePrivateForemanFields ? shiftSession.getForemanHourlyRate() : null,
+				shiftSession.getPayPolicyVersion() == null ? null : shiftSession.getPayPolicyVersion().getId(),
 				pauseState,
 				shiftSession.getCreatedBy().getId()
 		);

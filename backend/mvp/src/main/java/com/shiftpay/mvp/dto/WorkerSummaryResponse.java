@@ -1,5 +1,7 @@
 package com.shiftpay.mvp.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.math.BigDecimal;
 
 /**
@@ -13,6 +15,7 @@ import java.math.BigDecimal;
  * @param pauseMinutes persisted pause minutes deducted for the attendance
  * @param hourlyRate attendance rate used for salary calculation
  * @param salary persisted calculated salary with scale two
+ * @param payCalculation persisted premium pay breakdown after close
  */
 public record WorkerSummaryResponse(
 		Long attendanceId,
@@ -22,6 +25,8 @@ public record WorkerSummaryResponse(
 		Integer workedMinutes,
 		Integer pauseMinutes,
 		BigDecimal hourlyRate,
-		BigDecimal salary
+		BigDecimal salary,
+		@JsonInclude(JsonInclude.Include.NON_NULL)
+		PayCalculationResponse payCalculation
 ) {
 }

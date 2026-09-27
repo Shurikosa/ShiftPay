@@ -7,6 +7,7 @@ import com.shiftpay.mvp.dto.JoinShiftRequest;
 import com.shiftpay.mvp.dto.JoinShiftResponse;
 import com.shiftpay.mvp.dto.MyShiftHistoryResponse;
 import com.shiftpay.mvp.dto.PauseStateResponse;
+import com.shiftpay.mvp.dto.PayCalculationResponse;
 import com.shiftpay.mvp.entity.AttendanceStatus;
 import com.shiftpay.mvp.entity.Role;
 import com.shiftpay.mvp.entity.ShiftAttendance;
@@ -19,6 +20,9 @@ import com.shiftpay.mvp.exception.AttendanceNotFoundException;
 import com.shiftpay.mvp.exception.ForbiddenException;
 import com.shiftpay.mvp.exception.ShiftNotFoundException;
 import com.shiftpay.mvp.exception.ShiftStateConflictException;
+import com.shiftpay.mvp.repository.PayCalculationRepository;
+import com.shiftpay.mvp.repository.readmodel.ManagedAttendanceReadRow;
+import com.shiftpay.mvp.repository.readmodel.MyHistoryReadRow;
 import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
 import com.shiftpay.mvp.repository.ShiftPauseIntervalRepository;
 import com.shiftpay.mvp.repository.ShiftSessionRepository;
@@ -33,7 +37,9 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 /**
  * Business service for worker attendance workflows.
@@ -47,6 +53,7 @@ public class AttendanceService {
 	private final ShiftAttendanceRepository shiftAttendanceRepository;
 	private final ShiftPauseIntervalRepository shiftPauseIntervalRepository;
 	private final ShiftSessionRepository shiftSessionRepository;
+	private final PayCalculationRepository payCalculationRepository;
 	private final PauseViewFactory pauseViewFactory;
 	private final UserRepository userRepository;
 
@@ -56,6 +63,7 @@ public class AttendanceService {
 	 * @param shiftAttendanceRepository attendance repository
 	 * @param shiftPauseIntervalRepository pause interval repository
 	 * @param shiftSessionRepository shift repository used for state checks and locks
+	 * @param payCalculationRepository pay calculation snapshot repository
 	 * @param pauseViewFactory factory used to build mobile pause state fragments
 	 * @param userRepository user repository used to resolve the authenticated worker
 	 */
@@ -63,12 +71,14 @@ public class AttendanceService {
 			ShiftAttendanceRepository shiftAttendanceRepository,
 			ShiftPauseIntervalRepository shiftPauseIntervalRepository,
 			ShiftSessionRepository shiftSessionRepository,
+			PayCalculationRepository payCalculationRepository,
 			PauseViewFactory pauseViewFactory,
 			UserRepository userRepository
 	) {
 		this.shiftAttendanceRepository = shiftAttendanceRepository;
 		this.shiftPauseIntervalRepository = shiftPauseIntervalRepository;
 		this.shiftSessionRepository = shiftSessionRepository;
+		this.payCalculationRepository = payCalculationRepository;
 		this.pauseViewFactory = pauseViewFactory;
 		this.userRepository = userRepository;
 	}
@@ -131,32 +141,26 @@ public class AttendanceService {
 	 */
 	@Transactional(readOnly = true)
 	public List<MyShiftHistoryResponse> getMyShiftHistory(AuthenticatedUserPrincipal principal) {
-		List<ShiftAttendance> attendanceRows = shiftAttendanceRepository.findMyShiftHistoryByWorkerId(principal.id());
+		List<MyHistoryReadRow> attendanceRows = shiftAttendanceRepository.findMyHistoryReadRowsByWorkerId(principal.id());
+		List<Long> attendanceIds = attendanceRows.stream()
+				.filter(this::isFinalized)
+				.map(MyHistoryReadRow::attendanceId)
+				.toList();
+		Map<Long, PayCalculationResponse> snapshots = loadReadSnapshots(principal, attendanceIds);
 		List<Long> shiftIds = attendanceRows.stream()
-				.map((attendance) -> attendance.getShiftSession().getId())
+				.map(MyHistoryReadRow::shiftId)
 				.toList();
 		List<ShiftPauseInterval> pauseIntervals = shiftIds.isEmpty()
 				? List.of()
 				: shiftPauseIntervalRepository.findAllByShiftSessionIdIn(shiftIds);
+
 		return attendanceRows.stream()
-				.map((attendance) -> {
-					ShiftSession shiftSession = attendance.getShiftSession();
-					List<ShiftPauseInterval> intervals = pauseIntervals.stream()
-							.filter((pauseInterval) -> Objects.equals(
-									pauseInterval.getShiftSession().getId(),
-									shiftSession.getId()
-							))
-							.toList();
-					OffsetDateTime payableStartTime = workerPayableWindowStart(shiftSession, attendance);
-					PauseStateResponse pauseState = pauseViewFactory.forUser(
-							shiftSession,
-							intervals,
-							principal.id(),
-							attendance.getPauseMinutes(),
-							payableStartTime
-					);
-					return MyShiftHistoryResponse.from(attendance, pauseState, payableStartTime);
-				})
+				.map((attendance) -> toMyShiftHistoryResponse(
+						attendance,
+						snapshots,
+						pauseIntervals,
+						principal.id()
+				))
 				.toList();
 	}
 
@@ -179,23 +183,16 @@ public class AttendanceService {
 				.orElseThrow(ShiftNotFoundException::new);
 		validateAttendanceManagementAccess(shiftSession, principal);
 
-		List<ShiftAttendance> attendanceRows = shiftAttendanceRepository.findAllByShiftSessionIdWithWorker(shiftId);
+		List<ManagedAttendanceReadRow> attendanceRows = shiftAttendanceRepository.findManagedReadRowsByShiftId(shiftId);
+		List<Long> attendanceIds = attendanceRows.stream()
+				.filter(this::isFinalized)
+				.map(ManagedAttendanceReadRow::attendanceId)
+				.toList();
+		Map<Long, PayCalculationResponse> snapshots = loadReadSnapshots(principal, attendanceIds);
 		List<ShiftPauseInterval> pauseIntervals = shiftPauseIntervalRepository.findAllByShiftSessionId(shiftId);
+
 		return attendanceRows.stream()
-				.map((attendance) -> {
-					OffsetDateTime payableStartTime = workerPayableWindowStart(shiftSession, attendance);
-					return AttendanceResponse.from(
-							attendance,
-							pauseViewFactory.forUser(
-									shiftSession,
-									pauseIntervals,
-									attendance.getWorker().getId(),
-									attendance.getPauseMinutes(),
-									payableStartTime
-							),
-							payableStartTime
-					);
-				})
+				.map((attendance) -> toAttendanceResponse(attendance, snapshots, pauseIntervals))
 				.toList();
 	}
 
@@ -252,16 +249,128 @@ public class AttendanceService {
 		return null;
 	}
 
-	private OffsetDateTime workerPayableWindowStart(ShiftSession shiftSession, ShiftAttendance attendance) {
-		if (attendance.getStatus() != AttendanceStatus.APPROVED) {
+	private Map<Long, PayCalculationResponse> loadReadSnapshots(
+			AuthenticatedUserPrincipal principal,
+			List<Long> attendanceIds
+	) {
+		if (!canReceivePayCalculation(principal) || attendanceIds.isEmpty()) {
+			return Map.of();
+		}
+		return payCalculationRepository
+				.findAllByAttendanceIdInWithSegmentsForRead(attendanceIds)
+				.stream()
+				.collect(Collectors.toUnmodifiableMap(
+						calculation -> calculation.getAttendance().getId(),
+						PayCalculationResponse::from
+				));
+	}
+
+	private MyShiftHistoryResponse toMyShiftHistoryResponse(
+			MyHistoryReadRow attendance,
+			Map<Long, PayCalculationResponse> snapshots,
+			List<ShiftPauseInterval> pauseIntervals,
+			Long userId
+	) {
+		List<ShiftPauseInterval> attendancePauseIntervals = pauseIntervals.stream()
+				.filter((pauseInterval) -> Objects.equals(pauseInterval.getShiftSession().getId(), attendance.shiftId()))
+				.toList();
+		OffsetDateTime payableStartTime = payableStart(
+				attendance.shiftStatus(),
+				attendance.attendanceStatus(),
+				attendance.actualStartTime(),
+				attendance.payableStartTime()
+		);
+		PauseStateResponse pauseState = pauseViewFactory.forUser(
+				attendance.actualEndTime(),
+				attendancePauseIntervals,
+				userId,
+				attendance.pauseMinutes(),
+				payableStartTime
+		);
+
+		return new MyShiftHistoryResponse(
+				attendance.shiftId(),
+				attendance.attendanceId(),
+				attendance.companyId(),
+				attendance.companyName(),
+				attendance.currencyLabel(),
+				attendance.title(),
+				attendance.location(),
+				attendance.shiftStatus(),
+				attendance.actualStartTime(),
+				attendance.actualEndTime(),
+				attendance.attendanceStatus(),
+				attendance.paymentStatus(),
+				attendance.hourlyRate(),
+				attendance.breakMinutes(),
+				payableStartTime,
+				attendance.pauseMinutes(),
+				attendance.workedMinutes(),
+				attendance.calculatedSalary(),
+				snapshots.get(attendance.attendanceId()),
+				pauseState
+		);
+	}
+
+	private AttendanceResponse toAttendanceResponse(
+			ManagedAttendanceReadRow attendance,
+			Map<Long, PayCalculationResponse> snapshots,
+			List<ShiftPauseInterval> pauseIntervals
+	) {
+		OffsetDateTime payableStartTime = payableStart(
+				attendance.shiftStatus(),
+				attendance.attendanceStatus(),
+				attendance.actualStartTime(),
+				attendance.payableStartTime()
+		);
+		PauseStateResponse pauseState = pauseViewFactory.forUser(
+				attendance.actualEndTime(),
+				pauseIntervals,
+				attendance.workerId(),
+				attendance.pauseMinutes(),
+				payableStartTime
+		);
+
+		return new AttendanceResponse(
+				attendance.attendanceId(),
+				attendance.workerId(),
+				attendance.firstName(),
+				attendance.lastName(),
+				attendance.attendanceStatus(),
+				attendance.paymentStatus(),
+				attendance.hourlyRate(),
+				attendance.currencyLabel(),
+				attendance.breakMinutes(),
+				payableStartTime,
+				attendance.pauseMinutes(),
+				attendance.workedMinutes(),
+				attendance.calculatedSalary(),
+				snapshots.get(attendance.attendanceId()),
+				pauseState,
+				attendance.joinedAt(),
+				attendance.approvedAt()
+		);
+	}
+
+	private boolean isFinalized(MyHistoryReadRow row) {
+		return row.shiftStatus() == ShiftStatus.CLOSED && row.attendanceStatus() == AttendanceStatus.APPROVED
+				&& row.calculatedSalary() != null;
+	}
+
+	private boolean isFinalized(ManagedAttendanceReadRow row) {
+		return row.shiftStatus() == ShiftStatus.CLOSED && row.attendanceStatus() == AttendanceStatus.APPROVED
+				&& row.calculatedSalary() != null;
+	}
+
+	private OffsetDateTime payableStart(ShiftStatus shiftStatus, AttendanceStatus status, OffsetDateTime actualStart, OffsetDateTime stored) {
+		if (status != AttendanceStatus.APPROVED || shiftStatus == ShiftStatus.DISCARDED) {
 			return null;
 		}
-		OffsetDateTime actualStartTime = shiftSession.getActualStartTime();
-		OffsetDateTime payableStartTime = attendance.getPayableStartTime();
-		if (actualStartTime == null || payableStartTime == null || !payableStartTime.isAfter(actualStartTime)) {
-			return actualStartTime;
-		}
-		return payableStartTime;
+		return actualStart == null || stored == null || !stored.isAfter(actualStart) ? actualStart : stored;
+	}
+
+	private boolean canReceivePayCalculation(AuthenticatedUserPrincipal principal) {
+		return principal.role() == Role.WORKER || principal.role() == Role.FOREMAN;
 	}
 
 	/**

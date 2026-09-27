@@ -1,12 +1,16 @@
 package com.shiftpay.mvp.repository;
 
 import com.shiftpay.mvp.entity.ShiftAttendance;
+import com.shiftpay.mvp.repository.readmodel.ManagedAttendanceReadRow;
+import com.shiftpay.mvp.repository.readmodel.MyHistoryReadRow;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -35,7 +39,7 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 	 * @return attendance row when the worker joined the shift
 	 */
 	@Query("""
-			select attendance
+			select distinct attendance
 			from ShiftAttendance attendance
 			join fetch attendance.shiftSession shiftSession
 			join fetch shiftSession.company
@@ -81,7 +85,11 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 	@Query("""
 			select attendance
 			from ShiftAttendance attendance
-			where attendance.shiftSession.id = :shiftId
+			where attendance.id in (
+				select attendanceId.id
+				from ShiftAttendance attendanceId
+				where attendanceId.shiftSession.id = :shiftId
+			)
 			order by attendance.id asc
 			""")
 	List<ShiftAttendance> findAllByShiftSessionIdForUpdate(@Param("shiftId") Long shiftId);
@@ -102,6 +110,44 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 	List<ShiftAttendance> findAllByShiftSessionIdWithWorker(@Param("shiftId") Long shiftId);
 
 	/**
+	 * Loads scalar rows for {@code GET /api/v1/shifts/{shiftId}/attendance}.
+	 *
+	 * <p>The projection supplies the managed-attendance response without materializing {@link ShiftAttendance}, whose
+	 * inverse pay-calculation association can otherwise trigger row-linear selects.</p>
+	 *
+	 * @param shiftId shift session id
+	 * @return scalar attendance rows ordered by join time and id
+	 */
+	@Query("""
+			select new com.shiftpay.mvp.repository.readmodel.ManagedAttendanceReadRow(
+				attendance.id,
+				worker.id,
+				worker.firstName,
+				worker.lastName,
+				attendance.status,
+				attendance.paymentStatus,
+				attendance.hourlyRate,
+				shift.currencyLabel,
+				attendance.breakMinutes,
+				attendance.payableStartTime,
+				attendance.pauseMinutes,
+				attendance.workedMinutes,
+				attendance.calculatedSalary,
+				attendance.joinedAt,
+				attendance.approvedAt,
+				shift.status,
+				shift.actualStartTime,
+				shift.actualEndTime
+			)
+			from ShiftAttendance attendance
+			join attendance.worker worker
+			join attendance.shiftSession shift
+			where shift.id = :shiftId
+			order by attendance.joinedAt asc, attendance.id asc
+			""")
+	List<ManagedAttendanceReadRow> findManagedReadRowsByShiftId(@Param("shiftId") Long shiftId);
+
+	/**
 	 * Lists the current user's worker-attendance history and fetches shift details in the same query.
 	 *
 	 * @param workerId current authenticated user id
@@ -117,11 +163,171 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 				com.shiftpay.mvp.entity.ShiftStatus.OPEN,
 				com.shiftpay.mvp.entity.ShiftStatus.ACTIVE,
 				com.shiftpay.mvp.entity.ShiftStatus.CLOSED,
+				com.shiftpay.mvp.entity.ShiftStatus.DISCARDED,
 				com.shiftpay.mvp.entity.ShiftStatus.CANCELLED
 			  )
 			order by attendance.joinedAt desc, attendance.id desc
 			""")
 	List<ShiftAttendance> findMyShiftHistoryByWorkerId(@Param("workerId") Long workerId);
+
+	/**
+	 * Loads scalar rows for {@code GET /api/v1/me/shifts}.
+	 *
+	 * <p>The projection supplies personal-history response fields without materializing {@link ShiftAttendance}, whose
+	 * inverse pay-calculation association can otherwise trigger row-linear selects.</p>
+	 *
+	 * @param workerId authenticated worker id
+	 * @return scalar history rows ordered by newest join time and id
+	 */
+	@Query("""
+			select new com.shiftpay.mvp.repository.readmodel.MyHistoryReadRow(
+				shift.id,
+				attendance.id,
+				company.id,
+				company.name,
+				shift.currencyLabel,
+				shift.title,
+				shift.location,
+				shift.status,
+				shift.actualStartTime,
+				shift.actualEndTime,
+				attendance.status,
+				attendance.paymentStatus,
+				attendance.hourlyRate,
+				attendance.breakMinutes,
+				attendance.payableStartTime,
+				attendance.pauseMinutes,
+				attendance.workedMinutes,
+				attendance.calculatedSalary
+			)
+			from ShiftAttendance attendance
+			join attendance.shiftSession shift
+			join shift.company company
+			where attendance.worker.id = :workerId
+			  and shift.status in (
+				com.shiftpay.mvp.entity.ShiftStatus.OPEN,
+				com.shiftpay.mvp.entity.ShiftStatus.ACTIVE,
+				com.shiftpay.mvp.entity.ShiftStatus.CLOSED,
+				com.shiftpay.mvp.entity.ShiftStatus.DISCARDED,
+				com.shiftpay.mvp.entity.ShiftStatus.CANCELLED
+			  )
+			order by attendance.joinedAt desc, attendance.id desc
+			""")
+	List<MyHistoryReadRow> findMyHistoryReadRowsByWorkerId(@Param("workerId") Long workerId);
+
+	/**
+	 * Lists payable closed attendance for the worker payroll screen.
+	 *
+	 * @param workerId current worker id
+	 * @param companyId current worker company id
+	 * @return payable attendance ordered by closed shift end time and id
+	 */
+	@Query("""
+			select distinct attendance
+			from ShiftAttendance attendance
+			join fetch attendance.shiftSession shiftSession
+			join fetch shiftSession.company
+			join fetch shiftSession.createdBy
+			left join fetch attendance.payCalculation calculation
+			left join fetch calculation.segments
+			where attendance.worker.id = :workerId
+			  and shiftSession.company.id = :companyId
+			  and attendance.status = com.shiftpay.mvp.entity.AttendanceStatus.APPROVED
+			  and shiftSession.status = com.shiftpay.mvp.entity.ShiftStatus.CLOSED
+			  and attendance.paymentStatus = com.shiftpay.mvp.entity.PaymentStatus.UNPAID
+			  and attendance.workedMinutes is not null
+			  and attendance.calculatedSalary is not null
+			order by shiftSession.actualEndTime desc, attendance.id desc
+			""")
+	List<ShiftAttendance> findPayableByWorkerIdAndCompanyId(
+			@Param("workerId") Long workerId,
+			@Param("companyId") Long companyId
+	);
+
+	/**
+	 * Loads selected attendance rows for a worker payout preview.
+	 *
+	 * @param attendanceIds selected attendance ids
+	 * @param workerId current worker id
+	 * @return selected attendance owned by the worker
+	 */
+	@Query("""
+			select attendance
+			from ShiftAttendance attendance
+			join fetch attendance.worker worker
+			left join fetch worker.company
+			join fetch attendance.shiftSession shiftSession
+			join fetch shiftSession.company
+			join fetch shiftSession.createdBy
+			where attendance.id in :attendanceIds
+			  and worker.id = :workerId
+			""")
+	List<ShiftAttendance> findSelectedByIdsAndWorkerIdWithDetails(
+			@Param("attendanceIds") Collection<Long> attendanceIds,
+			@Param("workerId") Long workerId
+	);
+
+	/**
+	 * Locks selected attendance rows before payout request creation.
+	 *
+	 * @param attendanceIds selected attendance ids
+	 * @param workerId current worker id
+	 * @return locked selected attendance owned by the worker
+	 */
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("""
+			select attendance
+			from ShiftAttendance attendance
+			where attendance.id in (
+				select attendanceId.id
+				from ShiftAttendance attendanceId
+				where attendanceId.id in :attendanceIds
+				  and attendanceId.worker.id = :workerId
+			)
+			""")
+	List<ShiftAttendance> findSelectedByIdsAndWorkerIdForUpdate(
+			@Param("attendanceIds") Collection<Long> attendanceIds,
+			@Param("workerId") Long workerId
+	);
+
+	/**
+	 * Loads the to-one associations needed to validate and snapshot a locked payout selection.
+	 *
+	 * <p>This deliberately does not fetch a {@code PayCalculation}: payout flows load calculation snapshots only
+	 * after all selection validation has succeeded, using their dedicated batch query.</p>
+	 *
+	 * @param attendanceIds ids already locked by the payout creation flow
+	 * @return attendance rows with worker, company, shift, and shift foreman details
+	 */
+	@Query("""
+			select attendance
+			from ShiftAttendance attendance
+			join fetch attendance.worker worker
+			left join fetch worker.company
+			join fetch attendance.shiftSession shiftSession
+			join fetch shiftSession.company
+			join fetch shiftSession.createdBy
+			where attendance.id in :attendanceIds
+			""")
+	List<ShiftAttendance> findAllByIdInWithPayoutDetails(@Param("attendanceIds") Collection<Long> attendanceIds);
+
+	/**
+	 * Locks attendance rows selected by a payout request during approval.
+	 *
+	 * @param attendanceIds selected attendance ids
+	 * @return locked attendance rows with shift details
+	 */
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("""
+			select attendance
+			from ShiftAttendance attendance
+			where attendance.id in (
+				select attendanceId.id
+				from ShiftAttendance attendanceId
+				where attendanceId.id in :attendanceIds
+			)
+			""")
+	List<ShiftAttendance> findAllByIdInForUpdate(@Param("attendanceIds") Collection<Long> attendanceIds);
 
 	/**
 	 * Lists approved attendance for a closed shift summary and fetches worker identity in the same query.
@@ -139,5 +345,39 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 			""")
 	List<ShiftAttendance> findApprovedByShiftSessionIdWithWorkerOrderByWorkerName(
 			@Param("shiftId") Long shiftId
+	);
+
+	/**
+	 * Finds previous finalized worker attendance in the same company for overtime context.
+	 *
+	 * @param workerId worker id
+	 * @param companyId company id
+	 * @param currentAttendanceId attendance currently being closed
+	 * @param actualEndBeforeExclusive current shift end time upper bound
+	 * @return previous finalized attendance rows with calculation snapshots
+	 */
+	@Query("""
+			select distinct attendance
+			from ShiftAttendance attendance
+			join fetch attendance.shiftSession shiftSession
+			join fetch shiftSession.company
+			left join fetch attendance.payCalculation calculation
+			left join fetch calculation.segments
+			where attendance.worker.id = :workerId
+			  and shiftSession.company.id = :companyId
+			  and attendance.id <> :currentAttendanceId
+			  and attendance.status = com.shiftpay.mvp.entity.AttendanceStatus.APPROVED
+			  and shiftSession.status = com.shiftpay.mvp.entity.ShiftStatus.CLOSED
+			  and attendance.workedMinutes is not null
+			  and attendance.calculatedSalary is not null
+			  and shiftSession.actualStartTime is not null
+			  and shiftSession.actualEndTime is not null
+			  and shiftSession.actualEndTime <= :actualEndBeforeExclusive
+			""")
+	List<ShiftAttendance> findPreviousFinalizedForOvertimeContext(
+			@Param("workerId") Long workerId,
+			@Param("companyId") Long companyId,
+			@Param("currentAttendanceId") Long currentAttendanceId,
+			@Param("actualEndBeforeExclusive") OffsetDateTime actualEndBeforeExclusive
 	);
 }

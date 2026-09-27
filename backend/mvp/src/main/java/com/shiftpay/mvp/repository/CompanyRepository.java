@@ -39,4 +39,14 @@ public interface CompanyRepository extends JpaRepository<Company, Long> {
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("select company from Company company where company.joinCode = :joinCode")
 	Optional<Company> findByJoinCodeForUpdate(@Param("joinCode") String joinCode);
+
+	/**
+	 * Locks a company by id for policy initialization.
+	 *
+	 * @param id company id
+	 * @return locked company when present
+	 */
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("select company from Company company where company.id = :id")
+	Optional<Company> findByIdForUpdate(@Param("id") Long id);
 }

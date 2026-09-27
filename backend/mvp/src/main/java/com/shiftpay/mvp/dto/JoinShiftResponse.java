@@ -13,13 +13,15 @@ import java.math.BigDecimal;
  * @param workerId worker user id
  * @param status initial attendance status, normally {@code JOINED}
  * @param hourlyRate rate snapshot copied from the shift default hourly rate
+ * @param currencyLabel nullable shift currency-label snapshot for the hourly rate
  */
 public record JoinShiftResponse(
 		Long attendanceId,
 		Long shiftId,
 		Long workerId,
 		AttendanceStatus status,
-		BigDecimal hourlyRate
+		BigDecimal hourlyRate,
+		String currencyLabel
 ) {
 
 	/**
@@ -34,7 +36,8 @@ public record JoinShiftResponse(
 				attendance.getShiftSession().getId(),
 				attendance.getWorker().getId(),
 				attendance.getStatus(),
-				attendance.getHourlyRate()
+				attendance.getHourlyRate(),
+				attendance.getShiftSession().getCurrencyLabel()
 		);
 	}
 }

@@ -27,6 +27,7 @@ import static org.hamcrest.Matchers.matchesPattern;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -44,6 +45,7 @@ class CompanyControllerTests {
 	private static final String LOGIN_URL = "/api/v1/auth/login";
 	private static final String CREATE_COMPANY_URL = "/api/v1/companies";
 	private static final String JOIN_COMPANY_URL = "/api/v1/companies/join";
+	private static final String COMPANY_SETTINGS_URL = "/api/v1/me/company";
 	private static final String CURRENT_USER_URL = "/api/v1/users/me";
 	private static final Pattern ACCESS_TOKEN_PATTERN = Pattern.compile("\"accessToken\":\"([^\"]+)\"");
 	private static final Pattern JOIN_CODE_PATTERN = Pattern.compile("\"joinCode\":\"([^\"]+)\"");
@@ -83,7 +85,11 @@ class CompanyControllerTests {
 				.andExpect(jsonPath("$.id").isNumber())
 				.andExpect(jsonPath("$.name").value("Acme Construction"))
 				.andExpect(jsonPath("$.joinCode").value(matchesPattern("[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}")))
-				.andExpect(jsonPath("$.*", hasSize(3)))
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"))
+				.andExpect(jsonPath("$.defaultWorkerHourlyRate").value(nullValue()))
+				.andExpect(jsonPath("$.defaultForemanHourlyRate").value(nullValue()))
+				.andExpect(jsonPath("$.timeZone").value("Europe/Berlin"))
+				.andExpect(jsonPath("$.*", hasSize(7)))
 				.andReturn();
 
 		String joinCode = extractJoinCode(result);
@@ -91,6 +97,42 @@ class CompanyControllerTests {
 		assertThat(foreman.getCompany()).isNotNull();
 		assertThat(foreman.getCompany().getName()).isEqualTo("Acme Construction");
 		assertThat(foreman.getCompany().getJoinCode()).isEqualTo(joinCode);
+	}
+
+	/**
+	 * Accepts explicit IANA timezone ids and persists them as the company timezone.
+	 */
+	@Test
+	void foremanCreatesCompanyWithValidIanaTimezone() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+
+		createCompany(foremanToken, "Acme Construction", "America/New_York")
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.timeZone").value("America/New_York"));
+
+		Company company = companyRepository.findAll().getFirst();
+		assertThat(company.getTimeZone()).isEqualTo("America/New_York");
+	}
+
+	/**
+	 * Rejects fixed-offset and GMT-style ids that Java can parse but are not IANA zone ids.
+	 */
+	@Test
+	void foremanCompanyTimezoneRejectsNonIanaZoneIds() throws Exception {
+		String offsetForemanToken = registerAndLogin("offset.foreman@example.com", "FOREMAN");
+		createCompany(offsetForemanToken, "Offset Company", "+02:00")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message").value("timeZone: must be a valid IANA timezone id"));
+
+		String zForemanToken = registerAndLogin("z.foreman@example.com", "FOREMAN");
+		createCompany(zForemanToken, "Z Company", "Z")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message").value("timeZone: must be a valid IANA timezone id"));
+
+		String gmtOffsetForemanToken = registerAndLogin("gmt.foreman@example.com", "FOREMAN");
+		createCompany(gmtOffsetForemanToken, "GMT Offset Company", "GMT+02:00")
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message").value("timeZone: must be a valid IANA timezone id"));
 	}
 
 	/**
@@ -122,8 +164,10 @@ class CompanyControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.id").isNumber())
 				.andExpect(jsonPath("$.name").value("Acme Construction"))
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"))
+				.andExpect(jsonPath("$.timeZone").value("Europe/Berlin"))
 				.andExpect(jsonPath("$.joinCode").doesNotExist())
-				.andExpect(jsonPath("$.*", hasSize(2)));
+				.andExpect(jsonPath("$.*", hasSize(4)));
 
 		User worker = userRepository.findWithCompanyByEmail("worker@example.com").orElseThrow();
 		assertThat(worker.getCompany()).isNotNull();
@@ -183,7 +227,11 @@ class CompanyControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.company.id").isNumber())
 				.andExpect(jsonPath("$.company.name").value("Acme Construction"))
-				.andExpect(jsonPath("$.company.joinCode").value(joinCode));
+				.andExpect(jsonPath("$.company.joinCode").value(joinCode))
+				.andExpect(jsonPath("$.company.currencyLabel").value("EUR"))
+				.andExpect(jsonPath("$.company.defaultWorkerHourlyRate").doesNotExist())
+				.andExpect(jsonPath("$.company.defaultForemanHourlyRate").doesNotExist())
+				.andExpect(jsonPath("$.company.timeZone").value("Europe/Berlin"));
 
 		String workerToken = registerAndLogin("worker@example.com", "WORKER");
 		joinCompany(workerToken, joinCode).andExpect(status().isOk());
@@ -192,6 +240,10 @@ class CompanyControllerTests {
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.company.id").isNumber())
 				.andExpect(jsonPath("$.company.name").value("Acme Construction"))
+				.andExpect(jsonPath("$.company.currencyLabel").value("EUR"))
+				.andExpect(jsonPath("$.company.defaultWorkerHourlyRate").doesNotExist())
+				.andExpect(jsonPath("$.company.defaultForemanHourlyRate").doesNotExist())
+				.andExpect(jsonPath("$.company.timeZone").value("Europe/Berlin"))
 				.andExpect(jsonPath("$.company.joinCode").doesNotExist());
 	}
 
@@ -228,6 +280,107 @@ class CompanyControllerTests {
 				.andExpect(jsonPath("$.status").value(403))
 				.andExpect(jsonPath("$.message").value("Forbidden"))
 				.andExpect(jsonPath("$.path").value(JOIN_COMPANY_URL));
+	}
+
+	/**
+	 * Company Settings exposes mutable defaults only to the owning FOREMAN and preserves read-only company fields.
+	 */
+	@Test
+	void foremanCanReadAndReplaceCompanySettingsWithoutChangingJoinCodeOrTimeZone() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		MvcResult created = mockMvc.perform(post(CREATE_COMPANY_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "name": "Acme Construction",
+								  "currencyLabel": "  EUR  ",
+								  "defaultWorkerHourlyRate": 20.00,
+								  "defaultForemanHourlyRate": 30.00,
+								  "timeZone": "America/New_York"
+								}
+								"""))
+				.andExpect(status().isCreated())
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"))
+				.andExpect(jsonPath("$.defaultWorkerHourlyRate").value(20.00))
+				.andExpect(jsonPath("$.defaultForemanHourlyRate").value(30.00))
+				.andReturn();
+		String joinCode = extractJoinCode(created);
+
+		mockMvc.perform(get(COMPANY_SETTINGS_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.name").value("Acme Construction"))
+				.andExpect(jsonPath("$.joinCode").value(joinCode))
+				.andExpect(jsonPath("$.currencyLabel").value("EUR"))
+				.andExpect(jsonPath("$.defaultWorkerHourlyRate").value(20.00))
+				.andExpect(jsonPath("$.defaultForemanHourlyRate").value(30.00))
+				.andExpect(jsonPath("$.timeZone").value("America/New_York"));
+
+		mockMvc.perform(put(COMPANY_SETTINGS_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("""
+								{
+								  "name": "Acme Construction GmbH",
+								  "currencyLabel": "\u00A0грн\u2009",
+								  "defaultWorkerHourlyRate": null,
+								  "defaultForemanHourlyRate": 0
+								}
+								"""))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.name").value("Acme Construction GmbH"))
+				.andExpect(jsonPath("$.joinCode").value(joinCode))
+				.andExpect(jsonPath("$.currencyLabel").value("грн"))
+				.andExpect(jsonPath("$.defaultWorkerHourlyRate").value(nullValue()))
+				.andExpect(jsonPath("$.defaultForemanHourlyRate").value(0))
+				.andExpect(jsonPath("$.timeZone").value("America/New_York"));
+	}
+
+	/**
+	 * The endpoint rejects non-FOREMAN principals and applies the exact server-side label validation.
+	 */
+	@Test
+	void companySettingsAreForemanOnlyAndRejectBoundaryWhitespaceOnlyLabels() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		createCompany(foremanToken, "Acme Construction").andExpect(status().isCreated());
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+		String adminToken = createAdminAndLogin();
+
+		for (String accessToken : new String[]{workerToken, adminToken}) {
+			mockMvc.perform(get(COMPANY_SETTINGS_URL)
+							.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken))
+					.andExpect(status().isForbidden());
+			mockMvc.perform(put(COMPANY_SETTINGS_URL)
+							.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+							.contentType(MediaType.APPLICATION_JSON)
+							.content("{\"name\":\"No access\",\"currencyLabel\":\"EUR\"}"))
+					.andExpect(status().isForbidden());
+		}
+
+		mockMvc.perform(put(COMPANY_SETTINGS_URL)
+						.header(HttpHeaders.AUTHORIZATION, "Bearer " + foremanToken)
+						.contentType(MediaType.APPLICATION_JSON)
+						.content("{\"name\":\"Acme Construction\",\"currencyLabel\":\"\\u00A0\\u2009\"}"))
+				.andExpect(status().isBadRequest())
+				.andExpect(jsonPath("$.message").value("currencyLabel: must not be blank"));
+	}
+
+	/**
+	 * Migrated company labels remain an explicit nullable compact response field rather than being inferred on join.
+	 */
+	@Test
+	void companyJoinSerializesLegacyNullCurrencyLabel() throws Exception {
+		String foremanToken = registerAndLogin("foreman@example.com", "FOREMAN");
+		String joinCode = extractJoinCode(createCompany(foremanToken, "Acme Construction").andReturn());
+		Company company = companyRepository.findAll().getFirst();
+		company.setCurrencyLabel(null);
+		companyRepository.saveAndFlush(company);
+		String workerToken = registerAndLogin("worker@example.com", "WORKER");
+
+		joinCompany(workerToken, joinCode)
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.currencyLabel").value(nullValue()));
 	}
 
 	/**
@@ -282,14 +435,35 @@ class CompanyControllerTests {
 			String accessToken,
 			String companyName
 	) throws Exception {
+		return createCompany(accessToken, companyName, null);
+	}
+
+	/**
+	 * Sends the create company request with an optional timezone.
+	 *
+	 * @param accessToken JWT for the caller
+	 * @param companyName company name
+	 * @param timeZone optional timezone id
+	 * @return MockMvc result actions
+	 */
+	private org.springframework.test.web.servlet.ResultActions createCompany(
+			String accessToken,
+			String companyName,
+			String timeZone
+	) throws Exception {
+		String timezoneJson = timeZone == null ? "" : """
+				,
+						  "timeZone": "%s"
+				""".formatted(timeZone);
 		return mockMvc.perform(post(CREATE_COMPANY_URL)
 				.header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
 				.contentType(MediaType.APPLICATION_JSON)
 				.content("""
 						{
-						  "name": "%s"
+						  "name": "%s",
+						  "currencyLabel": "EUR"%s
 						}
-						""".formatted(companyName)));
+						""".formatted(companyName, timezoneJson)));
 	}
 
 	/**
