@@ -834,6 +834,64 @@ mobile/
     store/
     types/
     utils/
+
+Mobile Presentation Architecture
+
+The presentation dependency direction is:
+
+theme tokens -> shared semantic components -> screens
+
+Typed API clients, auth/data contexts, and navigation types remain outside that
+visual dependency chain. Screens compose them; shared presentation components
+must not call backend endpoints, own authorization, or duplicate domain logic.
+
+- `src/utils/theme.ts` is the source for semantic colors, typography, spacing,
+  radii, control dimensions, and status palettes defined by
+  `docs/UI_DESIGN_SYSTEM.md`. New raw color literals or repeated ad hoc visual
+  dimensions must not be scattered through screen files.
+- Evolve the current `Screen`, `Button`, `FormField`, `StatusBadge`,
+  `StateMessage`, `SegmentedControl`, shift-card, and payout-card components.
+  Introduce the documented `ScreenHeader`, `Card`, `Metric`, `SettingGroup`,
+  `EmptyState`, or `Feedback` abstractions only where they remove duplication
+  and preserve current behavior.
+- Formatting helpers own presentation-only locale, timezone, money-label,
+  duration, nullable-value, and approved status-copy formatting. They display
+  returned values and must not calculate salary, premiums, overtime, rounded
+  payroll minutes, payout totals, or historical labels.
+- Numeric money is formatted with the device locale as a decimal and followed
+  by the exact persisted `currencyLabel`. The label is opaque text. A null
+  historical label remains explicitly unavailable; a missing amount never
+  becomes zero.
+- Formatting keeps scale-2 currency-settlement values, whole-number payout
+  values, and scale-8 calculation-audit fields distinct. Audit helpers configure
+  up to eight fraction digits explicitly and display the returned field without
+  relying on locale-formatting defaults, re-summing segments, or reconciling it
+  to the separately returned settlement value.
+- Company-domain date/time display uses a returned Company/PayPolicy timezone
+  where available, or authenticated current-company timezone for its records.
+  If neither is available, device timezone is an explicit display fallback
+  only and never policy-boundary authority.
+- Navigation remains the typed native-stack boundary documented in
+  `MOBILE_UX.md`. Bottom tabs, Shifts, More, account, or legal routes are not
+  introduced in the first redesign phase. Role gates and existing transitions
+  remain authoritative.
+- Existing contexts and screen coordinators retain loading, refresh, mutation,
+  stale-response, focus, and unmount ownership. A visual component may render
+  those states but must not weaken their sequencing.
+- In particular, preserve Company Settings load sequencing and unmount guards,
+  Create Shift's settings sequence and user-edit guards, Worker Payroll's
+  mutation/selection-preview coordination, and Pay Rules' focus-generation,
+  freshness, queued-load, and stale-callback coordinator.
+- Accessibility and layout behavior are architectural requirements: safe-area
+  and keyboard handling, scroll reachability, large font scaling, long-text
+  wrapping, accessible roles/names/states, and minimum touch targets belong in
+  shared primitives where possible.
+
+The backend remains the source of truth for business and calculated data. The
+only permitted client-side monetary illustration is the canonical Pay Rules
+single-rule preview using Company.defaultWorkerHourlyRate; it is not a payable
+result. Presentation work does not change DTOs or contracts unless a separate
+canonical docs change is approved first.
 API Layer
 
 All backend calls should be inside:

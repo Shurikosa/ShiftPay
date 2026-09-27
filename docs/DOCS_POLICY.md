@@ -12,6 +12,7 @@ canonical documentation location and the single source of truth for:
 - API contracts
 - architecture decisions
 - mobile UX expectations
+- mobile visual and interaction design
 - task coordination
 
 The canonical docs are:
@@ -20,7 +21,15 @@ The canonical docs are:
 - `/home/oleksandr/Projects/ShiftPay/docs/SPEC.md`
 - `/home/oleksandr/Projects/ShiftPay/docs/ARCHITECTURE.md`
 - `/home/oleksandr/Projects/ShiftPay/docs/MOBILE_UX.md`
+- `/home/oleksandr/Projects/ShiftPay/docs/UI_DESIGN_SYSTEM.md`
 - `/home/oleksandr/Projects/ShiftPay/docs/TASKS.md`
+
+`/home/oleksandr/Projects/ShiftPay/docs/DesignExample.png` is a repository
+visual reference linked from `UI_DESIGN_SYSTEM.md`. It is not a canonical
+Markdown document or contract authority. It may guide visual direction only.
+Product behavior, routes, roles, statuses, data, and calculations remain
+governed by the canonical Markdown documents and must not be inferred from the
+image.
 
 ## Start With Docs
 

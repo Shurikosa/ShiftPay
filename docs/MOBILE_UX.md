@@ -2,10 +2,11 @@
 
 This document defines the practical UX plan for the ShiftPay mobile MVP.
 
-It is not a final visual design system and does not replace `docs/TASKS.md`.
-`docs/TASKS.md` remains the backlog and milestone tracker. This document gives
-the mobile agent enough screen, navigation, and interaction detail to implement
-Milestone 7 and Milestone 8 without inventing product flow.
+It defines role flows, screen behavior, and real data states. The canonical
+visual and component contract is `docs/UI_DESIGN_SYSTEM.md`, while
+`docs/DesignExample.png` is visual direction only. `docs/TASKS.md` remains the
+ordered backlog. Together, these documents give the mobile agent enough detail
+to redesign the interface without inventing product behavior.
 
 ## 1. Mobile UX Goal
 
@@ -84,6 +85,13 @@ the Vaadin admin dashboard.
 - Do not create a landing page, marketing hero, or decorative onboarding.
 - Do not put business logic in UI components.
 - Render returned monetary amounts with the applicable backend currencyLabel as plain text, for example `20.00 EUR` or `20.00 грн`. Do not assume ISO codes, apply exchange rates, or replace historical labels with the current company label.
+- Format numeric text and date language with the device locale. Use the returned
+  Company/PayPolicy timezone for company-domain date/time display where it is
+  available; use the authenticated current-company timezone for records in that
+  company. If a view has no applicable timezone, fall back to device timezone
+  for display only and never use that fallback to infer pay boundaries.
+- Missing values use field-specific pending/unavailable copy, never numeric
+  zero. A backend-returned zero remains zero.
 - Screens should use the typed API client rather than calling `fetch` directly.
 
 ## 4. Navigation Model
@@ -111,12 +119,12 @@ added later.
 
 ### Worker Flow
 
-- `WorkerDashboardScreen`
-- `CompanyJoinScreen`
-- `JoinShiftScreen`
-- `MyShiftHistoryScreen`
-- `WorkerShiftDetailsScreen`
-- `WorkerPayrollScreen`
+- without a company, the role gate renders route/screen `JoinCompany`
+- worker stack route `WorkerDashboard`
+- worker stack route `JoinShift`
+- worker stack route `MyShiftHistory`
+- worker stack route `WorkerPayroll`
+- worker stack route `WorkerShiftDetails`
 
 Worker navigation is centered on joining a shift and reading personal attendance
 history from `GET /api/v1/me/shifts`. A worker who does not belong to a company
@@ -129,17 +137,18 @@ Worker payroll navigation is centered on backend-owned payroll data from
 
 ### Foreman Flow
 
-- `ForemanDashboardScreen`
-- `CompanyCreateScreen`
-- `ForemanCompanySettingsScreen`
-- `ForemanPayRulesScreen`
-- `CreateShiftScreen`
-- `ForemanShiftDetailsScreen`
-- `ShiftSummaryScreen`
-- `ForemanPayrollRequestsScreen`
+- without a company, the role gate renders route/screen `CreateCompany`
+- foreman stack route `ForemanDashboard`
+- foreman stack route `CreateShift`
+- foreman stack route `ForemanShiftDetails`
+- foreman stack route `ShiftSummary`
+- foreman stack route `ForemanPayrollRequests`
+- foreman stack route `ForemanCompanySettings`, with `ForemanPayRules` nested
+  from Company Settings
 
-The foreman shift details screen can contain attendance as a section or navigate
-to a dedicated attendance list screen if the implementation becomes clearer.
+The foreman shift details screen keeps attendance in its current section. A
+dedicated attendance destination does not exist and must not be added during
+this presentation redesign.
 
 Foreman navigation is centered on managed shifts from
 `GET /api/v1/me/managed-shifts`. A foreman who does not have a company should
@@ -149,6 +158,36 @@ Foreman payroll navigation shows payout requests from
 Company Settings navigation uses `GET/PUT /api/v1/me/company`. Pay Rules is opened from Company Settings and uses `GET /api/v1/me/pay-policy`,
 `PUT /api/v1/me/pay-policy`, and optionally
 `GET /api/v1/me/pay-policy/versions`.
+
+The verified app uses React Navigation native stacks only. Bottom tabs are not
+part of this redesign phase: `@react-navigation/bottom-tabs` is absent, FOREMAN
+has no separate Shifts route, and neither role has a More route. Do not add
+empty or duplicate destinations to imitate the visual reference. Any future
+bottom-tab information architecture requires a separate canonical decision.
+ADMIN continues to use the unsupported-role state and has no mobile MVP flow.
+
+### Shared presentation and state contract
+
+Screens use the token and semantic-component layers in
+`UI_DESIGN_SYSTEM.md`. Evolve the current `Screen`, `Button`, `FormField`,
+`StatusBadge`, `StateMessage`, `SegmentedControl`, shift cards, and payout card
+before introducing parallel components. Add shared `ScreenHeader`, `Card`,
+`Metric`, `SettingGroup`, and dedicated empty/feedback abstractions only where
+the documented contract requires them.
+
+Every redesigned network screen must preserve:
+
+- blocking first load and a non-destructive refresh state where content already
+  exists;
+- a specific empty state and current next action when one exists;
+- safe backend/field errors, generic network fallback, and retry/recovery;
+- disabled/busy controls that prevent duplicate mutations;
+- success or conflict feedback that remains visible for the current operation;
+- current focus/unmount and stale-response protections.
+
+Status badges use the canonical copy dictionary in `UI_DESIGN_SYSTEM.md`.
+Shift, attendance, attendance payment, payout request, PayCalculation snapshot,
+and pause states must not be collapsed into one label.
 
 ## 5. Screens
 
@@ -182,6 +221,15 @@ States:
 - invalid credentials error
 - generic network error
 
+Rules:
+
+- retain entered values and field errors after a rejected attempt
+- block duplicate submit while authentication is in flight
+- provide an accessible password-visibility action
+- keep submit reachable with the keyboard and increased system text size
+- do not add the reference image's construction photo, Terms/Privacy copy, or
+  legal routes
+
 ### RegisterScreen
 
 Purpose:
@@ -214,7 +262,7 @@ Rules:
 - after WORKER registration/login, prompt company join if no company exists
 - show backend validation and duplicate-email errors clearly
 
-### CompanyCreateScreen
+### CreateCompanyScreen
 
 Purpose:
 
@@ -244,7 +292,7 @@ Rules:
 - default rates may be left empty and configured later in Company Settings, but shift creation then requires explicit rates until defaults exist
 - show company join code after creation so it can be shared with workers
 
-### CompanyJoinScreen
+### JoinCompanyScreen
 
 Purpose:
 
@@ -283,7 +331,6 @@ Content:
 - shortcut to shift history
 - shortcut to payroll
 - recent joined shifts if available
-- outstanding unpaid or requested payroll status when returned by the backend
 - pause status if the worker has an active joined shift:
   worker paused, global pause active, or not paused
 
@@ -291,8 +338,6 @@ API calls:
 
 - `GET /api/v1/users/me`
 - `GET /api/v1/me/shifts`
-- `GET /api/v1/me/payable-attendances` if showing unpaid count or payroll preview
-- `GET /api/v1/me/payout-requests` if showing pending/approved status preview
 
 Empty state:
 
@@ -300,7 +345,6 @@ Empty state:
 - clear action to join by code
 - no company yet
 - clear action to join company by company join code
-- no unpaid payroll items
 
 ### JoinShiftScreen
 
@@ -357,6 +401,9 @@ Rules:
 - this screen is worker attendance history
 - do not use it as foreman managed-shift history
 - pay breakdown seconds, exact minutes, and base/premium/total amounts are backend audit fields; audit amounts can have up to 8 decimal places, so mobile may format them for display but must not calculate or re-sum them
+- scale-2 settlement money, whole-number payout amounts, and scale-8 audit money
+  use their distinct formatting contracts from `UI_DESIGN_SYSTEM.md`; do not
+  apply a default three-fraction-digit locale formatter to audit values
 
 ### WorkerShiftDetailsScreen
 
@@ -452,7 +499,9 @@ Rules:
 - mobile may format minutes into hours/minutes for display
 - mobile must not calculate salary, rounded payable minutes, or payout amount
 - backend preview/create `payoutAmount` and raw payable time are the payroll values shown on cards and selected-total UI
-- do not show `payoutRoundedMinutes` or exact calculated amount on payout request cards unless a later detailed audit view is added
+- do not show `payoutRoundedMinutes` or exact calculated amount on payout request
+  cards in the current flow; any future inline audit presentation first requires
+  a canonical docs update
 - use status badges for `UNPAID`, `PAYMENT_REQUESTED`, `PAID`, `PENDING`, and `APPROVED`
 - if backend returns a conflict because an item was already requested or paid, refresh and show the updated state
 
@@ -471,21 +520,17 @@ Content:
 - shortcut to Company Settings; Pay Rules is nested there
 - shortcut to payroll requests
 - status labels for `OPEN`, `ACTIVE`, `CLOSED`, `CANCELLED`, and `DISCARDED`
-- pending payout request count if loaded
 
 API calls:
 
 - `GET /api/v1/users/me`
 - `GET /api/v1/me/managed-shifts`
-- `GET /api/v1/me/company` if showing a company-settings summary
-- `GET /api/v1/me/managed-payout-requests` if showing pending request count or preview
 
 Rules:
 
-- if no company exists, route FOREMAN to `CompanyCreateScreen`
+- if no company exists, render `CreateCompanyScreen`
 - this screen should not use `GET /api/v1/me/shifts`
-- ADMIN users may use the same route only for shifts they personally created
-  during the MVP
+- ADMIN has no mobile MVP route to this screen
 
 ### ForemanCompanySettingsScreen
 
@@ -553,7 +598,7 @@ Rules:
 
 - only FOREMAN uses this screen
 - open this screen from Company Settings rather than treating it as a worker/admin or standalone payroll destination
-- if no company exists, route FOREMAN to `CompanyCreateScreen`
+- if no company exists, render `CreateCompanyScreen`
 - saving creates a new immutable policy version in the backend
 - show `Company.timeZone` as the source of day, week, and holiday boundaries
 - use `MONDAY` as the recommended default week start unless backend returns a different value
@@ -735,16 +780,15 @@ Content:
 - raw payable minutes with hours/minutes formatting
 - backend-calculated whole-number payout amount
 - persisted payout-request currency label beside monetary values
-- request-level total base amount, premium amount, and calculated salary may appear in detail views when returned by the backend
-- request base/premium totals are scale-8 audit components; calculated salary and payout totals are currency-settlement values and can differ from the audit-component sum by a rounding delta
-- optional detailed premium breakdown in a separate detail view, not on request cards
+- current request cards keep returned audit-component totals and calculated
+  salary hidden; request base/premium totals remain scale-8 audit values distinct
+  from currency-settlement calculated salary and payout totals
 - requestedAt, approvedAt, and paidAt when present
 - status badges for `PENDING` and `APPROVED`
 
 Actions:
 
 - filter by pending or approved requests
-- open request detail if needed
 - approve a pending payout request
 - refresh request list
 
@@ -756,7 +800,7 @@ API calls:
 Rules:
 
 - only FOREMAN uses this screen
-- if no company exists, route FOREMAN to `CompanyCreateScreen`
+- if no company exists, render `CreateCompanyScreen`
 - default list should focus on `PENDING` requests
 - foreman sees only requests for their company and shifts they created
 - approve is available only for `PENDING` requests
@@ -767,9 +811,18 @@ Rules:
 - do not calculate premium pay, overtime, effective rates, or pay breakdown totals on the client
 - rounded payable minutes are backend audit/display fields and must not be used by mobile to rescale premium-aware salary
 - mobile must not derive payout totals locally
-- show stored calculatedSalary/final payoutAmount for normal money display. If a detailed view exposes scale-8 base/premium audit components, format them only; do not independently round or sum them to reconcile currency totals
+- no payout-request-detail route or action exists. Preserve the current inline
+  card flow. If already-returned detailed content is later included on this
+  existing screen, it may expand inline only; a separate destination requires a
+  future canonical information-architecture and API decision
+- show stored calculatedSalary/final payoutAmount for normal money display. If
+  inline expanded content exposes scale-8 base/premium audit components, format
+  each returned value only; do not independently round, sum, or reconcile it to
+  currency totals
 - for legacy payout items without a payCalculation, use backend-returned calculatedSalary/payout values and fallback totals only; do not synthesize a breakdown or recalculate the payout basis
-- do not show exact calculated amount or rounded payable minutes on payout request cards unless a later detailed audit view is added
+- do not show exact calculated amount or rounded payable minutes on payout
+  request cards in the current flow; any future inline audit presentation first
+  requires a canonical docs update
 - keep payroll cards focused on raw payable time, final payout amount, status, and selected days/items
 - compact payroll cards remain compact; adding currencyLabel means appending the returned text to existing amounts, not exposing hidden audit/rate fields
 - do not add a base-rate field to payroll cards. The existing payroll DTO `hourlyRate` remains available only where the existing detailed contract already exposes it; the Company worker base rate mentioned by Pay Rules is preview reference data, not a new payroll-card field
@@ -833,18 +886,53 @@ Show success feedback for:
 - payout request approval
 - pay policy save
 
+### Redesign state acceptance by target screen
+
+| Screen | Required state coverage before visual acceptance |
+| --- | --- |
+| Login | Initial form, local field errors, invalid credentials/backend error, network error, submitting/disabled, keyboard visible, and retained input. |
+| Foreman dashboard | Initial load, refresh with content retained, no company gate, no managed shifts, error/retry, active shift priority, and all canonical shift statuses. |
+| Worker dashboard | Initial load, refresh, no company gate, no shifts, error/retry, current OPEN/ACTIVE state, attendance approval state, payment state, and pause state. |
+| Shift history | Initial load, empty/join action, error/retry, long list, cancelled/discarded non-payable rows, pending/null fields, legacy null currency, and available/unavailable/absent breakdown. |
+| Worker payroll | Initial load, no payable work, no requests, preview loading/error/stale result, empty/mixed/null-label selection disable, create conflict/success, and refreshed history. |
+| Foreman payroll requests | Initial load, empty PENDING and APPROVED filters, refresh, approval loading/success, stale conflict, returned `approvedAt` and `paidAt`, and legacy null label. |
+| Company Settings | Blocking load, failed initial load/retry, migrated null label, route notice, dirty form, field/server error, saving/disabled, saved state, and Pay Rules transition. |
+| Pay Rules | Blocking coherent-pair load, background refresh, required refresh/failure/retry, save loading/success/field error, focus/unmount/stale responses, empty rule list, all rule editors, and queued refresh behavior. |
+
+The state coverage above must use real typed fixtures or API data. Screenshot
+mock values do not replace behavior tests.
+
 ## 7. Basic Visual Direction
 
-- Use a clean, restrained interface for repeated daily use.
-- Prefer white or near-white surfaces with dark readable text.
-- Use one strong accent color for primary actions.
-- Use distinct status colors for shift and attendance states.
-- Use distinct status badges for payroll states: `UNPAID`,
-  `PAYMENT_REQUESTED`, `PAID`, `PENDING`, and `APPROVED`.
-- Keep typography compact but readable.
-- Use consistent spacing.
-- Use cards for shift rows and worker rows.
-- Avoid decorative backgrounds, hero sections, and marketing copy.
+- Follow the canonical tokens, semantic components, status copy, and responsive
+  rules in `UI_DESIGN_SYSTEM.md`.
+- Use `DesignExample.png` only for the agreed teal direction and visual
+  hierarchy. Its tabs, photo, legal links, mock data, and icons do not create
+  product requirements.
+- Avoid decorative backgrounds, oversized hero sections, and marketing copy.
+
+### Accessibility and responsive acceptance
+
+- Support narrow phones, safe-area insets, reachable scrolling, Android/iOS
+  keyboard behavior, and portrait plus practical landscape layouts.
+- Support increased system font sizes without clipping critical copy, amounts,
+  errors, controls, or badges. Long person, company, location, currency, and
+  rule names wrap instead of disappearing behind one-line truncation.
+- All actions expose accessible name, role, disabled/selected/busy state, and at
+  least a 44 x 44 touch target. Color never carries status alone.
+- Verify WCAG AA contrast for normal/large text, graphics, badges, focus, and
+  disabled states.
+- Preserve meaningful screen-reader order and announce important error/success
+  feedback.
+
+### Per-screen review gate
+
+After each target screen task, run typecheck, lint, focused tests, and
+`git diff --check`, then review the real app on a device or emulator before
+starting the next screen. Record platform/device, viewport or orientation, font
+scale, and the representative loading, empty, error, disabled, long-text, and
+real-data states checked; keep a screenshot for visual comparison. A screen is
+not complete merely because its populated happy path resembles the reference.
 
 ## 8. Out Of Scope For Mobile MVP
 
@@ -902,7 +990,8 @@ Mobile must not calculate pause-adjusted salary. It should display backend persi
   raw payable time, and `payoutAmount` values returned by the backend for card
   display.
 - The mobile app must not show `payoutRoundedMinutes` or exact calculated amount
-  on payout request cards unless a later detailed audit view is added.
+  on payout request cards in the current flow. Any future inline audit
+  presentation first requires a canonical docs update.
 - For late workers, the mobile app should treat backend `payableStartTime` as the worker's effective salary start.
 - The mobile app should consume backend `pauseState`, `pauseMinutes`, and
   `foremanPauseMinutes` rather than deriving pause totals locally.
