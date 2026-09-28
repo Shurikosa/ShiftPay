@@ -20,6 +20,7 @@ import type {
   ShiftAttendance,
   ShiftStatus
 } from "../../types/shifts";
+import { formatMoneyWithCurrencyLabel } from "../../utils/format";
 import { ForemanShiftDetailsScreen } from "../ForemanShiftDetailsScreen";
 
 jest.mock("@react-navigation/native", () => {
@@ -251,7 +252,7 @@ describe("ForemanShiftDetailsScreen pay breakdown", () => {
     expect(mockedGetShiftAttendance).toHaveBeenCalledWith("foreman-token", 100);
     expect(rendered).toContain("John");
     expect(rendered).toContain("Calculated salary");
-    expect(rendered).toContain("25.00");
+    expect(rendered).toContain(formatMoneyWithCurrencyLabel(25, "EUR"));
     expect(rendered).toContain("Pay breakdown");
     expect(rendered).toContain("Managed night premium");
   });
@@ -267,7 +268,7 @@ describe("ForemanShiftDetailsScreen pay breakdown", () => {
 
       const rendered = await renderDetails(shiftFixture(), [attendance]);
 
-      expect(rendered).toContain("25.00");
+      expect(rendered).toContain(formatMoneyWithCurrencyLabel(25, "EUR"));
       expect(rendered).toContain("Historical breakdown unavailable");
       expect(rendered).toContain("stored calculated salary remains");
       expect(rendered).not.toContain("Segment 1");

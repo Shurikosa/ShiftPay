@@ -4,6 +4,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useWorkerShiftHistory } from "../../hooks/useWorkerShiftHistory";
 import type { PayCalculation } from "../../types/payCalculation";
 import type { WorkerShiftHistoryItem } from "../../types/shifts";
+import { formatMoneyWithCurrencyLabel } from "../../utils/format";
 import { WorkerShiftDetailsScreen } from "../WorkerShiftDetailsScreen";
 
 jest.mock("../../context/AuthContext", () => ({
@@ -136,7 +137,7 @@ describe("WorkerShiftDetailsScreen pay breakdown", () => {
     const rendered = renderShift(shiftFixture());
 
     expect(rendered).toContain("Calculated salary");
-    expect(rendered).toContain("25.00");
+    expect(rendered).toContain(formatMoneyWithCurrencyLabel(25, "EUR"));
     expect(rendered).toContain("Pay breakdown");
     expect(rendered).toContain("Night premium");
     expect(rendered).toContain("Total premium amount (audit)");
@@ -154,7 +155,7 @@ describe("WorkerShiftDetailsScreen pay breakdown", () => {
       const rendered = renderShift(shift);
 
       expect(rendered).toContain("Calculated salary");
-      expect(rendered).toContain("25.00");
+      expect(rendered).toContain(formatMoneyWithCurrencyLabel(25, "EUR"));
       expect(rendered).toContain("Historical breakdown unavailable");
       expect(rendered).toContain("stored calculated salary remains");
       expect(rendered).not.toContain("Total base amount (audit)");

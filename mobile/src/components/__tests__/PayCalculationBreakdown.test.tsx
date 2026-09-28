@@ -4,6 +4,7 @@ import type {
   PayCalculation,
   UnavailablePaySegment
 } from "../../types/payCalculation";
+import { formatAuditDecimal } from "../../utils/format";
 import { PayCalculationBreakdown } from "../PayCalculationBreakdown";
 
 function completeSegment(
@@ -115,7 +116,7 @@ describe("PayCalculationBreakdown", () => {
     expect(rendered).toContain("21600 sec");
     expect(rendered).toContain("Night premium");
     expect(rendered).toContain("TIME OF DAY");
-    expect(rendered).toContain("37.5%");
+    expect(rendered).toContain(`${formatAuditDecimal(37.5)}%`);
     expect(rendered).toContain("ADD");
   });
 
@@ -156,6 +157,6 @@ describe("PayCalculationBreakdown", () => {
 
     expect(rendered).toContain("Breakdown details unavailable");
     expect(rendered).toContain("17 sec");
-    expect(rendered).toContain("0.12345678");
+    expect(rendered).toContain(formatAuditDecimal(0.12345678));
   });
 });

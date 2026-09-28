@@ -11,6 +11,12 @@ import type {
   UnavailablePaySegment
 } from "../../types/payCalculation";
 import type { ShiftSummary, ShiftSummaryWorker } from "../../types/shifts";
+import {
+  formatAuditDecimal,
+  formatMinutes,
+  formatMoneyWithCurrencyLabel,
+  formatRate
+} from "../../utils/format";
 import { ShiftSummaryScreen } from "../ShiftSummaryScreen";
 
 jest.mock("@react-navigation/native", () => {
@@ -201,9 +207,9 @@ describe("ShiftSummaryScreen pay breakdown", () => {
     expect(authenticatedRequest).toHaveBeenCalledTimes(1);
     expect(mockedGetShiftSummary).toHaveBeenCalledWith("foreman-token", 100);
     expect(rendered).toContain("Total worker salary");
-    expect(rendered).toContain("100.00");
+    expect(rendered).toContain(formatMoneyWithCurrencyLabel(100, "EUR"));
     expect(rendered).toContain("Total base amount (audit)");
-    expect(rendered).toContain("90.004");
+    expect(rendered).toContain(`${formatAuditDecimal(90.004)} EUR`);
     expect(rendered).toContain("Total premium amount (audit)");
     expect(rendered).toContain("backend-provided audit values");
     expect(rendered).toContain("final settlement rounding");
@@ -213,10 +219,10 @@ describe("ShiftSummaryScreen pay breakdown", () => {
     const rendered = await renderSummary(summaryFixture());
 
     expect(rendered).toContain("Foreman salary");
-    expect(rendered).toContain("8 h 0 min");
-    expect(rendered).toContain("15 min");
-    expect(rendered).toContain("25.00");
-    expect(rendered).toContain("196.88");
+    expect(rendered).toContain(formatMinutes(480));
+    expect(rendered).toContain(formatMinutes(15));
+    expect(rendered).toContain(`${formatRate(25)} EUR`);
+    expect(rendered).toContain(formatMoneyWithCurrencyLabel(196.88, "EUR"));
   });
 
   it("does not invent a private foreman salary section when fields are omitted", async () => {
@@ -230,7 +236,7 @@ describe("ShiftSummaryScreen pay breakdown", () => {
     );
 
     expect(rendered).not.toContain("Foreman salary");
-    expect(rendered).not.toContain("196.88");
+    expect(rendered).not.toContain(formatMoneyWithCurrencyLabel(196.88, "EUR"));
   });
 
   it("renders each returned COMPLETE worker calculation through the shared breakdown", async () => {
@@ -258,7 +264,7 @@ describe("ShiftSummaryScreen pay breakdown", () => {
         })
       );
 
-      expect(rendered).toContain("88.77");
+      expect(rendered).toContain(formatMoneyWithCurrencyLabel(88.77, "EUR"));
       expect(rendered).toContain("Historical breakdown unavailable");
       expect(rendered).toContain("stored salary remains");
       expect(rendered).toContain("no worker audit breakdown was reconstructed");
@@ -275,7 +281,7 @@ describe("ShiftSummaryScreen pay breakdown", () => {
     );
 
     expect(rendered).toContain("Breakdown details unavailable");
-    expect(rendered).toContain("0.12345678");
+    expect(rendered).toContain(formatAuditDecimal(0.12345678));
     expect(rendered).not.toContain("No premium rules applied");
   });
 });
