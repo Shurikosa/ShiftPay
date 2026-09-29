@@ -4,18 +4,16 @@ import {
   StyleSheet,
   Text,
   type PressableProps,
-  type StyleProp,
-  type ViewStyle
 } from "react-native";
-import { colors, radii, spacing, typography } from "../utils/theme";
+import { theme } from "../utils/theme";
 
-type ButtonVariant = "primary" | "secondary" | "ghost";
+type ButtonVariant = "primary" | "secondary" | "text" | "destructive" | "ghost";
 
-type ButtonProps = PressableProps & {
+type ButtonProps = Omit<PressableProps, "children" | "style"> & {
   label: string;
   loading?: boolean;
   variant?: ButtonVariant;
-  style?: StyleProp<ViewStyle>;
+  style?: PressableProps["style"];
 };
 
 export function Button({
@@ -30,19 +28,23 @@ export function Button({
 
   return (
     <Pressable
+      {...pressableProps}
+      accessibilityLabel={pressableProps.accessibilityLabel ?? label}
       accessibilityRole="button"
+      accessibilityState={{ ...pressableProps.accessibilityState, disabled: isDisabled, busy: loading }}
       disabled={isDisabled}
       style={({ pressed }) => [
         styles.base,
         styles[variant],
+        typeof style === "function" ? style({ pressed }) : style,
         isDisabled && styles.disabled,
         pressed && !isDisabled && styles.pressed,
-        style
+        pressed && !isDisabled && variant === "primary" && styles.primaryPressed,
+        styles.target
       ]}
-      {...pressableProps}
     >
       {loading ? (
-        <ActivityIndicator color={variant === "primary" ? colors.white : colors.primary} />
+        <ActivityIndicator color={variant === "primary" || variant === "destructive" ? theme.colors.surface.default : theme.colors.brand.primary} />
       ) : (
         <Text style={[styles.label, styles[`${variant}Label`]]}>{label}</Text>
       )}
@@ -52,39 +54,47 @@ export function Button({
 
 const styles = StyleSheet.create({
   base: {
-    minHeight: 50,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: radii.control,
-    paddingHorizontal: spacing.lg
+    borderRadius: theme.radius.sm,
+    paddingHorizontal: theme.space[4]
+  },
+  target: {
+    minHeight: theme.height.control.min,
+    minWidth: theme.target.min
   },
   primary: {
-    backgroundColor: colors.primary
+    backgroundColor: theme.colors.brand.primary
   },
   secondary: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border
+    backgroundColor: theme.colors.surface.subtle,
+    borderWidth: theme.border.default,
+    borderColor: theme.colors.border
   },
-  ghost: {
-    backgroundColor: "transparent"
+  text: {
+    borderWidth: 0
   },
+  ghost: { borderWidth: 0 },
+  destructive: { backgroundColor: theme.colors.danger.fg },
   disabled: {
     opacity: 0.6
   },
   pressed: {
     opacity: 0.86
   },
+  primaryPressed: { backgroundColor: theme.colors.brand.pressed },
   label: {
-    ...typography.button
+    ...theme.typography.label,
+    flexShrink: 1,
+    textAlign: "center"
   },
   primaryLabel: {
-    color: colors.white
+    color: theme.colors.surface.default
   },
   secondaryLabel: {
-    color: colors.text
+    color: theme.colors.ink.primary
   },
-  ghostLabel: {
-    color: colors.primary
-  }
+  textLabel: { color: theme.colors.brand.primary },
+  ghostLabel: { color: theme.colors.brand.primary },
+  destructiveLabel: { color: theme.colors.surface.default }
 });
