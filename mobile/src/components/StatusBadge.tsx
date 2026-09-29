@@ -1,48 +1,73 @@
-import { StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View, type ViewProps } from "react-native";
 import type { StatusTone } from "../utils/status";
-import { colors, radii, spacing, typography } from "../utils/theme";
+import { theme } from "../utils/theme";
 
-type StatusBadgeProps = {
+export type StatusBadgeProps = Pick<
+  ViewProps,
+  "accessibilityHint" | "accessibilityLabel" | "nativeID" | "testID"
+> & {
   label: string;
   tone?: StatusTone;
 };
+
+function getAccessibleName(label: string, context?: string): string {
+  const normalizedContext = context?.trim();
+
+  if (!normalizedContext || normalizedContext.includes(label)) {
+    return normalizedContext || label;
+  }
+
+  return `${normalizedContext}: ${label}`;
+}
 
 const toneColors: Record<
   StatusTone,
   { backgroundColor: string; borderColor: string; color: string }
 > = {
   neutral: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    color: colors.textSecondary
+    backgroundColor: theme.colors.surface.subtle,
+    borderColor: theme.colors.border,
+    color: theme.colors.ink.secondary
   },
   primary: {
-    backgroundColor: colors.primarySoft,
-    borderColor: colors.primary,
-    color: colors.primary
+    backgroundColor: theme.colors.info.bg,
+    borderColor: theme.colors.info.fg,
+    color: theme.colors.info.fg
   },
   success: {
-    backgroundColor: colors.successSoft,
-    borderColor: colors.success,
-    color: colors.success
+    backgroundColor: theme.colors.success.bg,
+    borderColor: theme.colors.success.fg,
+    color: theme.colors.success.fg
   },
   warning: {
-    backgroundColor: colors.warningSoft,
-    borderColor: colors.warning,
-    color: colors.warning
+    backgroundColor: theme.colors.warning.bg,
+    borderColor: theme.colors.warning.fg,
+    color: theme.colors.warning.fg
   },
   error: {
-    backgroundColor: colors.errorSoft,
-    borderColor: colors.error,
-    color: colors.error
+    backgroundColor: theme.colors.danger.bg,
+    borderColor: theme.colors.danger.fg,
+    color: theme.colors.danger.fg
   }
 };
 
-export function StatusBadge({ label, tone = "neutral" }: StatusBadgeProps) {
+export function StatusBadge({
+  label,
+  tone = "neutral",
+  accessibilityHint,
+  accessibilityLabel,
+  nativeID,
+  testID
+}: StatusBadgeProps) {
   const palette = toneColors[tone];
 
   return (
     <View
+      accessible
+      accessibilityHint={accessibilityHint}
+      accessibilityLabel={getAccessibleName(label, accessibilityLabel)}
+      accessibilityRole="text"
+      nativeID={nativeID}
       style={[
         styles.badge,
         {
@@ -50,8 +75,11 @@ export function StatusBadge({ label, tone = "neutral" }: StatusBadgeProps) {
           borderColor: palette.borderColor
         }
       ]}
+      testID={testID}
     >
-      <Text style={[styles.label, { color: palette.color }]}>{label}</Text>
+      <Text allowFontScaling style={[styles.label, { color: palette.color }]}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -59,13 +87,15 @@ export function StatusBadge({ label, tone = "neutral" }: StatusBadgeProps) {
 const styles = StyleSheet.create({
   badge: {
     alignSelf: "flex-start",
-    borderRadius: radii.control,
-    borderWidth: 1,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs
+    maxWidth: "100%",
+    flexShrink: 1,
+    borderRadius: theme.radius.sm,
+    borderWidth: theme.border.default,
+    paddingHorizontal: theme.space[2],
+    paddingVertical: theme.space[1]
   },
   label: {
-    ...typography.caption,
-    fontWeight: "700"
+    ...theme.typography.caption,
+    flexShrink: 1
   }
 });
