@@ -4,9 +4,11 @@ This document defines the practical UX plan for the ShiftPay mobile MVP.
 
 It defines role flows, screen behavior, and real data states. The canonical
 visual and component contract is `docs/UI_DESIGN_SYSTEM.md`, while
-`docs/DesignExample.png` is visual direction only. `docs/TASKS.md` remains the
-ordered backlog. Together, these documents give the mobile agent enough detail
-to redesign the interface without inventing product behavior.
+`docs/DesignExample.png` is the approved visual-language and composition
+reference for the complete mobile MVP. It remains non-normative for APIs,
+routes, data, and business behavior. `docs/TASKS.md` remains the ordered
+backlog. Together, these documents give the mobile agent enough detail to
+redesign every current screen without inventing product behavior.
 
 ## 1. Mobile UX Goal
 
@@ -25,6 +27,8 @@ The app should prioritize:
 - simple forms with obvious success and error states
 
 The MVP should feel like a practical workforce tool, not a marketing site.
+Its product UI should nevertheless be visually deliberate and recognizably
+reference-driven on every screen, not only on Login or dashboards.
 
 ## 2. Target Users
 
@@ -77,12 +81,29 @@ the Vaadin admin dashboard.
 
 - Use a mobile-first layout.
 - Use large touch targets and readable text.
-- Keep forms simple and predictable.
+- Use a light cool canvas, dark slate typography, teal/emerald accents, rounded
+  elevated or bordered surfaces, subtle depth, and clear separation between
+  layers.
+- Establish an explicit hierarchy for screen title, section title, card title,
+  primary value, metadata, and supporting text.
+- Use layered cards, consistent section headers, action tiles for real
+  dashboard destinations, compact icon-supported metadata, semantic status
+  chips, and distinct primary/secondary/tertiary actions.
+- Keep forms simple and predictable, but group related fields and settings in
+  explained surfaces rather than one long undifferentiated stack.
 - Make shift status visible wherever a shift appears.
 - Show loading, empty, error, and success states for network workflows.
-- Use neutral, professional colors with strong contrast.
-- Use cards only for repeated shift list items.
-- Do not create a landing page, marketing hero, or decorative onboarding.
+- Use whitespace intentionally without creating large accidental empty zones.
+- Use one consistent semantic icon system. Do not use Unicode emoji as
+  production icons; decorative icons are accessibility-hidden, and icon-only
+  actions have accessible labels and minimum touch targets. Icons never replace
+  essential visible text or authorize an absent action.
+- Use a separately approved construction hero only on Login under its asset contract;
+  the shared branded auth/onboarding shell may use restrained visual branding
+  without inventing marketing or product behavior.
+- A screen migration is rejected if it only changes colors, fonts, spacing, or
+  radii while retaining the old composition and hierarchy without a documented
+  screen-specific reason.
 - Do not put business logic in UI components.
 - Render returned monetary amounts with the applicable backend currencyLabel as plain text, for example `20.00 EUR` or `20.00 грн`. Do not assume ISO codes, apply exchange rates, or replace historical labels with the current company label.
 - Format numeric text and date language with the device locale. Use the returned
@@ -93,6 +114,8 @@ the Vaadin admin dashboard.
 - Missing values use field-specific pending/unavailable copy, never numeric
   zero. A backend-returned zero remains zero.
 - Screens should use the typed API client rather than calling `fetch` directly.
+- Support responsive wrapping, narrow viewports, keyboard-safe reachability,
+  and system font scale 1.5 without clipping critical content.
 
 ## 4. Navigation Model
 
@@ -172,8 +195,15 @@ Screens use the token and semantic-component layers in
 `UI_DESIGN_SYSTEM.md`. Evolve the current `Screen`, `Button`, `FormField`,
 `StatusBadge`, `StateMessage`, `SegmentedControl`, shift cards, and payout card
 before introducing parallel components. Add shared `ScreenHeader`, `Card`,
+`AppIcon`, `SectionHeader`, `ActionTile`, identity/company summary patterns,
 `Metric`, `SettingGroup`, and dedicated empty/feedback abstractions only where
-the documented contract requires them.
+the documented contract requires them and the pattern genuinely repeats.
+
+The theme/shared-component correction stage must happen before screen
+migrations. It preserves existing accessibility and behavior while evolving the
+visual composition primitives and unified icon approach required by the global
+reference contract. Already-correct functional work remains usable; it is not,
+by itself, evidence of visual approval.
 
 Every redesigned network screen must preserve:
 
@@ -188,6 +218,38 @@ Every redesigned network screen must preserve:
 Status badges use the canonical copy dictionary in `UI_DESIGN_SYSTEM.md`.
 Shift, attendance, attendance payment, payout request, PayCalculation snapshot,
 and pause states must not be collapsed into one label.
+
+### Full reference-driven screen scope
+
+The migration covers every current mobile MVP component below. Route names are
+shown in parentheses when the screen is registered in a native stack. The
+session, unsupported-role, and company gates remain conditional UI and do not
+become new navigation destinations.
+
+| Screen/component | Composition outcome |
+| --- | --- |
+| `LoginScreen` (`Login`) | Compact ShiftPay brand, `Welcome back`, product sentence, separately approved construction hero, overlapping elevated form card, icon-supported credentials, primary Log in, `or`, secondary Create account. |
+| `RegisterScreen` (`Register`) | Shared branded auth/onboarding shell, clear intro, elevated grouped account/role form, and reference-like action hierarchy. |
+| `RestoreSessionScreen` | Branded system-state shell with intentional loading feedback. |
+| `UnsupportedRoleScreen` | Branded system-state shell with clear explanation and only existing recovery/logout behavior. |
+| `JoinCompanyScreen` | Branded worker onboarding shell, elevated join-code form, explanation, and prominent join action. |
+| `CreateCompanyScreen` | Branded foreman onboarding shell, elevated grouped company/currency/default-rate form, explanations, and prominent create action. |
+| `WorkerDashboardScreen` (`WorkerDashboard`) | Identity/role header, returned company summary, prominent Join shift, History/Payroll action tiles, recent/current section header, redesigned semantic shift cards. |
+| `JoinShiftScreen` (`JoinShift`) | Strong header, elevated join-code card, contextual help, clear feedback, and keyboard-safe primary action. |
+| `MyShiftHistoryScreen` (`MyShiftHistory`) | Strong header, surfaced list context, redesigned compact shift cards, icon metadata, separate dates/duration/amount/status. |
+| `WorkerPayrollScreen` (`WorkerPayroll`) | Strong header, surfaced selection, compact payable cards, backend-preview metrics, primary request action, segmented history, semantic request cards. |
+| `WorkerShiftDetailsScreen` (`WorkerShiftDetails`) | Strong header, primary state/status summary, grouped timing/work/pay cards, returned metrics/breakdown, contextual pause action. |
+| `ForemanDashboardScreen` (`ForemanDashboard`) | Identity/role header, returned company/join-code summary, prominent Create shift, Settings/Payroll action tiles, recent/current section, redesigned managed-shift cards. |
+| `CreateShiftScreen` (`CreateShift`) | Strong header, grouped shift/rate cards with explanations and company/currency context, keyboard-safe create action. |
+| `ForemanShiftDetailsScreen` (`ForemanShiftDetails`) | Strong header, lifecycle/status summary, grouped shift/pause/attendance/rate cards, metrics, contextual actions, separated destructive decisions. |
+| `ShiftSummaryScreen` (`ShiftSummary`) | Strong result header, primary closed/status summary, returned total metrics, grouped worker cards, layered attendance/pay breakdown. |
+| `ForemanPayrollRequestsScreen` (`ForemanPayrollRequests`) | Strong header, PENDING/APPROVED segment surface, compact request cards, icon metadata, chips, and conditional approve action. |
+| `ForemanCompanySettingsScreen` (`ForemanCompanySettings`) | Strong header, grouped identity/localization/default/read-only cards, explained Pay Rules row, visible dirty/save feedback, keyboard-safe actions. |
+| `ForemanPayRulesScreen` (`ForemanPayRules`) | Strong header, policy/version summary, grouped week/stacking settings, structured rule cards/editor, explanations, visible async/save state. |
+
+Every composition uses only real fields, statuses, and actions returned or
+already available to that screen. The reference must not supply missing data or
+new destinations.
 
 ## 5. Screens
 
@@ -227,8 +289,51 @@ Rules:
 - block duplicate submit while authentication is in flight
 - provide an accessible password-visibility action
 - keep submit reachable with the keyboard and increased system text size
-- do not add the reference image's construction photo, Terms/Privacy copy, or
-  legal routes
+- implement the full Login composition from the scope table, including the
+  construction hero and elevated/overlapping form card
+- use `mobile/assets/images/login-hero.png`; the exact bitmap must receive
+  separate user visual approval before implementation and may be derived from
+  the reference or created as a new AI-generated variant in a close style
+- bundle the hero locally, mark it decorative/accessibility-hidden, include no
+  third-party text/branding or recognizable person, and use a
+  portrait-responsive crop that preserves keyboard/form reachability
+- do not add the reference image's Terms/Privacy copy or legal routes
+
+### RestoreSessionScreen
+
+Purpose:
+
+- resolve an existing stored session before role routing
+
+Presentation:
+
+- use the same branded system-state shell as other app-level states
+- show intentional, accessible loading feedback without fabricated progress
+- avoid a blank screen, a dashboard preview, or actions that bypass session
+  validation
+
+Rules:
+
+- preserve the current token load, `GET /api/v1/users/me`, invalid-session
+  clearing, and role routing behavior
+- do not add retry, navigation, or domain behavior unless it already exists
+
+### UnsupportedRoleScreen
+
+Purpose:
+
+- explain that the authenticated role has no mobile MVP flow
+
+Presentation:
+
+- use the branded system-state shell and reference-like surface hierarchy
+- present the role limitation clearly and expose only the existing
+  recovery/logout action
+
+Rules:
+
+- do not create an ADMIN mobile flow or new destination
+- preserve existing session/logout behavior
 
 ### RegisterScreen
 
@@ -257,6 +362,8 @@ API calls:
 
 Rules:
 
+- use the shared branded auth/onboarding shell, clear intro, elevated grouped
+  form surface, and primary/secondary action hierarchy from the scope table
 - do not allow `ADMIN` registration in the mobile UI
 - after FOREMAN registration/login, prompt company creation if no company exists
 - after WORKER registration/login, prompt company join if no company exists
@@ -286,6 +393,8 @@ API calls:
 
 Rules:
 
+- use the shared branded onboarding shell and grouped elevated company form
+  from the scope table; keep the final action keyboard-safe
 - only FOREMAN uses this screen
 - FOREMAN cannot create or start shifts before company creation
 - currency label is required free-form display text; examples such as `EUR`, `€`, `USD`, `долар`, `грн`, or `元` are hints, not a closed list. Use the exact shared boundary algorithm: remove only leading/trailing code points in this set, U+0009–U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, and U+3000; reject a blank result; then limit it to 64 Unicode code points, not UTF-8 bytes or UTF-16 code units. Preserve all non-boundary Unicode/case without normalization. Do not rely on JavaScript `trim()`; backend validation is authoritative, and the screen must display a backend field-validation response if rejected
@@ -313,6 +422,8 @@ API calls:
 
 Rules:
 
+- use the shared branded onboarding shell, elevated join-code surface, and
+  reference-like action/feedback hierarchy from the scope table
 - only WORKER uses this screen
 - normalize company join code visually as uppercase if practical
 - WORKER cannot join a shift before joining that shift's company
@@ -854,6 +965,9 @@ Use empty states when:
 - foreman has no pending payout requests
 
 Each empty state should include one clear next action when an action is available.
+Loading, empty, error, and retry presentation uses the same branded shell,
+surface language, section hierarchy, and shared `Feedback`/`EmptyState`
+patterns as populated screens; it must not look like a legacy utility view.
 
 ### Error
 
@@ -890,26 +1004,43 @@ Show success feedback for:
 
 | Screen | Required state coverage before visual acceptance |
 | --- | --- |
-| Login | Initial form, local field errors, invalid credentials/backend error, network error, submitting/disabled, keyboard visible, and retained input. |
-| Foreman dashboard | Initial load, refresh with content retained, no company gate, no managed shifts, error/retry, active shift priority, and all canonical shift statuses. |
-| Worker dashboard | Initial load, refresh, no company gate, no shifts, error/retry, current OPEN/ACTIVE state, attendance approval state, payment state, and pause state. |
-| Shift history | Initial load, empty/join action, error/retry, long list, cancelled/discarded non-payable rows, pending/null fields, legacy null currency, and available/unavailable/absent breakdown. |
-| Worker payroll | Initial load, no payable work, no requests, preview loading/error/stale result, empty/mixed/null-label selection disable, create conflict/success, and refreshed history. |
-| Foreman payroll requests | Initial load, empty PENDING and APPROVED filters, refresh, approval loading/success, stale conflict, returned `approvedAt` and `paidAt`, and legacy null label. |
-| Company Settings | Blocking load, failed initial load/retry, migrated null label, route notice, dirty form, field/server error, saving/disabled, saved state, and Pay Rules transition. |
-| Pay Rules | Blocking coherent-pair load, background refresh, required refresh/failure/retry, save loading/success/field error, focus/unmount/stale responses, empty rule list, all rule editors, and queued refresh behavior. |
+| Login | Initial/content, local field errors, invalid credentials/backend error, network error, submitting/disabled, keyboard, retained input, long text, font scale 1.5, narrow viewport, and approved hero crop. |
+| Register | Initial/content, role selection, local/backend validation, duplicate email, submitting/disabled, keyboard, long text, font scale 1.5, and narrow viewport. |
+| Restore Session | Loading with real session restore, invalid/expired-session transition, long text/font scale, and narrow viewport where applicable. |
+| Unsupported Role | Real unsupported role, existing recovery/logout action and busy/error behavior where applicable, long text/font scale, and narrow viewport. |
+| Join Company | Initial/content, validation, unknown code, submitting/disabled, success transition, keyboard, long text/font scale, and narrow viewport. |
+| Create Company | Initial/content, optional/default-rate variants, validation/server error, submitting/disabled, success, keyboard, long Unicode text, font scale 1.5, and narrow viewport. |
+| Worker dashboard | Initial load, refresh, no company gate, no shifts, error/retry, current OPEN/ACTIVE state, attendance approval, payment and pause states, long returned text, font scale 1.5, and narrow viewport. |
+| Join Shift | Initial/content, validation, duplicate/unknown/forbidden/lifecycle errors, submitting/disabled, success, keyboard, long text/font scale, and narrow viewport. |
+| Shift history | Initial load, empty/join action, error/retry, long list, cancelled/discarded non-payable rows, pending/null fields, legacy null currency, available/unavailable/absent breakdown, long text/font scale, and narrow viewport. |
+| Worker payroll | Initial load, no payable work, no requests, preview loading/error/stale result, empty/mixed/null-label selection disable, create conflict/success, refreshed history, long real data, font scale 1.5, and narrow viewport. |
+| Worker shift details | Initial/content, returned status combinations, pause mutation busy/error/success, closed breakdown complete/unavailable/absent, nullable data, long text/font scale, and narrow viewport. |
+| Foreman dashboard | Initial load, refresh with content retained, no company gate, no managed shifts, error/retry, active shift priority, all canonical shift statuses, long returned text, font scale 1.5, and narrow viewport. |
+| Create Shift | Blocking settings load, defaults/overrides including zero, missing-rate/null-label routing, validation/server error, submitting/disabled, keyboard, long text/font scale, and narrow viewport. |
+| Foreman shift details | Initial/content, attendance empty/data/error, approval and lifecycle mutations disabled/busy/error/success, short-shift decision, pause states, all real statuses, breakdown variants, long text/font scale, and narrow viewport. |
+| Shift Summary | Loading, not-closed/error/retry, empty/single/many workers, legacy and COMPLETE/UNAVAILABLE breakdowns, nullable label, long values/text, font scale 1.5, and narrow viewport. |
+| Foreman payroll requests | Initial load, empty PENDING and APPROVED filters, refresh, approval loading/success, stale conflict, real `approvedAt` and `paidAt`, legacy null label, long text/font scale, and narrow viewport. |
+| Company Settings | Blocking load, failed initial load/retry, migrated null label, route notice, dirty form, field/server error, saving/disabled, saved state, Pay Rules transition, keyboard, long Unicode/font scale, and narrow viewport. |
+| Pay Rules | Blocking coherent-pair load, background refresh, required refresh/failure/retry, save loading/success/field error, focus/unmount/stale responses, empty/all rule editors, queued refresh, keyboard, long text/font scale, and narrow viewport. |
 
-The state coverage above must use real typed fixtures or API data. Screenshot
-mock values do not replace behavior tests.
+The state coverage above must use real typed fixtures or API data and real
+returned statuses where the screen is network-backed. Screenshot mock values do
+not replace behavior tests.
 
 ## 7. Basic Visual Direction
 
 - Follow the canonical tokens, semantic components, status copy, and responsive
   rules in `UI_DESIGN_SYSTEM.md`.
-- Use `DesignExample.png` only for the agreed teal direction and visual
-  hierarchy. Its tabs, photo, legal links, mock data, and icons do not create
-  product requirements.
-- Avoid decorative backgrounds, oversized hero sections, and marketing copy.
+- Treat `DesignExample.png` as the approved visual-language and composition
+  reference for every mobile MVP screen. Each screen must recognizably carry
+  its layered surfaces, hierarchy, actions, cards, semantic chips, icon
+  treatment, and teal/slate language without literal pixel copying.
+- A token-only reskin of an old layout is not accepted unless the unchanged
+  composition has a documented, screen-specific justification.
+- Use the separately approved Login hero only under its explicit asset contract. The
+  reference's tabs, hamburger/settings destinations, legal links, and mock data
+  do not create product requirements.
+- Rebranding is deferred. The visible product name remains `ShiftPay`.
 
 ### Accessibility and responsive acceptance
 
@@ -927,12 +1058,25 @@ mock values do not replace behavior tests.
 
 ### Per-screen review gate
 
-After each target screen task, run typecheck, lint, focused tests, and
-`git diff --check`, then review the real app on a device or emulator before
-starting the next screen. Record platform/device, viewport or orientation, font
-scale, and the representative loading, empty, error, disabled, long-text, and
-real-data states checked; keep a screenshot for visual comparison. A screen is
-not complete merely because its populated happy path resembles the reference.
+For every screen, use this gate in order:
+
+1. Implement without commit or push.
+2. Run typecheck, lint, focused tests, relevant regressions, and
+   `git diff --check`.
+3. Obtain an independent read-only review, correct every finding, and repeat
+   until the reviewer reports `NO FINDINGS`.
+4. Review the real app on an Android device or emulator. Check every relevant
+   initial/content, loading, empty, error/retry, mutation-disabled, long-text,
+   keyboard, font-scale-1.5, narrow-viewport, and real-status/data state from
+   the table above. Record device/OS, viewport or orientation, font scale, and
+   screenshots.
+5. Obtain explicit user visual approval. Only then create and push the
+   screen's feature-branch commit and begin the next screen.
+
+Android is the current validation platform. Document iOS as unavailable until
+that platform can be reviewed; Android approval does not silently imply iOS
+approval. A screen is not complete merely because its populated happy path
+resembles the reference.
 
 ## 8. Out Of Scope For Mobile MVP
 

@@ -365,74 +365,193 @@ Follow-up mobile tasks:
 
 ## Milestone 8.1: Mobile UI Design System and Screen Migration
 
+This is a global reference-driven redesign of the complete mobile MVP.
+`docs/DesignExample.png` is the approved visual-language and composition
+reference for every screen, while canonical Markdown remains authoritative for
+routes, data, permissions, calculations, and behavior. A migration is not
+accepted when it merely applies new colors, fonts, spacing, or radii to the old
+composition and information hierarchy without a documented screen-specific
+reason.
+
+The frozen mobile commit `ec75bbd` is not visually approved and must not be
+used as acceptance evidence. Its correct behavior/accessibility work may be
+retained and evolved after the canonical docs gate passes.
+
 Required phase order:
 
-1. Complete the canonical UI documentation update.
-2. Complete an independent canonical docs review with no findings.
+1. Complete this canonical UI documentation update.
+2. Complete an independent read-only canonical Docs Review, correct all
+   findings, and repeat until the reviewer reports `NO FINDINGS`.
 3. The user commits and pushes the reviewed canonical docs. This is a
    user-owned workflow gate, not an agent checkbox.
-4. Implement theme tokens.
-5. Evolve shared components.
-6. Migrate Login.
-7. Migrate the foreman dashboard.
-8. Migrate the worker dashboard.
-9. Migrate shift history.
-10. Migrate worker payroll.
-11. Migrate foreman payout requests.
-12. Migrate Company Settings.
-13. Migrate the Pay Rules shell and state presentation.
-14. Migrate the Pay Rules rule editor.
-15. Complete verified navigation and header polish.
-16. Complete final regression, independent review, and available-device smoke
-    review.
+4. Complete the shared visual-foundation correction stage.
+5. Migrate and approve every screen strictly in the listed order.
+6. Complete navigation/header consistency and final regression/smoke review.
 
 The user-owned documentation commit/push checkpoint is a workflow gate, not an
-agent task. Mobile implementation must not start before that gate passes. After
-each migrated screen, its automated and device/emulator visual gate must pass
-before the next screen begins.
+agent task. Mobile implementation must not start before that gate passes.
 
 Common contract for every mobile task:
 
 - Sources: canonical `docs/UI_DESIGN_SYSTEM.md`, `docs/MOBILE_UX.md`,
-  `docs/SPEC.md`, relevant `docs/API.md` sections, and the current implementation
-  and tests. `docs/DesignExample.png` is visual direction only.
-- Scope: change only `mobile/` presentation code and focused tests. Do not
-  change backend/API/data contracts, permissions, role flows, calculations,
-  persistence, or canonical docs during implementation. If one is genuinely
-  required, report `docs change required` or `backend change required` and stop
-  the divergent work.
-- Boundaries: do not invent routes/features, calculate real salary/premiums/
-  overtime/payroll/payout totals, substitute currency labels, treat missing as
-  zero, or scatter new raw colors and repeated visual dimensions through
-  screens. Preserve typed API/context ownership and current async coordination.
-- Automated checks: `npm run typecheck`, `npm run lint`, focused Jest tests,
-  relevant existing regression suites, and `git diff --check`.
-- Per-screen visual gate: review on a device or emulator and record platform/
-  device, viewport or orientation, font scale, loading, empty, error, disabled,
-  long-text, and representative real-data states plus a comparison screenshot.
-  Check safe area, keyboard where relevant, wrapping, touch targets, accessible
-  names/roles/states, screen-reader order, and status contrast.
+  `docs/SPEC.md`, relevant `docs/API.md` sections, current implementation/tests,
+  and `docs/DesignExample.png` for approved visual language and composition.
+- Scope: change only `mobile/` presentation code/assets and focused tests. Do
+  not change backend/API/data contracts, permissions, role flows, calculations,
+  persistence, or canonical docs during implementation. If genuinely required,
+  report `docs change required` or `backend change required` and stop divergent
+  work.
+- Boundaries: keep React Navigation native stacks, WORKER/FOREMAN gates,
+  existing routes/back/transitions, and Company Settings -> Pay Rules nesting.
+  Do not add bottom tabs, hamburger/settings destinations, Shifts/More/account/
+  legal routes, fabricated data, client pay calculations, substituted currency
+  labels, or missing-as-zero behavior.
+- Visual contract: use the light cool canvas, slate type, teal/emerald accents,
+  clear title hierarchy, layered cards, semantic chips, compact icon metadata,
+  primary/secondary/tertiary actions, section headers, grouped forms/settings,
+  subtle depth, intentional whitespace, responsive wrapping, and font scaling.
+  Use one icon system and no Unicode emoji production icons.
+- Behavior contract: preserve typed API/context ownership, role/privacy
+  boundaries, accessibility behavior, validation, lifecycle actions, and all
+  existing async/stale-response/concurrency coordinators.
+
+Per-screen acceptance gate, in order:
+
+1. Implement without commit or push.
+2. Run `npm run typecheck`, `npm run lint`, focused Jest tests, relevant
+   regressions, and `git diff --check`.
+3. Obtain an independent read-only review, correct all findings, and repeat
+   until the reviewer reports `NO FINDINGS`.
+4. Review the real screen on Android. Check every relevant initial/content,
+   loading, empty, error/retry, mutation-disabled, long-text, keyboard,
+   font-scale-1.5, narrow-viewport, and real-returned-status/data state; record
+   device/OS, viewport/orientation, font scale, and comparison screenshots.
+5. Obtain explicit user visual approval.
+6. Only then create and push that screen's feature-branch commit and begin the
+   next screen.
+
+Android is the current visual-validation platform. Record iOS as unavailable
+for each affected gate until the platform is available; Android approval does
+not imply iOS approval.
 
 Documentation gates:
 
-- [ ] Make `UI_DESIGN_SYSTEM.md` canonical and register `DesignExample.png` as its non-normative visual reference; align docs policy, verified native-stack role navigation, status/copy mapping, formatting/null/timezone rules, semantic component contracts, screen states, presentation architecture, migration order, and acceptance criteria without changing API or business rules
-- [ ] Independently review the canonical mobile UI design documentation with no findings before the user commits and pushes it; verify that `API.md` remains unchanged unless a true contract ambiguity was found
+- [ ] Canonicalize the global reference-driven visual/composition contract,
+  full current screen scope, Login hero contract, shared-foundation correction,
+  navigation/product boundaries, migration order, and acceptance workflow in
+  `UI_DESIGN_SYSTEM.md`, `MOBILE_UX.md`, and `TASKS.md` without changing API or
+  business rules
+- [ ] Independently review the canonical mobile UI documentation with `NO
+  FINDINGS` before the user commits and pushes it; confirm `API.md`, `SPEC.md`,
+  `ARCHITECTURE.md`, and `DOCS_POLICY.md` remain unchanged
 
-Mobile implementation, strictly sequential:
+Shared visual-foundation correction, before screens:
 
-- [ ] Theme tokens — inspect `mobile/src/utils/theme.ts`, `status.ts`, and `format.ts`; add the canonical semantic color, type, spacing, radius, control/touch, focus, and status-token structure while preserving compatible exports during migration; test status/copy and locale/null formatting helpers, and make no screen/navigation/API changes
-- [ ] Shared components — inspect `mobile/src/components/` and their tests; evolve `Screen`, `Button`, `FormField`, `StatusBadge`, `StateMessage`, `SegmentedControl`, shift cards, and payout card, and add only the documented `ScreenHeader`, `Card`, `Metric`, `SettingGroup`, `EmptyState`, or `Feedback` abstractions needed by later tasks; accept loading/disabled/pressed/error/wrapping/accessibility and narrow-screen behavior without moving data fetching or business logic into components
-- [ ] Login — migrate `LoginScreen.tsx` and focused auth/component tests using shared primitives; preserve login, Register navigation, retained input, validation/backend errors, session behavior, and duplicate-submit blocking; add an accessible password-visibility action, but no photo asset, Terms/Privacy route, legal copy, or other reference-only feature; pass the per-screen visual gate with keyboard and enlarged text
-- [ ] Foreman dashboard — migrate `ForemanDashboardScreen.tsx`, `ManagedShiftCard.tsx`, and focused context/screen tests; preserve Create shift, Company Settings, Payroll requests, managed-shift details, refresh/retry, join code, logout, all canonical shift states, and role/privacy boundaries; prioritize only a real returned ACTIVE shift and never fabricate worker counts or money; pass the per-screen visual gate
-- [ ] Worker dashboard — migrate `WorkerDashboardScreen.tsx`, shared worker shift-card presentation, and focused context/screen tests; preserve Join shift, history, payroll, details, refresh/retry, logout, recent-three behavior, and separate shift/attendance/payment/pause states; pass no-company, empty, active, pending/null, paid, long-text, and per-screen visual checks
-- [ ] Shift history — migrate `MyShiftHistoryScreen.tsx`, `WorkerShiftCard.tsx`, related detail entry behavior, formatting, and focused tests; preserve backend ordering, detail navigation, CANCELLED/DISCARDED non-payable semantics, legacy null labels, null versus zero, and returned pay-breakdown states without client calculation; pass the per-screen visual gate
-- [ ] Worker payroll — migrate `WorkerPayrollScreen.tsx`, worker use of `PayoutRequestCard.tsx`, and focused API/screen/card tests; preserve backend preview ownership, exact selected attendance IDs, null/mixed-label blocking, stale preview/conflict recovery, compact-card fields, latest-response behavior, create/refresh, and request history; pass loading/empty/error/selection/success and per-screen visual checks
-- [ ] Foreman payroll requests — migrate `ForemanPayrollRequestsScreen.tsx`, foreman request-card variants, and focused tests; preserve PENDING/APPROVED filters, approve-only-pending, refresh, mutation blocking, stale conflict, compact-card fields, persisted labels, and distinct approved/paid timestamps and copy; pass both-filter empty/data/error and per-screen visual checks
-- [ ] Company Settings — migrate `ForemanCompanySettingsScreen.tsx`, Company Settings form primitives, and focused navigation/API/screen tests; preserve FOREMAN-only access, exact Unicode currency-label validation, nullable independent defaults, read-only join code/timezone, route notices, load/retry, save/field errors, stale/unmount protection, historical-snapshot copy, and nested Pay Rules navigation; pass null-label, long-Unicode, keyboard, error, success, and per-screen visual checks
-- [ ] Pay Rules shell and state — migrate only the `ForemanPayRulesScreen.tsx` shell, metadata, groups, feedback, and focused async-state tests; do not rewrite the operation coordinator; preserve coherent policy/settings loads, focus generations, required freshness gating, background/queued refresh, save visibility/errors, stale callback suppression, and immutable-version copy; pass deferred-operation tests and the per-screen visual gate before rule-editor styling
-- [ ] Pay Rules rule editor — migrate `PayPolicyRuleEditor.tsx`, related shared controls, `payPolicyForm.ts` presentation boundaries, and focused tests; preserve all five rule types, exact percentage and integer-minute validation, decimal-safe threshold conversion, manual holidays, weekday selection, U+FEFF currency-label behavior, and worker-default-only single-rule preview; do not calculate applicability, stacking, overtime, salary, payroll, payout, or foreman premium; pass all-rule/large-text/narrow-screen visual checks
-- [ ] Verified navigation and header polish — inspect `AppNavigator.tsx`, `types/navigation.ts`, role/navigation tests, and every migrated header/back action; retain native stacks, role gates, all existing destinations/actions, Company Settings -> Pay Rules nesting, and Android hardware back; do not add bottom tabs, Shifts, More, account, admin, or legal routes; pass WORKER/FOREMAN/ADMIN route-boundary and transition tests plus device review
-- [ ] Final mobile regression, independent review, and available-device smoke review — run full typecheck, lint, Jest, and `git diff --check`; audit the complete mobile diff for API/business/privacy/status/null/currency/timezone/calculation regressions, raw visual constants, accessibility/responsive requirements, and evidence from every per-screen visual gate; require an independent review with no findings; then smoke test Login and both role flows through history, payroll, Company Settings, and Pay Rules on Android and iOS when available, otherwise document the available device/platform limitation; record the tested worktree/commit, device/OS/Expo versions, font-scale/keyboard/safe-area checks, representative real states, and outcome before the user commits and pushes the reviewed mobile work
+- [ ] Re-audit `theme.ts`, status/format helpers, and shared components against
+  the new global visual contract; preserve existing accessibility/behavior;
+  strengthen composition primitives and the unified icon approach; evolve
+  `Screen`, buttons, fields, badges, feedback/empty state, segments, and cards;
+  add action tiles, identity/company summaries, section headers, metrics, and
+  redesigned card shells only where genuinely reusable; do not automatically
+  discard already-correct technical work
+- [ ] Create or derive `mobile/assets/images/login-hero.png` under the canonical
+  hero contract, but do not integrate it until the user separately approves the
+  exact visual; bundle locally, keep it decorative/accessibility-hidden, exclude
+  third-party text/branding and recognizable people, and verify a responsive
+  portrait crop
+
+Screen migrations, strictly sequential:
+
+- [ ] Login (`LoginScreen.tsx`, route `Login`) — build the compact brand,
+  `Welcome back`, product sentence, approved hero, overlapping elevated form,
+  icon fields, password visibility, primary Log in, `or`, and secondary Create
+  account; preserve auth/session/errors/input and add no Terms/Privacy route
+- [ ] Register (`RegisterScreen.tsx`, route `Register`) — use the shared branded
+  auth shell, intro, elevated grouped account/role form, and action hierarchy;
+  preserve WORKER/FOREMAN-only registration, validation, and navigation
+- [ ] Restore Session (`RestoreSessionScreen.tsx`) — use the branded system
+  shell and intentional loading feedback; preserve token validation/clearing and
+  role routing without adding a route or fake progress
+- [ ] Unsupported Role (`UnsupportedRoleScreen.tsx`) — use the branded system
+  shell and existing recovery/logout behavior; do not create an ADMIN flow
+- [ ] Join Company (`JoinCompanyScreen.tsx`, WORKER company gate) — use branded
+  onboarding, elevated join-code form, explanations, and clear feedback/action;
+  preserve company join validation and role gate
+- [ ] Create Company (`CreateCompanyScreen.tsx`, FOREMAN company gate) — use
+  branded onboarding and grouped company/currency/default-rate surfaces;
+  preserve exact validation, optional defaults, create/refresh behavior, and
+  role gate
+- [ ] Worker Dashboard (`WorkerDashboardScreen.tsx`, route `WorkerDashboard`) —
+  add identity/role and returned-company summary, prominent Join shift,
+  History/Payroll action tiles, section header, and redesigned shift cards;
+  preserve refresh, recent-three behavior, logout, and separate real states
+- [ ] Join Shift (`JoinShiftScreen.tsx`, route `JoinShift`) — add strong header,
+  elevated code card, contextual help, feedback surface, and keyboard-safe
+  action; preserve all join validation/lifecycle outcomes
+- [ ] Shift History (`MyShiftHistoryScreen.tsx`, route `MyShiftHistory`) — add
+  reference-like hierarchy and redesigned compact shift cards with icon
+  metadata and separate date/duration/amount/status; preserve backend ordering,
+  navigation, null/currency, and breakdown semantics
+- [ ] Worker Payroll (`WorkerPayrollScreen.tsx`, route `WorkerPayroll`) — add
+  surfaced selection, compact payable cards, backend-preview metrics, primary
+  request action, segmented history, and redesigned request cards; preserve
+  exact IDs, latest preview, null/mixed-label blocks, conflicts, and no local
+  totals
+- [ ] Worker Shift Details (`WorkerShiftDetailsScreen.tsx`, route
+  `WorkerShiftDetails`) — add status summary, grouped timing/work/pay cards,
+  metrics/breakdown, and contextual pause action; preserve permissions,
+  lifecycle, returned calculation states, and no client calculation
+- [ ] Foreman Dashboard (`ForemanDashboardScreen.tsx`, route
+  `ForemanDashboard`) — add identity/role and returned-company/join-code
+  summary, prominent Create shift, Settings/Payroll action tiles, section
+  header, and redesigned managed-shift cards; fabricate no counts or money
+- [ ] Create Shift (`CreateShiftScreen.tsx`, route `CreateShift`) — add strong
+  header and grouped shift/rate cards with company/currency context and
+  keyboard-safe action; preserve settings sequencing, edit guards, fallback/
+  override rules, zero, validation, and routing
+- [ ] Foreman Shift Details (`ForemanShiftDetailsScreen.tsx`, route
+  `ForemanShiftDetails`) — add lifecycle/status summary, grouped shift/pause/
+  attendance/rate cards, metrics, and clear contextual/destructive hierarchy;
+  preserve approvals, pause/lifecycle actions, short-shift decision, privacy,
+  and stale-response protection
+- [ ] Shift Summary (`ShiftSummaryScreen.tsx`, route `ShiftSummary`) — add result
+  header, closed/status summary, returned-total metrics, grouped worker cards,
+  and layered breakdown; preserve read-only backend values, privacy, legacy and
+  unavailable snapshot behavior
+- [ ] Foreman Payroll Requests (`ForemanPayrollRequestsScreen.tsx`, route
+  `ForemanPayrollRequests`) — add a surfaced PENDING/APPROVED segment and compact
+  icon-supported request cards with semantic chips; preserve filtering,
+  approve-only-pending, mutation lock, stale conflict, persisted labels, and
+  distinct approval/payment facts
+- [ ] Company Settings (`ForemanCompanySettingsScreen.tsx`, route
+  `ForemanCompanySettings`) — add grouped identity/localization/default/read-only
+  cards, explained Pay Rules row, and visible dirty/save feedback; preserve
+  FOREMAN-only access, exact Unicode rules, independent nullable defaults,
+  sequencing/unmount guards, notices, and nested navigation
+- [ ] Pay Rules shell/state (`ForemanPayRulesScreen.tsx`, route
+  `ForemanPayRules`) — add policy/version summary and grouped settings/feedback;
+  preserve the coherent-pair/focus/freshness/queued-load/stale-callback
+  coordinator and immutable-version behavior; do not approve the screen yet
+- [ ] Pay Rules editor (`PayPolicyRuleEditor.tsx` within `ForemanPayRules`) — add
+  structured rule cards and reference-like action hierarchy; preserve all five
+  rule types, exact validation/conversion, manual holidays, weekdays, and the
+  worker-default-only illustration; after integration, run the full Pay Rules
+  screen acceptance gate and obtain one user visual approval
+
+Final integration:
+
+- [ ] Verified navigation/header consistency — inspect `AppNavigator.tsx`,
+  `types/navigation.ts`, role tests, and every header/back action; preserve
+  native stacks, gates, destinations, Company Settings -> Pay Rules, Android
+  hardware back, and transitions; add no bottom tabs, hamburger/gear
+  destinations, Shifts, More, account, admin, or legal routes
+- [ ] Final regression, independent review, and Android smoke review — run full
+  typecheck, lint, Jest, and `git diff --check`; audit behavior/privacy/status/
+  null/currency/timezone/calculation and visual-system consistency across all
+  screens; require final independent `NO FINDINGS`; smoke test both role flows
+  and system/auth states on Android; record worktree/commit, device/OS/Expo,
+  keyboard/font-scale/narrow-viewport/safe-area evidence and iOS unavailability
+  before the user commits and pushes the reviewed final integration
 
 ## Milestone 9: Infrastructure
 

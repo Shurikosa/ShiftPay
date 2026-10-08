@@ -851,9 +851,15 @@ must not call backend endpoints, own authorization, or duplicate domain logic.
   dimensions must not be scattered through screen files.
 - Evolve the current `Screen`, `Button`, `FormField`, `StatusBadge`,
   `StateMessage`, `SegmentedControl`, shift-card, and payout-card components.
-  Introduce the documented `ScreenHeader`, `Card`, `Metric`, `SettingGroup`,
-  `EmptyState`, or `Feedback` abstractions only where they remove duplication
-  and preserve current behavior.
+  Current canonical shared patterns also include `ScreenHeader`, `Card`,
+  `AppIcon`, `SectionHeader`, `ActionTile`, `IdentityHeader`, `CompanySummary`,
+  `Metric`, `SettingGroup`, `EmptyState`, and `Feedback`. This is not a closed
+  component inventory: `docs/UI_DESIGN_SYSTEM.md` is the authoritative
+  component contract and source for the current shared-pattern set.
+- Add or evolve a presentation abstraction only when a pattern genuinely
+  repeats and the abstraction removes screen-level duplication. Presentation
+  components do not fetch data, implement domain validation or calculations,
+  or change navigation, permissions, or business behavior.
 - Formatting helpers own presentation-only locale, timezone, money-label,
   duration, nullable-value, and approved status-copy formatting. They display
   returned values and must not calculate salary, premiums, overtime, rounded
@@ -900,22 +906,42 @@ src/api/
 
 Do not call fetch directly from screen components.
 
-Screens
+Screen Inventory and Navigation Boundary
 
-Basic MVP screens:
+Native-stack route screens are registered in `AppNavigator.tsx` through the
+typed auth, worker, or foreman stack parameter lists. They are named navigation
+destinations and participate in the applicable stack's route history,
+transitions, and back behavior:
 
-LoginScreen
-RegisterScreen
-WorkerDashboardScreen
-WorkerPayrollScreen
-ForemanDashboardScreen
-ForemanCompanySettingsScreen
-ForemanPayRulesScreen
-ForemanPayrollRequestsScreen
-JoinShiftScreen
-CreateShiftScreen
-ShiftDetailsScreen
-ShiftSummaryScreen
+- `LoginScreen`
+- `RegisterScreen`
+- `WorkerDashboardScreen`
+- `JoinShiftScreen`
+- `MyShiftHistoryScreen`
+- `WorkerPayrollScreen`
+- `WorkerShiftDetailsScreen`
+- `ForemanDashboardScreen`
+- `ForemanCompanySettingsScreen`
+- `ForemanPayRulesScreen`
+- `CreateShiftScreen`
+- `ForemanPayrollRequestsScreen`
+- `ForemanShiftDetailsScreen`
+- `ShiftSummaryScreen`
+
+Conditional gate/state screens are rendered directly by the root session or
+role decision in `AppNavigator.tsx`; they are not registered stack routes and
+must not be treated as independently navigable destinations:
+
+- `RestoreSessionScreen` while stored session state is resolved
+- `UnsupportedRoleScreen` when the authenticated role has no mobile MVP flow
+- `JoinCompanyScreen` when a WORKER has no company
+- `CreateCompanyScreen` when a FOREMAN has no company
+
+This inventory records the implemented navigation structure; it is not an
+independent screen backlog or UX scope. `docs/MOBILE_UX.md` and
+`docs/UI_DESIGN_SYSTEM.md` canonically own the exact screen UX, composition,
+state coverage, and migration scope so this architecture summary does not
+diverge from them.
 
 8. Infrastructure
 

@@ -1,24 +1,36 @@
 # ShiftPay Mobile UI Design System
 
-Version: 1.0 · 27 September 2026
+Version: 2.0 · 8 October 2026
 
 This document is the canonical visual and interaction specification for the
 ShiftPay React Native / Expo application. Product behavior remains defined by
 `SPEC.md`, HTTP contracts by `API.md`, mobile flows by `MOBILE_UX.md`, and the
 implementation sequence by `TASKS.md`.
 
-[`DesignExample.png`](DesignExample.png) is a non-normative visual reference for
-the teal direction, spacing, typography, surfaces, and information hierarchy.
-It is not contract authority and does not authorize routes, actions, data,
-status meanings, legal copy, calculations, or assets that are absent from the
-canonical specifications and implementation.
+[`DesignExample.png`](DesignExample.png) is the approved visual-language and
+composition reference for the entire mobile MVP. Every mobile screen must
+recognizably inherit its hierarchy, layered surfaces, cards, action treatment,
+status presentation, icon-supported metadata, and teal/slate visual language;
+pixel-for-pixel copying is not required. The image remains non-normative for
+API contracts, routes, actions, returned data, status meanings, business rules,
+permissions, calculations, and legal copy. Anything shown in the image but
+absent from the canonical Markdown contracts remains out of scope.
 
 ## 1. Scope and invariants
 
-This phase is a presentation redesign. It must not change backend APIs, the data
-model, authorization, role permissions, pay or payout calculations, persistence,
-or business rules. Existing typed clients, contexts, lifecycle actions, error
-handling, and concurrency protections remain in place.
+This phase is a reference-driven presentation redesign of the complete mobile
+MVP, not a token refresh of selected screens. It must not change backend APIs,
+the data model, authorization, role permissions, pay or payout calculations,
+persistence, or business rules. Existing typed clients, contexts, lifecycle
+actions, error handling, concurrency protections, accessibility behavior, and
+already-correct functional work remain the foundation and may be visually
+evolved rather than discarded.
+
+A migration is not accepted when it only applies new colors, fonts, spacing,
+or radii to an old layout while retaining the previous composition and
+information hierarchy without a documented, screen-specific reason. Each
+screen must receive a visibly redesigned hierarchy, surface structure, action
+placement, and state presentation appropriate to its real content and actions.
 
 The redesign must preserve these invariants:
 
@@ -38,31 +50,47 @@ The redesign must preserve these invariants:
 - the UI must not claim a per-shift policy version where the current DTO does
   not provide one.
 
-The reference image does not add Terms/Privacy routes, construction-photo
-functionality, QR scanning, generic account or role-agnostic settings
-destinations, decorative settings gears, mock worker counts, fabricated pay
-values, or any other absent feature. The existing FOREMAN-only Company Settings
-route remains in scope.
+The reference image does not add Terms/Privacy routes, QR scanning, bottom
+tabs, hamburger or generic settings destinations, account/legal screens, mock
+worker counts, fabricated pay values, or any other absent feature. The existing
+FOREMAN-only Company Settings route remains in scope. The Login hero slot is a
+presentation-only exception governed by section 8; the exact bitmap
+still requires separate visual approval and adds no product functionality.
 
 ## 2. Product direction
 
-ShiftPay should feel calm, reliable, and quick to scan during a shift. Use a
-light neutral canvas, white surfaces, deep teal primary actions, clear system
-type, and restrained semantic status colors. Put the current task and its
-result first; keep audit detail and policy configuration in their existing
-dedicated views.
+ShiftPay should feel calm, reliable, modern, and quick to scan during a shift.
+The complete app uses a light cool canvas, dark slate typography, teal/emerald
+brand accents, rounded elevated or bordered surfaces, and restrained semantic
+status colors. Put the current task and its result first; keep audit detail and
+policy configuration in their existing dedicated views.
+
+The product name remains `ShiftPay`. Rebranding is deferred to a separate final
+stage and is not part of this migration.
 
 Design principles:
 
-1. Use one clear primary action per screen or section. Keep destructive actions
-   distinct and preserve existing confirmation behavior.
-2. Use the same semantic component for the same job throughout the app.
-3. Keep number and unit together and allow both to wrap without clipping.
-4. Explain policy implications beside controls, including stacking, timezone,
+1. Establish a clear hierarchy of large screen titles, section titles, card
+   titles, values, and supporting text; do not rely on font weight alone.
+2. Prefer layered cards and grouped surfaces over plain content stacks. Use
+   consistent section headers and compact icon-supported metadata to make real
+   returned data easy to scan.
+3. Use one clear primary action per screen or section, supported by visually
+   distinct secondary and tertiary actions. Keep destructive actions separate
+   and preserve existing confirmation behavior.
+4. Use dashboard action tiles only for real existing destinations, and group
+   related form/settings controls into explained sections.
+5. Use the same semantic component for the same job throughout the app, but
+   create a shared primitive only when the pattern genuinely repeats.
+6. Keep number and unit together and allow both to wrap without clipping.
+7. Explain policy implications beside controls, including stacking, timezone,
    thresholds, and immutable versions.
-5. Keep role context visible while sharing tokens and components.
-6. Design for long names, localization, narrow phones, safe areas, keyboard
-   display, and increased system font size.
+8. Keep identity, role, and company context visible where relevant while
+   sharing tokens and components.
+9. Use deliberate whitespace and subtle depth/surface separation; avoid both
+   dense undifferentiated stacks and large accidental empty zones.
+10. Design for long names, localization, narrow phones, safe areas, keyboard
+    display, responsive wrapping, and a system font scale of at least 1.5.
 
 ## 3. Foundations
 
@@ -125,9 +153,28 @@ labels, errors, amounts, and actions must not be ellipsized.
 | `radius.sm/md/lg` | 8 / 12 / 16 | Compact control, input, card |
 | `border.default` | 1 | Surface delineation |
 
-Prefer borders and background separation over shadows. Reserve a subtle
-platform-adjusted shadow for floating overlays. Screen content respects safe
-area, keyboard, scroll reachability, and any future navigation inset.
+Use borders, tonal background separation, and restrained platform-adjusted
+shadows to create the reference-like layered depth. Elevation must remain
+subtle and consistent rather than becoming decoration. Screen content respects
+safe area, keyboard, scroll reachability, and existing navigation insets.
+
+### 3.4 Iconography
+
+Use one consistent production icon system across mobile. Semantic icons may
+support fields, real navigation actions, metadata, status context, dashboard
+tiles, and settings groups.
+
+- Do not use Unicode emoji as production icons.
+- Icon-only interactive controls require an accessible label, correct role and
+  state, and at least the 44 x 44 minimum touch target.
+- Decorative icons and the decorative Login hero are hidden from accessibility
+  services.
+- An icon supplements but never replaces important visible action text, status
+  copy, or an essential value.
+- Icon use follows existing product scope. An icon visible in the reference
+  does not authorize a route, action, status, or data field.
+- Use consistent size, optical weight, alignment, and semantic color through a
+  shared icon wrapper or equivalent foundation instead of per-screen glyphs.
 
 ## 4. Shared component contracts
 
@@ -138,9 +185,13 @@ parallel abstractions:
 | --- | --- | --- |
 | `AppScreen` | evolve `Screen` | Safe area, canvas, scroll/non-scroll, keyboard avoidance, reachable final action, configurable insets. |
 | `ScreenHeader` | new shared component | Role/context eyebrow, wrapping title, optional subtitle, back and named action; no ubiquitous gear. |
+| `AppIcon` | shared icon wrapper | One icon family, semantic size/color, decorative-hidden support, labelled icon-only controls, no emoji. |
 | `Button` | evolve `Button` | Primary, secondary, text, destructive; loading, disabled, pressed, accessible state, stable label and minimum target. |
 | `TextField` | evolve `FormField` | Persistent label, hint, field error, keyboard type, focus and optional trailing action; preserve input after rejection. |
 | `Card` | new primitive | Surface, border, radius, padding and optional press state; nested surface remains distinguishable. |
+| `SectionHeader` | new shared component where repeated | Wrapping section title, optional supporting text, and optional real named action such as View all. |
+| `ActionTile` | new dashboard primitive | Icon, visible destination/action label, optional supporting context, pressed/disabled state; never invents a destination. |
+| `IdentityHeader` / `CompanySummary` | shared pattern where repeated | Real user/role identity and returned company context without fabricated metrics. |
 | `StatusBadge` | evolve `StatusBadge` | Domain-specific visible copy plus semantic tone; wraps and never relies on color alone. |
 | `Metric` | new component | Label, value, unit, explanation, pending and unavailable variants. |
 | `ShiftCard` | converge `ManagedShiftCard` and `WorkerShiftCard` | Shared shell with role-specific data; separate status dimensions; show duration/amount only when returned. |
@@ -153,7 +204,9 @@ parallel abstractions:
 `DetailRow`, `PayCalculationBreakdown`, `PayPolicyRuleEditor`, and the current
 context/API abstractions remain valid specialized building blocks. Presentation
 components display typed state; they do not fetch directly or reimplement
-domain validation/calculation.
+domain validation/calculation. Identity/company summaries, section headers,
+metrics, action tiles, and redesigned cards should be shared only where their
+content and interaction contract actually repeats.
 
 ## 5. Verified navigation map
 
@@ -163,12 +216,13 @@ existing transitions during the first redesign phase:
 
 | Context | Verified routes and nesting |
 | --- | --- |
+| Session gate | `RestoreSessionScreen` while the stored session is resolved; it is not a new stack destination. |
 | Unauthenticated | `Login`, `Register`, and their existing forward/back transitions |
 | WORKER without company | role gate renders `JoinCompany` before the worker stack |
 | WORKER | `WorkerDashboard`, `JoinShift`, `MyShiftHistory`, `WorkerPayroll`, `WorkerShiftDetails` |
 | FOREMAN without company | role gate renders `CreateCompany` before the foreman stack |
 | FOREMAN | `ForemanDashboard`, `CreateShift`, `ForemanShiftDetails`, `ShiftSummary`, `ForemanPayrollRequests`, `ForemanCompanySettings` -> `ForemanPayRules` |
-| ADMIN | no mobile MVP flow; render the existing unsupported-role state |
+| ADMIN/unsupported role | no mobile MVP flow; render `UnsupportedRoleScreen`, which is not a new product route |
 
 The reference four-tab model is deferred. FOREMAN has no separate Shifts
 destination, neither role has a More destination, and settings/account routes
@@ -178,7 +232,8 @@ canonical information-architecture decision and dependency/task update.
 Nested screens provide a visible, named Back control and preserve Android
 hardware-back behavior. `Create shift` and `Join shift` remain prominent
 dashboard actions. Company Settings remains FOREMAN-only and Pay Rules remains
-nested inside it.
+nested inside it. Visual headers may follow the reference composition, but they
+show only actions that already exist for the current screen and role.
 
 ## 6. Status and copy dictionary
 
@@ -288,15 +343,57 @@ suppression. Header or shared-component work that touches these screens must not
 weaken those owners even when the screen itself is not the current migration
 target.
 
+### Full mobile scope and composition contract
+
+The reference-driven migration covers every current mobile MVP screen or gate
+listed below. Route names are shown where the component is registered in a
+native stack; `RestoreSessionScreen`, `UnsupportedRoleScreen`,
+`JoinCompanyScreen`, and `CreateCompanyScreen` are current conditional gates,
+not authorization for new routes.
+
+| Screen/component (route where applicable) | Required reference-driven composition |
+| --- | --- |
+| `LoginScreen` (`Login`) | Compact ShiftPay brand area; large `Welcome back` title and product sentence; separately approved construction hero; elevated form card that visually overlaps/layers with the hero; icon-supported email/password fields; visible password action; primary Log in; `or` separator; secondary Create account. |
+| `RegisterScreen` (`Register`) | Shared branded auth/onboarding shell, concise intro, elevated form surface, grouped identity/account/role fields, and clear primary/secondary action hierarchy. |
+| `RestoreSessionScreen` | Branded system-state shell with compact identity, intentional loading/progress feedback, and no blank transitional canvas. |
+| `UnsupportedRoleScreen` | Branded system-state shell, clear unsupported-role explanation, and only the existing recovery/logout action. |
+| `JoinCompanyScreen` (company gate) | Branded onboarding shell, clear worker/company intro, elevated join-code form surface, supporting explanation, and one prominent join action. |
+| `CreateCompanyScreen` (company gate) | Branded onboarding shell, clear foreman/company intro, elevated grouped company/currency/default-rate form, explanatory copy, and prominent create action. |
+| `WorkerDashboardScreen` (`WorkerDashboard`) | Identity/WORKER header, returned company summary, prominent Join shift action, History and Payroll action tiles, current/recent section header, and redesigned shift cards with separate real status dimensions. |
+| `JoinShiftScreen` (`JoinShift`) | Strong header, elevated join-code card, concise eligibility/help copy, reference-like primary action, and clear feedback surface. |
+| `MyShiftHistoryScreen` (`MyShiftHistory`) | Strong header, filter/context surface only if backed by current behavior, section hierarchy, and compact redesigned shift cards separating date, duration, amount, and status. |
+| `WorkerPayrollScreen` (`WorkerPayroll`) | Strong header; surfaced selection context; selectable payable-work cards; backend-preview metrics in a distinct summary card; primary request action; segmented request history; compact status-aware request cards. |
+| `WorkerShiftDetailsScreen` (`WorkerShiftDetails`) | Strong header; primary shift/attendance/payment status summary; grouped timing, work, and pay cards; returned metrics and breakdown; contextual pause action with clear primary/secondary state. |
+| `ForemanDashboardScreen` (`ForemanDashboard`) | Identity/FOREMAN header, returned company/join-code summary, prominent Create shift action, Company Settings and Payroll Requests action tiles, recent/current section header, and redesigned managed-shift cards. |
+| `CreateShiftScreen` (`CreateShift`) | Strong header, grouped shift/rate form cards with explanations, visible returned company/currency context, and keyboard-safe primary create action. |
+| `ForemanShiftDetailsScreen` (`ForemanShiftDetails`) | Strong header; primary lifecycle/status summary; grouped shift, pause, attendance, and rate cards; metrics; contextual lifecycle actions; clearly separated destructive cancel/discard decisions. |
+| `ShiftSummaryScreen` (`ShiftSummary`) | Strong result header, closed-status summary, metric surfaces for returned totals, grouped worker result cards, and layered read-only attendance/pay breakdown. |
+| `ForemanPayrollRequestsScreen` (`ForemanPayrollRequests`) | Strong header, prominent PENDING/APPROVED segmented surface, compact redesigned request cards, icon-supported time/date/amount metadata, status chips, and approve action only where currently allowed. |
+| `ForemanCompanySettingsScreen` (`ForemanCompanySettings`) | Strong header; grouped identity, localization, defaults, and read-only company-detail cards; explained Pay Rules row; clear dirty/saving/saved/error feedback; keyboard-safe actions. |
+| `ForemanPayRulesScreen` (`ForemanPayRules`) | Strong header; policy/version summary; grouped week/stacking settings; structured rule cards/editor; explanatory surfaces; visible loading/dirty/saving/saved/error state; keyboard-safe save action. |
+
+Across the table, “strong header”, cards, metrics, icons, and action hierarchy
+refer only to presentation of fields and actions already available to that
+screen. They must not fabricate values or imply unsupported navigation.
+
 ### Login
 
-- Compact brand, one product sentence, labelled email/password fields, an
+- Use the full Login composition in the table above: compact brand, `Welcome back`,
+  one product sentence, construction hero, overlapping elevated form
+  card, labelled icon-supported email/password fields, `or` separator,
   accessible password-visibility action, primary Log in, and secondary Create
   account.
 - Preserve values and field errors; show invalid credentials/network feedback;
   block duplicate submit. Keyboard and increased text must not hide submit.
 - Do not add reference-image Terms/Privacy links without real routes and
-  approved legal copy. The construction photo is not an implementation asset.
+  approved legal copy.
+- The hero contract is `mobile/assets/images/login-hero.png`. Before mobile
+  implementation, the exact bitmap requires separate user visual approval. It
+  may be derived from the reference or be a new AI-generated image in a close
+  style. It must be locally bundled, decorative and accessibility-hidden,
+  contain no third-party text/branding or recognizable person, and use a
+  portrait-responsive crop that preserves form reachability on narrow/short
+  screens and at increased font scale.
 
 ### Foreman dashboard
 
@@ -378,11 +475,41 @@ target.
 
 ## 10. Migration and acceptance
 
-Migrate in this order: theme tokens, shared components, Login, foreman
-dashboard, worker dashboard, shift history, worker payroll, foreman payroll
-requests, Company Settings, Pay Rules shell/state, Pay Rules rule editor, then
-navigation/header polish and final regression. Do not redesign all screens in
-one task.
+The previously implemented mobile redesign is a behavioral/accessibility
+foundation, not visual approval. First complete a correction stage that reviews
+the theme and all shared components against this global composition contract.
+Preserve correct behavior and accessibility while strengthening reusable
+composition primitives, the unified icon approach, action tiles,
+identity/company summaries, section headers, metrics, and redesigned cards only
+where patterns genuinely repeat.
+
+After that correction stage, migrate one screen at a time in this order:
+
+1. `LoginScreen` after separate approval of `login-hero.png`.
+2. `RegisterScreen`.
+3. `RestoreSessionScreen`.
+4. `UnsupportedRoleScreen`.
+5. `JoinCompanyScreen`.
+6. `CreateCompanyScreen`.
+7. `WorkerDashboardScreen`.
+8. `JoinShiftScreen`.
+9. `MyShiftHistoryScreen`.
+10. `WorkerPayrollScreen`.
+11. `WorkerShiftDetailsScreen`.
+12. `ForemanDashboardScreen`.
+13. `CreateShiftScreen`.
+14. `ForemanShiftDetailsScreen`.
+15. `ShiftSummaryScreen`.
+16. `ForemanPayrollRequestsScreen`.
+17. `ForemanCompanySettingsScreen`.
+18. `ForemanPayRulesScreen` shell/state, then its rule editor within the same
+    screen approval boundary.
+19. Verified navigation/header consistency and final regression across all
+    screens without adding destinations.
+
+Do not redesign all screens in one implementation task. A later screen may
+reuse an already-approved shared primitive, but must still receive its own
+composition and approval gate.
 
 For each migrated screen:
 
@@ -390,15 +517,29 @@ For each migrated screen:
    sections plus the current implementation/tests.
 2. Change only mobile presentation code and focused tests; preserve typed API,
    role gates, actions, calculations, and async behavior.
-3. Run typecheck, lint, focused tests, and `git diff --check`.
-4. Review on a device or emulator before starting the next screen. Record
-   platform/device, viewport or orientation, font scale, and representative
-   loading, empty, error, long-text, disabled, and real-data states; retain a
-   screenshot for visual comparison.
+3. Implement without commit or push, then run typecheck, lint, focused tests,
+   relevant regressions, and `git diff --check`.
+4. Obtain an independent read-only review. Correct every finding and repeat the
+   review until it reports `NO FINDINGS`.
+5. Review the real screen on an Android device or emulator. Check every
+   relevant state: initial/content, loading, empty, error/retry, mutation
+   disabled/busy, long text, keyboard, font scale 1.5, narrow viewport, and real
+   returned statuses/data. Record device/OS, viewport or orientation, font
+   scale, states, and comparison screenshots.
+6. Obtain explicit user visual approval. Only after approval may the mobile
+   agent create and push that screen's feature-branch commit. Then proceed to
+   the next screen.
 
-The phase is accepted when all targeted screens use shared semantic tokens and
-components without new scattered raw visual constants; every existing role
-action remains reachable; status and null/money/time contracts above hold; and
-final Android plus iOS when available (otherwise documented available-device)
-smoke review passes without backend, API, business-rule, permission, or data
-model changes.
+Android is the currently available visual-validation platform. Lack of iOS
+review must be recorded for every affected gate until iOS is available; it is
+not evidence of iOS approval.
+
+The phase is accepted when all screens in the full scope use the approved
+reference-driven visual language and have visibly reconsidered composition and
+hierarchy, not merely tokens; shared semantic tokens/components do not create
+scattered raw visual constants; every existing role action remains reachable;
+status and null/money/time contracts above hold; each screen has independent
+`NO FINDINGS` review and user visual approval; and final Android plus iOS when
+available (otherwise explicitly documented as unavailable) smoke review passes
+without backend, API, business-rule, permission, calculation, or data-model
+changes.
