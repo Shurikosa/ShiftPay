@@ -436,12 +436,12 @@ not imply iOS approval.
 
 Documentation gates:
 
-- [ ] Canonicalize the global reference-driven visual/composition contract,
+- [x] Canonicalize the global reference-driven visual/composition contract,
   full current screen scope, Login hero contract, shared-foundation correction,
   navigation/product boundaries, migration order, and acceptance workflow in
   `UI_DESIGN_SYSTEM.md`, `MOBILE_UX.md`, and `TASKS.md` without changing API or
   business rules
-- [ ] Independently review the canonical mobile UI documentation with `NO
+- [x] Independently review the canonical mobile UI documentation with `NO
   FINDINGS` before the user commits and pushes it; confirm `API.md`, `SPEC.md`,
   `ARCHITECTURE.md`, and `DOCS_POLICY.md` remain unchanged
 
