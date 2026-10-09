@@ -59,6 +59,13 @@ export const theme = {
   padding: { card: 16 },
   height: { control: { min: 48 } },
   target: { min: 44 },
+  icon: {
+    size: {
+      metadata: 16,
+      control: 20,
+      tile: 28
+    }
+  },
   radius: { sm: 8, md: 12, lg: 16 },
   border: { default: 1 },
   elevation: {
