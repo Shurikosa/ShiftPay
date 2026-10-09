@@ -1,29 +1,64 @@
 import type { ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import { theme } from "../utils/theme";
+import { AppIcon } from "./AppIcon";
 
-type HeaderAction = {
+export type ScreenHeaderAction = {
   label: string;
   onPress: () => void;
+  disabled?: boolean;
+  busy?: boolean;
 };
 
-type ScreenHeaderProps = {
+export type ScreenHeaderProps = {
   title: string;
   eyebrow?: string;
   subtitle?: string;
-  backAction?: HeaderAction;
-  action?: HeaderAction;
+  backAction?: ScreenHeaderAction;
+  action?: ScreenHeaderAction;
   children?: ReactNode;
 };
 
-function HeaderActionButton({ action }: { action: HeaderAction }) {
+function HeaderActionButton({
+  action,
+  back = false,
+  trailing = false
+}: {
+  action: ScreenHeaderAction;
+  back?: boolean;
+  trailing?: boolean;
+}) {
+  const isBusy = action.busy === true;
+  const isDisabled = action.disabled === true || isBusy;
+
   return (
     <Pressable
+      accessible
       accessibilityLabel={action.label}
       accessibilityRole="button"
-      onPress={action.onPress}
-      style={({ pressed }) => [styles.action, pressed && styles.actionPressed]}
+      accessibilityState={{ disabled: isDisabled, busy: isBusy }}
+      aria-busy={isBusy}
+      aria-disabled={isDisabled}
+      disabled={isDisabled}
+      onPress={isDisabled ? undefined : action.onPress}
+      style={({ pressed }) => [
+        styles.action,
+        trailing && styles.trailingAction,
+        pressed && !isDisabled && styles.actionPressed,
+        isDisabled && styles.actionDisabled
+      ]}
     >
+      {back ? <AppIcon name="back" size="control" tone="brand" /> : null}
+      {isBusy ? (
+        <ActivityIndicator
+          accessibilityElementsHidden
+          accessible={false}
+          aria-hidden
+          color={theme.colors.brand.primary}
+          importantForAccessibility="no-hide-descendants"
+          size="small"
+        />
+      ) : null}
       <Text style={styles.actionLabel}>{action.label}</Text>
     </Pressable>
   );
@@ -41,13 +76,15 @@ export function ScreenHeader({
     <View style={styles.root}>
       {backAction || action ? (
         <View style={styles.actions}>
-          {backAction ? <HeaderActionButton action={backAction} /> : null}
-          {action ? <HeaderActionButton action={action} /> : null}
+          {backAction ? <HeaderActionButton action={backAction} back /> : null}
+          {action ? <HeaderActionButton action={action} trailing /> : null}
         </View>
       ) : null}
       <View style={styles.copy}>
         {eyebrow ? <Text style={styles.eyebrow}>{eyebrow}</Text> : null}
-        <Text style={styles.title}>{title}</Text>
+        <Text accessibilityRole="header" style={styles.title}>
+          {title}
+        </Text>
         {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
         {children}
       </View>
@@ -57,6 +94,7 @@ export function ScreenHeader({
 
 const styles = StyleSheet.create({
   root: {
+    width: "100%",
     gap: theme.space[2]
   },
   actions: {
@@ -88,13 +126,26 @@ const styles = StyleSheet.create({
     minHeight: theme.target.min,
     maxWidth: "100%",
     flexShrink: 1,
+    flexDirection: "row",
+    flexWrap: "wrap",
     justifyContent: "center",
     alignItems: "center",
+    gap: theme.space[1],
     borderRadius: theme.radius.sm,
     paddingHorizontal: theme.space[2]
   },
   actionPressed: {
-    backgroundColor: theme.colors.brand.tint
+    backgroundColor: theme.colors.brand.tint,
+    transform: [{ translateY: theme.border.default }]
+  },
+  trailingAction: {
+    marginLeft: "auto"
+  },
+  actionDisabled: {
+    borderWidth: theme.border.default,
+    borderColor: theme.colors.border,
+    borderStyle: "dashed",
+    opacity: 0.6
   },
   actionLabel: {
     ...theme.typography.label,
