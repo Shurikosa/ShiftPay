@@ -1,7 +1,9 @@
 import { Pressable, StyleSheet, Text, View, type ViewProps } from "react-native";
 import { theme } from "../utils/theme";
 
-export interface SegmentedControlOption<TValue extends string> {
+type SegmentValue = string | number;
+
+export interface SegmentedControlOption<TValue extends SegmentValue> {
   label: string;
   value: TValue;
   disabled?: boolean;
@@ -10,7 +12,7 @@ export interface SegmentedControlOption<TValue extends string> {
   testID?: string;
 }
 
-export type SegmentedControlProps<TValue extends string> = Pick<
+export type SegmentedControlProps<TValue extends SegmentValue> = Pick<
   ViewProps,
   "accessibilityHint" | "nativeID" | "testID"
 > & {
@@ -20,19 +22,117 @@ export type SegmentedControlProps<TValue extends string> = Pick<
   options: readonly SegmentedControlOption<TValue>[];
   value: TValue;
   wrap?: boolean;
+};
+
+type SafeSegmentedControlOption<TValue extends SegmentValue> =
+  SegmentedControlOption<TValue> & {
+    accessibleName: string;
+  };
+
+function normalizeAccessiblePart(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\p{P}]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
 }
 
-function getAccessibleName(label: string, context?: string): string {
-  const normalizedContext = context?.trim();
+function containsEquivalentPart(context: string, label: string): boolean {
+  const normalizedLabel = normalizeAccessiblePart(label);
+  if (!normalizedLabel) {
+    return false;
+  }
 
-  if (!normalizedContext || normalizedContext.includes(label)) {
+  return [context, ...context.split(/[.!?…;:]+/u)].some(
+    (part) => {
+      const normalizedPart = normalizeAccessiblePart(part);
+      return normalizedPart.length > 0 && normalizedPart === normalizedLabel;
+    }
+  );
+}
+
+function getAccessibleName(label: string, context?: unknown): string {
+  const normalizedContext =
+    typeof context === "string" ? context.trim() : undefined;
+
+  if (!normalizedContext || containsEquivalentPart(normalizedContext, label)) {
     return normalizedContext || label;
   }
 
-  return `${normalizedContext}: ${label}`;
+  const separator = /\p{P}$/u.test(normalizedContext) ? " " : ": ";
+  return `${normalizedContext}${separator}${label}`;
 }
 
-export function SegmentedControl<TValue extends string>({
+function isSegmentValue(value: unknown): value is SegmentValue {
+  return (
+    (typeof value === "string" && value.trim().length > 0) ||
+    (typeof value === "number" && Number.isFinite(value))
+  );
+}
+
+function getSafeOptions<TValue extends SegmentValue>(
+  options: unknown
+): readonly SafeSegmentedControlOption<TValue>[] {
+  if (!Array.isArray(options)) {
+    return [];
+  }
+
+  const seenValues = new Set<SegmentValue>();
+  const seenLabels = new Set<string>();
+  const seenAccessibleNames = new Set<string>();
+  const safeOptions: SafeSegmentedControlOption<TValue>[] = [];
+
+  for (const option of options) {
+    if (typeof option !== "object" || option === null) {
+      continue;
+    }
+
+    const candidate = option as Record<string, unknown>;
+    if (
+      typeof candidate.label !== "string" ||
+      candidate.label.trim().length === 0 ||
+      !isSegmentValue(candidate.value)
+    ) {
+      continue;
+    }
+
+    const label = candidate.label.trim();
+    const normalizedLabel = normalizeAccessiblePart(label);
+    const accessibleName = getAccessibleName(label, candidate.accessibilityLabel);
+    const normalizedAccessibleName = normalizeAccessiblePart(accessibleName);
+    if (
+      seenValues.has(candidate.value) ||
+      seenLabels.has(normalizedLabel) ||
+      seenAccessibleNames.has(normalizedAccessibleName)
+    ) {
+      continue;
+    }
+
+    seenValues.add(candidate.value);
+    seenLabels.add(normalizedLabel);
+    seenAccessibleNames.add(normalizedAccessibleName);
+    safeOptions.push({
+      accessibilityHint:
+        typeof candidate.accessibilityHint === "string"
+          ? candidate.accessibilityHint
+          : undefined,
+      accessibilityLabel:
+        typeof candidate.accessibilityLabel === "string"
+          ? candidate.accessibilityLabel
+          : undefined,
+      accessibleName,
+      disabled: candidate.disabled === true,
+      label,
+      testID: typeof candidate.testID === "string" ? candidate.testID : undefined,
+      value: candidate.value as TValue
+    });
+  }
+
+  return safeOptions;
+}
+
+export function SegmentedControl<TValue extends SegmentValue>({
   accessibilityLabel,
   accessibilityHint,
   disabled = false,
@@ -43,37 +143,67 @@ export function SegmentedControl<TValue extends string>({
   value,
   wrap = false
 }: SegmentedControlProps<TValue>) {
+  if (
+    typeof accessibilityLabel !== "string" ||
+    accessibilityLabel.trim().length === 0
+  ) {
+    return null;
+  }
+
+  const hasChangeHandler = typeof onChange === "function";
+  const isGroupDisabled = disabled === true || !hasChangeHandler;
+  const safeOptions = getSafeOptions<TValue>(options);
+  if (safeOptions.length === 0) {
+    return null;
+  }
+
   return (
     <View
-      accessibilityLabel={accessibilityLabel}
-      accessibilityHint={accessibilityHint}
+      accessibilityElementsHidden={false}
+      accessibilityLabel={accessibilityLabel.trim()}
+      accessibilityHint={
+        typeof accessibilityHint === "string" ? accessibilityHint : undefined
+      }
       accessibilityRole="radiogroup"
-      accessibilityState={{ disabled }}
-      nativeID={nativeID}
-      testID={testID}
-      style={[styles.container, wrap && styles.wrappedContainer]}
+      accessibilityState={{ disabled: isGroupDisabled }}
+      aria-disabled={isGroupDisabled}
+      aria-hidden={false}
+      importantForAccessibility="yes"
+      nativeID={typeof nativeID === "string" ? nativeID : undefined}
+      role="radiogroup"
+      testID={typeof testID === "string" ? testID : undefined}
+      style={[styles.container, wrap === true && styles.wrappedContainer]}
     >
-      {options.map((option) => {
+      {safeOptions.map((option) => {
         const selected = option.value === value;
-        const isDisabled = disabled || option.disabled === true;
+        const isDisabled = isGroupDisabled || option.disabled === true;
 
         return (
           <Pressable
+            accessible
+            accessibilityElementsHidden={false}
             accessibilityHint={option.accessibilityHint}
-            accessibilityLabel={getAccessibleName(option.label, option.accessibilityLabel)}
+            accessibilityLabel={option.accessibleName}
             accessibilityRole="radio"
             accessibilityState={{ checked: selected, disabled: isDisabled }}
+            aria-checked={selected}
+            aria-disabled={isDisabled}
+            aria-hidden={false}
             disabled={isDisabled}
-            key={option.value}
-            onPress={() => {
-              if (!isDisabled) {
-                onChange(option.value);
-              }
-            }}
+            importantForAccessibility="yes"
+            key={`${typeof option.value}:${String(option.value)}`}
+            onPress={
+              isDisabled
+                ? undefined
+                : () => {
+                    onChange(option.value);
+                  }
+            }
+            role="radio"
             testID={option.testID}
             style={({ pressed }) => [
               styles.option,
-              wrap ? styles.wrappedOption : styles.unwrappedOption,
+              wrap === true ? styles.wrappedOption : styles.unwrappedOption,
               selected ? styles.selectedOption : styles.unselectedOption,
               pressed && !isDisabled &&
                 (selected ? styles.selectedPressed : styles.unselectedPressed),
@@ -82,7 +212,12 @@ export function SegmentedControl<TValue extends string>({
           >
             <Text
               allowFontScaling
-              style={[styles.label, selected && styles.selectedLabel]}
+              accessible={false}
+              style={[
+                styles.label,
+                selected && styles.selectedLabel,
+                isDisabled && styles.disabledLabel
+              ]}
             >
               {option.label}
             </Text>
@@ -95,26 +230,29 @@ export function SegmentedControl<TValue extends string>({
 
 const styles = StyleSheet.create({
   container: {
-    flexDirection: "row",
-    flexWrap: "nowrap",
-    borderWidth: theme.border.default,
+    backgroundColor: theme.colors.surface.default,
     borderColor: theme.colors.border,
-    borderRadius: theme.radius.sm,
-    padding: theme.space[1],
+    borderRadius: theme.radius.md,
+    borderWidth: theme.border.default,
+    flexDirection: "row",
+    flexShrink: 1,
+    flexWrap: "nowrap",
     gap: theme.space[1],
-    backgroundColor: theme.colors.surface.default
+    maxWidth: "100%",
+    padding: theme.space[1]
   },
   wrappedContainer: {
     flexWrap: "wrap"
   },
   option: {
-    minWidth: theme.target.min,
-    minHeight: theme.target.min,
-    maxWidth: "100%",
-    flexShrink: 1,
     alignItems: "center",
-    justifyContent: "center",
     borderRadius: theme.radius.sm,
+    borderWidth: theme.border.default,
+    flexShrink: 1,
+    justifyContent: "center",
+    maxWidth: "100%",
+    minHeight: theme.target.min,
+    minWidth: theme.target.min,
     paddingHorizontal: theme.space[2],
     paddingVertical: theme.space[2]
   },
@@ -127,19 +265,30 @@ const styles = StyleSheet.create({
     flexBasis: "30%"
   },
   unselectedOption: {
-    backgroundColor: theme.colors.surface.default
+    backgroundColor: theme.colors.surface.default,
+    borderColor: theme.colors.border
   },
   selectedOption: {
-    backgroundColor: theme.colors.brand.primary
+    backgroundColor: theme.colors.brand.primary,
+    borderColor: theme.colors.brand.primary,
+    borderWidth: 2
   },
   unselectedPressed: {
-    backgroundColor: theme.colors.brand.tint
+    backgroundColor: theme.colors.brand.tint,
+    borderColor: theme.colors.brand.primary,
+    borderWidth: 2,
+    transform: [{ translateY: theme.border.default }]
   },
   selectedPressed: {
-    backgroundColor: theme.colors.brand.pressed
+    backgroundColor: theme.colors.brand.pressed,
+    borderColor: theme.colors.brand.pressed,
+    transform: [{ translateY: theme.border.default }]
   },
   disabled: {
-    opacity: 0.6
+    backgroundColor: theme.colors.surface.subtle,
+    borderColor: theme.colors.ink.muted,
+    borderStyle: "dashed",
+    opacity: 0.62
   },
   label: {
     ...theme.typography.label,
@@ -150,5 +299,8 @@ const styles = StyleSheet.create({
   },
   selectedLabel: {
     color: theme.colors.surface.default
+  },
+  disabledLabel: {
+    color: theme.colors.ink.muted
   }
 });

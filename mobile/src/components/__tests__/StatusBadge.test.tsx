@@ -1,5 +1,11 @@
-import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import { StyleSheet, Text, View, type ViewProps } from "react-native";
+import type { ComponentProps } from "react";
+import {
+  act,
+  create,
+  type ReactTestInstance,
+  type ReactTestRenderer
+} from "react-test-renderer";
+import { StyleSheet, Text, View, type ViewStyle } from "react-native";
 import type { StatusTone } from "../../utils/status";
 import { theme } from "../../utils/theme";
 import { StatusBadge } from "../StatusBadge";
@@ -7,11 +13,7 @@ import { StatusBadge } from "../StatusBadge";
 const toneExpectations: readonly (
   readonly [
     StatusTone,
-    {
-      backgroundColor: string;
-      borderColor: string;
-      color: string;
-    }
+    { backgroundColor: string; borderColor: string; color: string }
   ]
 )[] = [
   [
@@ -23,7 +25,7 @@ const toneExpectations: readonly (
     }
   ],
   [
-    "primary",
+    "info",
     {
       backgroundColor: theme.colors.info.bg,
       borderColor: theme.colors.info.fg,
@@ -47,7 +49,7 @@ const toneExpectations: readonly (
     }
   ],
   [
-    "error",
+    "danger",
     {
       backgroundColor: theme.colors.danger.bg,
       borderColor: theme.colors.danger.fg,
@@ -55,6 +57,29 @@ const toneExpectations: readonly (
     }
   ]
 ];
+
+async function renderBadge(
+  props: ComponentProps<typeof StatusBadge>
+): Promise<ReactTestRenderer> {
+  let view!: ReactTestRenderer;
+  await act(async () => {
+    view = create(<StatusBadge {...props} />);
+  });
+  return view;
+}
+
+function findBadge(view: ReactTestRenderer, testID: string): ReactTestInstance {
+  return view.root
+    .findAllByType(View)
+    .find((node) => node.props.testID === testID)!;
+}
+
+function expectNoFixedOrClippingStyle(style: unknown): void {
+  const flattened = StyleSheet.flatten(style) as ViewStyle | undefined;
+  expect(flattened).not.toHaveProperty("height");
+  expect(flattened).not.toHaveProperty("maxHeight");
+  expect(flattened?.overflow).not.toBe("hidden");
+}
 
 describe("StatusBadge", () => {
   beforeAll(() => {
@@ -64,153 +89,209 @@ describe("StatusBadge", () => {
   });
 
   it.each(toneExpectations)(
-    "renders visible status copy with canonical %s tone tokens",
+    "renders visible status copy with canonical %s tokens",
     async (tone, expected) => {
       const label = `Visible ${tone} status`;
-      let view!: ReactTestRenderer;
-      await act(async () => {
-        view = create(<StatusBadge label={label} tone={tone} testID={`badge-${tone}`} />);
-      });
+      const view = await renderBadge({ label, testID: `badge-${tone}`, tone });
+      const badge = findBadge(view, `badge-${tone}`);
+      const labelNode = view.root.findByProps({ children: label });
 
-      const badge = view.root
-        .findAllByType(View)
-        .find((node) => node.props.testID === `badge-${tone}`)!;
+      expect(badge.props).toMatchObject({
+        accessible: true,
+        accessibilityElementsHidden: false,
+        accessibilityLabel: label,
+        accessibilityRole: "text",
+        "aria-hidden": false,
+        importantForAccessibility: "yes"
+      });
       expect(StyleSheet.flatten(badge.props.style)).toMatchObject({
         backgroundColor: expected.backgroundColor,
         borderColor: expected.borderColor,
         borderWidth: theme.border.default
       });
-
-      const text = view.root.findAllByType(Text).find((node) => node.props.children === label)!;
-      expect(text).toBeTruthy();
-      expect(StyleSheet.flatten(text.props.style)).toMatchObject({ color: expected.color });
-      expect(badge.props.accessibilityLabel).toBe(label);
+      expect(labelNode.type).toBe(Text);
+      expect(StyleSheet.flatten(labelNode.props.style)).toMatchObject({
+        color: expected.color
+      });
     }
   );
 
-  it("grows and wraps for a long localized label without truncation", async () => {
+  it.each([
+    ["default name", "Paid", undefined, "Paid"],
+    ["context", "Paid", "Payment status", "Payment status: Paid"],
+    [
+      "precomposed exact part",
+      "Pending approval",
+      "Payout request status: Pending approval",
+      "Payout request status: Pending approval"
+    ],
+    ["substring is not a part", "No", "Not available", "Not available: No"],
+    ["normalized exact part", "Paid", "  pAID!  ", "pAID!"],
+    ["punctuation-only label", "...", "Status.", "Status. ..."],
+    ["empty normalized context part", "...", "!!!", "!!! ..."],
+    ["colon-terminated context", "Open", "Status:", "Status: Open"],
+    ["ellipsis-terminated context", "Open", "Status…", "Status… Open"],
+    ["unpunctuated context", "Open", "Status", "Status: Open"],
+    ["distinct currency symbols", "Pay €", "Pay $", "Pay $: Pay €"],
+    ["distinct math symbols", "C", "C++", "C++: C"],
+    [
+      "exact symbol-containing part",
+      "Pay €",
+      "Payment status: Pay €",
+      "Payment status: Pay €"
+    ]
+  ])(
+    "preserves the visible label in the accessible name for %s",
+    async (_case, label, accessibilityLabel, expectedName) => {
+      const view = await renderBadge({
+        accessibilityLabel,
+        label,
+        testID: "named-status"
+      });
+      const badge = findBadge(view, "named-status");
+
+      expect(badge.props.accessibilityLabel).toBe(expectedName);
+      expect(view.root.findByProps({ children: label }).type).toBe(Text);
+    }
+  );
+
+  it.each([
+    ["blank", ""],
+    ["whitespace", "   "],
+    ["number", 42],
+    ["object", { text: "Paid" }]
+  ])("fails closed for a %s runtime label", async (_case, label) => {
+    const unsafeProps = {
+      label,
+      testID: "invalid-status"
+    } as unknown as ComponentProps<typeof StatusBadge>;
+    const view = await renderBadge(unsafeProps);
+
+    expect(view.toJSON()).toBeNull();
+  });
+
+  it.each(["error", "#ff00ff", "unknown", 42, null, { tone: "danger" }])(
+    "falls back to the canonical neutral palette for invalid runtime tone %p",
+    async (tone) => {
+      const unsafeProps = {
+        label: "Safe status",
+        testID: "safe-status",
+        tone
+      } as unknown as ComponentProps<typeof StatusBadge>;
+      const view = await renderBadge(unsafeProps);
+      const badge = findBadge(view, "safe-status");
+      const labelNode = view.root.findByProps({ children: "Safe status" });
+
+      expect(StyleSheet.flatten(badge.props.style)).toMatchObject({
+        backgroundColor: theme.colors.surface.subtle,
+        borderColor: theme.colors.border
+      });
+      expect(StyleSheet.flatten(labelNode.props.style)).toMatchObject({
+        color: theme.colors.ink.secondary
+      });
+    }
+  );
+
+  it("maps the one production legacy primary input to canonical info presentation", async () => {
+    const view = await renderBadge({
+      label: "Pay breakdown",
+      testID: "legacy-primary",
+      tone: "primary"
+    });
+    const badge = findBadge(view, "legacy-primary");
+
+    expect(StyleSheet.flatten(badge.props.style)).toMatchObject({
+      backgroundColor: theme.colors.info.bg,
+      borderColor: theme.colors.info.fg
+    });
+  });
+
+  it("keeps long Ukrainian, English, and currency copy scalable and unclipped", async () => {
     const label =
-      "Очікує на підтвердження виплати за дуже довгий локалізований період роботи";
-    let view!: ReactTestRenderer;
-    await act(async () => {
-      view = create(<StatusBadge label={label} testID="localized-badge" />);
+      "Очікує підтвердження виплати € 1 234,56 for an unusually long payroll period";
+    const view = await renderBadge({ label, testID: "localized-badge" });
+    const badge = findBadge(view, "localized-badge");
+    const labelNode = view.root.findByProps({ children: label });
+
+    expectNoFixedOrClippingStyle(badge.props.style);
+    expectNoFixedOrClippingStyle(labelNode.props.style);
+    expect(StyleSheet.flatten(badge.props.style)).toMatchObject({
+      flexShrink: 1,
+      maxWidth: "100%"
     });
-
-    const badge = view.root
-      .findAllByType(View)
-      .find((node) => node.props.testID === "localized-badge")!;
-    const badgeStyle = StyleSheet.flatten(badge.props.style);
-    expect(badgeStyle).toMatchObject({ maxWidth: "100%", flexShrink: 1 });
-    expect(badgeStyle).not.toHaveProperty("height");
-    expect(badgeStyle).not.toHaveProperty("maxHeight");
-
-    const text = view.root.findAllByType(Text).find((node) => node.props.children === label)!;
-    expect(text.props).toMatchObject({ allowFontScaling: true });
-    expect(text.props.numberOfLines).toBeUndefined();
-    expect(text.props.ellipsizeMode).toBeUndefined();
-    expect(StyleSheet.flatten(text.props.style)).toMatchObject({ flexShrink: 1 });
-    expect(StyleSheet.flatten(text.props.style)).not.toHaveProperty("height");
+    expect(labelNode.props).toMatchObject({ allowFontScaling: true });
+    expect(labelNode.props.numberOfLines).toBeUndefined();
+    expect(labelNode.props.ellipsizeMode).toBeUndefined();
   });
 
-  it("adds caller context to the visible label in its accessible name", async () => {
-    const label = "Pending approval";
-    let view!: ReactTestRenderer;
-    await act(async () => {
-      view = create(
-        <StatusBadge
-          accessibilityHint="This request still needs review"
-          accessibilityLabel="Payout request status: Pending approval"
-          label={label}
-          nativeID="request-status"
-          testID="request-status-badge"
-          tone="warning"
-        />
-      );
-    });
-
-    const badge = view.root
-      .findAllByType(View)
-      .find((node) => node.props.testID === "request-status-badge")!;
-    expect(badge.props).toMatchObject({
-      accessible: true,
-      accessibilityRole: "text",
-      accessibilityLabel: "Payout request status: Pending approval",
-      accessibilityHint: "This request still needs review",
-      nativeID: "request-status"
-    });
-    expect(view.root.findAllByType(Text).some((node) => node.props.children === label)).toBe(true);
-  });
-
-  it("keeps the exact visible label in a contextual accessible name", async () => {
-    let view!: ReactTestRenderer;
-    await act(async () => {
-      view = create(
-        <StatusBadge
-          accessibilityLabel="Payment status"
-          label="Paid"
-          testID="paid-status"
-          tone="success"
-        />
-      );
-    });
-
-    const badge = view.root
-      .findAllByType(View)
-      .find((node) => node.props.testID === "paid-status")!;
-    expect(badge.props.accessibilityLabel).toContain("Payment status");
-    expect(badge.props.accessibilityLabel).toContain("Paid");
-    expect(view.root.findAllByType(Text).some((node) => node.props.children === "Paid")).toBe(true);
-  });
-
-  it("does not support disabling accessibility through its public type contract", () => {
-    // @ts-expect-error StatusBadge is always an accessible status element.
-    const inaccessibleBadge = <StatusBadge accessible={false} label="Paid" />;
-
-    expect(inaccessibleBadge).toBeTruthy();
-  });
-
-  it("keeps the actual root accessible after a wider ViewProps runtime bypass", async () => {
-    const widerViewProps: ViewProps = {
+  it("does not forward hostile visibility, semantics, interaction, content, or style props", async () => {
+    const onLongPress = jest.fn();
+    const onPress = jest.fn();
+    const hostileProps = {
       accessible: false,
-      "aria-hidden": true,
       accessibilityElementsHidden: true,
       accessibilityLabel: "Payment status",
-      accessibilityHint: "Current payment state",
+      accessibilityRole: "button",
+      "aria-hidden": true,
+      children: <Text>Injected</Text>,
       importantForAccessibility: "no-hide-descendants",
-      nativeID: "runtime-bypass-native",
-      testID: "runtime-bypass-status"
-    };
-    let view!: ReactTestRenderer;
-    await act(async () => {
-      view = create(<StatusBadge {...widerViewProps} label="Paid" />);
-    });
+      label: "Paid",
+      onLongPress,
+      onPress,
+      role: "button",
+      style: { display: "none", height: 1, overflow: "hidden" },
+      testID: "authoritative-status"
+    } as unknown as ComponentProps<typeof StatusBadge>;
+    const view = await renderBadge(hostileProps);
+    const badge = findBadge(view, "authoritative-status");
 
-    const badge = view.root
-      .findAllByType(View)
-      .find((node) => node.props.testID === "runtime-bypass-status")!;
-    expect(badge.props.accessible).toBe(true);
-    expect(badge.props.accessibilityRole).toBe("text");
-    expect(badge.props.accessibilityLabel).toContain("Payment status");
-    expect(badge.props.accessibilityLabel).toContain("Paid");
     expect(badge.props).toMatchObject({
-      accessibilityHint: "Current payment state",
-      nativeID: "runtime-bypass-native",
-      testID: "runtime-bypass-status"
+      accessible: true,
+      accessibilityElementsHidden: false,
+      accessibilityLabel: "Payment status: Paid",
+      accessibilityRole: "text",
+      "aria-hidden": false,
+      importantForAccessibility: "yes"
     });
-    expect(badge.props["aria-hidden"]).toBeUndefined();
-    expect(badge.props.accessibilityElementsHidden).toBeUndefined();
-    expect(badge.props.importantForAccessibility).toBeUndefined();
+    expect(badge.props.onPress).toBeUndefined();
+    expect(badge.props.onLongPress).toBeUndefined();
+    expect(badge.props.role).toBeUndefined();
+    expect(view.root.findAllByProps({ children: "Injected" })).toHaveLength(0);
+    expectNoFixedOrClippingStyle(badge.props.style);
+    expect(onPress).not.toHaveBeenCalled();
+    expect(onLongPress).not.toHaveBeenCalled();
   });
 
-  it("uses the exact visible label as the default accessible name", async () => {
-    let view!: ReactTestRenderer;
-    await act(async () => {
-      view = create(<StatusBadge label="Paid" testID="default-name-status" />);
-    });
+  it("keeps canonical tone and non-interactive public contracts narrow", () => {
+    type Props = ComponentProps<typeof StatusBadge>;
+    const canonical: StatusTone = "danger";
+    const primaryCompatibility: Props = { label: "Pay breakdown", tone: "primary" };
 
-    const badge = view.root
-      .findAllByType(View)
-      .find((node) => node.props.testID === "default-name-status")!;
-    expect(badge.props.accessibilityLabel).toBe("Paid");
+    // @ts-expect-error `primary` is not a canonical status tone.
+    const primaryCanonical: StatusTone = "primary";
+    // @ts-expect-error `error` is replaced by canonical `danger`.
+    const errorCanonical: StatusTone = "error";
+    // @ts-expect-error The unused legacy error input is not part of StatusBadge.
+    const legacyError: Props = { label: "Rejected", tone: "error" };
+    // @ts-expect-error StatusBadge owns its status content.
+    const children: Props = { children: "Hidden", label: "Paid" };
+    // @ts-expect-error StatusBadge has no raw style escape hatch.
+    const style: Props = { label: "Paid", style: { backgroundColor: "red" } };
+    // @ts-expect-error StatusBadge is not interactive.
+    const onPress: Props = { label: "Paid", onPress: jest.fn() };
+    // @ts-expect-error Callers cannot hide status semantics.
+    const inaccessible: Props = { accessible: false, label: "Paid" };
+
+    expect({
+      canonical,
+      children,
+      errorCanonical,
+      inaccessible,
+      legacyError,
+      onPress,
+      primaryCanonical,
+      primaryCompatibility,
+      style
+    }).toBeTruthy();
   });
 });

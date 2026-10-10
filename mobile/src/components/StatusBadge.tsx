@@ -2,22 +2,50 @@ import { StyleSheet, Text, View, type ViewProps } from "react-native";
 import type { StatusTone } from "../utils/status";
 import { theme } from "../utils/theme";
 
+/** Temporary compile bridge for WorkerShiftCard until the deferred F5 adoption. */
+type LegacyStatusTone = "primary";
+
 export type StatusBadgeProps = Pick<
   ViewProps,
   "accessibilityHint" | "accessibilityLabel" | "nativeID" | "testID"
 > & {
   label: string;
-  tone?: StatusTone;
+  tone?: StatusTone | LegacyStatusTone;
 };
 
-function getAccessibleName(label: string, context?: string): string {
-  const normalizedContext = context?.trim();
+function normalizeAccessiblePart(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\p{P}]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
 
-  if (!normalizedContext || normalizedContext.includes(label)) {
+function containsEquivalentPart(context: string, label: string): boolean {
+  const normalizedLabel = normalizeAccessiblePart(label);
+  if (!normalizedLabel) {
+    return false;
+  }
+
+  return [context, ...context.split(/[.!?…;:]+/u)].some(
+    (part) => {
+      const normalizedPart = normalizeAccessiblePart(part);
+      return normalizedPart.length > 0 && normalizedPart === normalizedLabel;
+    }
+  );
+}
+
+function getAccessibleName(label: string, context?: unknown): string {
+  const normalizedContext =
+    typeof context === "string" ? context.trim() : undefined;
+
+  if (!normalizedContext || containsEquivalentPart(normalizedContext, label)) {
     return normalizedContext || label;
   }
 
-  return `${normalizedContext}: ${label}`;
+  const separator = /\p{P}$/u.test(normalizedContext) ? " " : ": ";
+  return `${normalizedContext}${separator}${label}`;
 }
 
 const toneColors: Record<
@@ -29,7 +57,7 @@ const toneColors: Record<
     borderColor: theme.colors.border,
     color: theme.colors.ink.secondary
   },
-  primary: {
+  info: {
     backgroundColor: theme.colors.info.bg,
     borderColor: theme.colors.info.fg,
     color: theme.colors.info.fg
@@ -44,12 +72,27 @@ const toneColors: Record<
     borderColor: theme.colors.warning.fg,
     color: theme.colors.warning.fg
   },
-  error: {
+  danger: {
     backgroundColor: theme.colors.danger.bg,
     borderColor: theme.colors.danger.fg,
     color: theme.colors.danger.fg
   }
 };
+
+function resolveTone(value: unknown): StatusTone {
+  switch (value) {
+    case "info":
+    case "success":
+    case "warning":
+    case "danger":
+    case "neutral":
+      return value;
+    case "primary":
+      return "info";
+    default:
+      return "neutral";
+  }
+}
 
 export function StatusBadge({
   label,
@@ -59,15 +102,25 @@ export function StatusBadge({
   nativeID,
   testID
 }: StatusBadgeProps) {
-  const palette = toneColors[tone];
+  if (typeof label !== "string" || label.trim().length === 0) {
+    return null;
+  }
+
+  const visibleLabel = label.trim();
+  const palette = toneColors[resolveTone(tone)];
 
   return (
     <View
       accessible
-      accessibilityHint={accessibilityHint}
-      accessibilityLabel={getAccessibleName(label, accessibilityLabel)}
+      accessibilityElementsHidden={false}
+      accessibilityHint={
+        typeof accessibilityHint === "string" ? accessibilityHint : undefined
+      }
+      accessibilityLabel={getAccessibleName(visibleLabel, accessibilityLabel)}
       accessibilityRole="text"
-      nativeID={nativeID}
+      aria-hidden={false}
+      importantForAccessibility="yes"
+      nativeID={typeof nativeID === "string" ? nativeID : undefined}
       style={[
         styles.badge,
         {
@@ -75,10 +128,10 @@ export function StatusBadge({
           borderColor: palette.borderColor
         }
       ]}
-      testID={testID}
+      testID={typeof testID === "string" ? testID : undefined}
     >
       <Text allowFontScaling style={[styles.label, { color: palette.color }]}>
-        {label}
+        {visibleLabel}
       </Text>
     </View>
   );
