@@ -2,13 +2,14 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import type { ComponentProps } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { theme } from "../../utils/theme";
-import { AppIcon, type AppIconName } from "../AppIcon";
+import { AppIcon, isAppIconName, type AppIconName } from "../AppIcon";
 
 jest.mock("@expo/vector-icons/Ionicons", () => {
   const actualReact = jest.requireActual<typeof import("react")>("react");
   const { Text } = jest.requireActual<typeof import("react-native")>("react-native");
-  const MockIonicons = (props: Record<string, unknown>) =>
-    actualReact.createElement(Text, props as ComponentProps<typeof Text>);
+  const MockIonicons = jest.fn((props: Record<string, unknown>) =>
+    actualReact.createElement(Text, props as ComponentProps<typeof Text>)
+  );
 
   return { __esModule: true, default: MockIonicons };
 });
@@ -59,6 +60,28 @@ async function renderIcon(
 }
 
 describe("AppIcon", () => {
+  it("recognizes every documented semantic name from the canonical runtime map", () => {
+    for (const name of Object.keys(expectedGlyphs)) {
+      expect(isAppIconName(name)).toBe(true);
+    }
+  });
+
+  it.each([
+    ["unknown", "not-a-semantic-icon"],
+    ["blank", ""],
+    ["whitespace", "   "],
+    ["raw Ionicons glyph", "mail-outline"],
+    ["number", 1],
+    ["null", null],
+    ["undefined", undefined],
+    ["object", { name: "email" }],
+    ["prototype key __proto__", "__proto__"],
+    ["prototype key constructor", "constructor"],
+    ["prototype key toString", "toString"]
+  ])("rejects %s as a semantic icon name", (_case, value) => {
+    expect(isAppIconName(value)).toBe(false);
+  });
+
   it.each(Object.entries(expectedGlyphs) as [AppIconName, string][])(
     "maps %s to the canonical Ionicons glyph",
     async (name, glyph) => {
@@ -154,6 +177,19 @@ describe("AppIcon", () => {
     expect(icon.props.children).toBeUndefined();
     expect(icon.props.onPress).toBeUndefined();
     expect(icon.props.testID).toBeUndefined();
+  });
+
+  it("fails closed before calling Ionicons for an invalid runtime name", async () => {
+    const ioniconsMock = Ionicons as unknown as jest.Mock;
+    ioniconsMock.mockClear();
+    const unsafeProps = {
+      accessibilityLabel: "Forged image",
+      name: "mail-outline"
+    } as unknown as ComponentProps<typeof AppIcon>;
+    const view = await renderIcon(unsafeProps);
+
+    expect(view.toJSON()).toBeNull();
+    expect(ioniconsMock).not.toHaveBeenCalled();
   });
 
   it("keeps raw presentation and interaction props out of the public contract", () => {

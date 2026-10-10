@@ -55,6 +55,13 @@ export type AppIconName = keyof typeof iconGlyphs;
 export type AppIconSize = keyof typeof theme.icon.size;
 export type AppIconTone = keyof typeof iconColors;
 
+export function isAppIconName(value: unknown): value is AppIconName {
+  return (
+    typeof value === "string" &&
+    Object.prototype.hasOwnProperty.call(iconGlyphs, value)
+  );
+}
+
 export type AppIconProps = {
   name: AppIconName;
   size?: AppIconSize;
@@ -68,7 +75,14 @@ export function AppIcon({
   size = "control",
   tone = "primary"
 }: AppIconProps) {
-  const informativeLabel = accessibilityLabel?.trim() || undefined;
+  if (!isAppIconName(name)) {
+    return null;
+  }
+
+  const informativeLabel =
+    typeof accessibilityLabel === "string"
+      ? accessibilityLabel.trim() || undefined
+      : undefined;
   const informative = informativeLabel !== undefined;
 
   return (
