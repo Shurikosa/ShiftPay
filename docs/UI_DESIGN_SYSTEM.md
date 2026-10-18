@@ -1,6 +1,6 @@
 # ShiftPay Mobile UI Design System
 
-Version: 2.0 · 8 October 2026
+Version: 2.1 · 18 October 2026
 
 This document is the canonical visual and interaction specification for the
 ShiftPay React Native / Expo application. Product behavior remains defined by
@@ -16,15 +16,22 @@ API contracts, routes, actions, returned data, status meanings, business rules,
 permissions, calculations, and legal copy. Anything shown in the image but
 absent from the canonical Markdown contracts remains out of scope.
 
+Two newer product decisions intentionally override literal bitmap content:
+the second FOREMAN dashboard tile is `My shift history`, not `Company
+Settings`, and company timezone is shown in Settings, not on the dashboard.
+The bitmap still governs style and composition; it must not be edited to encode
+these behavioral decisions.
+
 ## 1. Scope and invariants
 
-This phase is a reference-driven presentation redesign of the complete mobile
-MVP, not a token refresh of selected screens. It must not change backend APIs,
-the data model, authorization, role permissions, pay or payout calculations,
-persistence, or business rules. Existing typed clients, contexts, lifecycle
-actions, error handling, concurrency protections, accessibility behavior, and
-already-correct functional work remain the foundation and may be visually
-evolved rather than discarded.
+The reference-driven visual redesign covers the complete mobile MVP. The new
+own-profile Settings flow is a separately documented API change: update the
+canonical contract, then backend, then mobile typed client and UI. Visual
+changes do not independently alter other backend APIs, authorization, role
+permissions, pay or payout calculations, persistence, or business rules.
+Existing contexts, lifecycle actions, error handling, concurrency protections,
+accessibility behavior, and already-correct functional work remain the
+foundation and may be visually evolved rather than discarded.
 
 A migration is not accepted when it only applies new colors, fonts, spacing,
 or radii to an old layout while retaining the previous composition and
@@ -50,10 +57,12 @@ The redesign must preserve these invariants:
 - the UI must not claim a per-shift policy version where the current DTO does
   not provide one.
 
-The reference image does not add Terms/Privacy routes, QR scanning, bottom
-tabs, hamburger or generic settings destinations, account/legal screens, mock
-worker counts, fabricated pay values, or any other absent feature. The existing
-FOREMAN-only Company Settings route remains in scope. The Login hero slot is a
+The reference image does not by itself add Terms/Privacy routes, QR scanning,
+an independent hamburger destination, legal screens, mock worker counts,
+fabricated pay values, or any other absent feature. Bottom tabs and own
+Settings are separately specified in the canonical mobile UX; the existing
+FOREMAN-only Company Settings route remains nested under foreman Settings.
+The Login hero slot is a
 presentation-only exception governed by section 8; the exact bitmap
 still requires separate visual approval and adds no product functionality.
 
@@ -78,7 +87,7 @@ Design principles:
 3. Use one clear primary action per screen or section, supported by visually
    distinct secondary and tertiary actions. Keep destructive actions separate
    and preserve existing confirmation behavior.
-4. Use dashboard action tiles only for real existing destinations, and group
+4. Use dashboard action tiles for the specified real destinations, and group
    related form/settings controls into explained sections.
 5. Use the same semantic component for the same job throughout the app, but
    create a shared primitive only when the pattern genuinely repeats.
@@ -175,6 +184,9 @@ tiles, and settings groups.
   does not authorize a route, action, status, or data field.
 - Use consistent size, optical weight, alignment, and semantic color through a
   shared icon wrapper or equivalent foundation instead of per-screen glyphs.
+- On a green primary action tile, use a white icon and white label with
+  sufficient contrast. Secondary tile and metadata icons use semantic teal or
+  slate tokens; do not select arbitrary raw icon colors per screen.
 
 ## 4. Shared component contracts
 
@@ -184,17 +196,17 @@ parallel abstractions:
 | Semantic role | Repository starting point | Required contract |
 | --- | --- | --- |
 | `AppScreen` | evolve `Screen` | Safe area, canvas, scroll/non-scroll, keyboard avoidance, reachable final action, configurable insets. |
-| `ScreenHeader` | new shared component | Role/context eyebrow, wrapping title, optional subtitle, back and named action; no ubiquitous gear. |
+| `ScreenHeader` | new shared component | Role/context eyebrow, wrapping title, optional subtitle, back and named action; both company-onboarding gates and role dashboards expose a separate visible button labelled Settings. |
 | `AppIcon` | shared icon wrapper | One icon family, semantic size/color, decorative-hidden support, labelled icon-only controls, no emoji. |
 | `Button` | evolve `Button` | Primary, secondary, text, destructive; loading, disabled, pressed, accessible state, stable label and minimum target. |
 | `TextField` | evolve `FormField` | Persistent label, hint, field error, keyboard type, focus and optional trailing action; preserve input after rejection. |
 | `Card` | new primitive | Surface, border, radius, padding and optional press state; nested surface remains distinguishable. |
 | `SectionHeader` | new shared component where repeated | Wrapping section title, optional supporting text, and optional real named action such as View all. |
-| `ActionTile` | new dashboard primitive | Icon, visible destination/action label, optional supporting context, pressed/disabled state; never invents a destination. |
+| `ActionTile` | new dashboard primitive | Near-square three-across group for each dashboard, icon, wrapping destination label, pressed/disabled state; green primary tile and semantic secondary icon colors. |
 | `IdentityHeader` / `CompanySummary` | shared pattern where repeated | Real user/role identity and returned company context without fabricated metrics. |
 | `StatusBadge` | evolve `StatusBadge` | Domain-specific visible copy plus semantic tone; wraps and never relies on color alone. |
 | `Metric` | new component | Label, value, unit, explanation, pending and unavailable variants. |
-| `ShiftCard` | converge `ManagedShiftCard` and `WorkerShiftCard` | Shared shell with role-specific data; separate status dimensions; show duration/amount only when returned. |
+| `ShiftCard` | converge `ManagedShiftCard` and `WorkerShiftCard` | Shared shell with role-specific data; separate status dimensions; show duration/amount only when returned; accessible chevron expands inline returned details while a separate visible `Full view` action opens the existing detail screen. |
 | `RequestCard` | evolve `PayoutRequestCard` | Worker/company, request status, selected work, raw time, final payout and returned timestamps; compact-card field limits remain. |
 | `SegmentedControl` | evolve existing component | Accessible selected/disabled states; wrapping or scrolling labels at large text/narrow widths. |
 | `SettingGroup` | new component | Heading, explanation, controls, dirty/saving/saved/error feedback. |
@@ -208,32 +220,41 @@ domain validation/calculation. Identity/company summaries, section headers,
 metrics, action tiles, and redesigned cards should be shared only where their
 content and interaction contract actually repeats.
 
-## 5. Verified navigation map
+## 5. Navigation map: current structure and planned role shell
 
-The current app uses `@react-navigation/native-stack` only.
-`@react-navigation/bottom-tabs` is not installed. Preserve these stacks and
-existing transitions during the first redesign phase:
+The current app uses `@react-navigation/native-stack` only;
+`@react-navigation/bottom-tabs` is not yet installed. Preserve its auth and
+detail transitions while adding the specified role shell:
 
-| Context | Verified routes and nesting |
+| Context | Planned route and nesting contract |
 | --- | --- |
 | Session gate | `RestoreSessionScreen` while the stored session is resolved; it is not a new stack destination. |
 | Unauthenticated | `Login`, `Register`, and their existing forward/back transitions |
-| WORKER without company | role gate renders `JoinCompany` before the worker stack |
-| WORKER | `WorkerDashboard`, `JoinShift`, `MyShiftHistory`, `WorkerPayroll`, `WorkerShiftDetails` |
-| FOREMAN without company | role gate renders `CreateCompany` before the foreman stack |
-| FOREMAN | `ForemanDashboard`, `CreateShift`, `ForemanShiftDetails`, `ShiftSummary`, `ForemanPayrollRequests`, `ForemanCompanySettings` -> `ForemanPayRules` |
+| WORKER without company | role gate renders `JoinCompany` before the worker stack and exposes Settings; close/back from Settings returns to `JoinCompany` |
+| WORKER | Bottom `Dashboard` (`WorkerDashboard`), `Shifts` (full `MyShiftHistory`), `Payroll` (`WorkerPayroll`), empty `More`; separate visible Settings button; stack details `JoinShift` and `WorkerShiftDetails` |
+| FOREMAN without company | role gate renders `CreateCompany` before the foreman stack and exposes Settings; close/back from Settings returns to `CreateCompany` |
+| FOREMAN | Bottom `Dashboard` (`ForemanDashboard`), `Shifts` (full managed shifts), `Payroll` (`ForemanPayrollRequests`), empty `More`; separate visible Settings button; stack details `CreateShift`, `ForemanShiftDetails`, `ShiftSummary`, `ForemanCompanySettings` -> `ForemanPayRules` |
 | ADMIN/unsupported role | no mobile MVP flow; render `UnsupportedRoleScreen`, which is not a new product route |
 
-The reference four-tab model is deferred. FOREMAN has no separate Shifts
-destination, neither role has a More destination, and settings/account routes
-must not be invented to fill tabs. A bottom-tab change requires a separate
-canonical information-architecture decision and dependency/task update.
+The role shell has four bottom destinations. WORKER Dashboard and Shifts use
+`GET /api/v1/me/shifts/page` with `limit=5` and `limit=20` respectively;
+FOREMAN Dashboard and Shifts use `GET /api/v1/me/managed-shifts/page` with the
+same limits. Each full Shifts view appends older pages only through visible
+`Load more`. The endpoints without `/page` remain unchanged JSON arrays solely
+for the installed mobile during the backend-first compatibility interval and
+are not used by the new dashboards or Shifts flows. Payroll uses the existing role-specific screen.
+More is selectable with an empty content area and no message or feature.
+Settings is a visible button labelled `Settings` outside More for both roles,
+including before company onboarding completes. Both roles edit only their own
+name, email, and password. FOREMAN reaches Company Settings with Pay Rules
+nested there only after company creation. The hamburger mark in the image does
+not specify an independent destination.
 
 Nested screens provide a visible, named Back control and preserve Android
 hardware-back behavior. `Create shift` and `Join shift` remain prominent
 dashboard actions. Company Settings remains FOREMAN-only and Pay Rules remains
 nested inside it. Visual headers may follow the reference composition, but they
-show only actions that already exist for the current screen and role.
+show only specified actions for the current screen and role.
 
 ## 6. Status and copy dictionary
 
@@ -355,16 +376,20 @@ not authorization for new routes.
 | --- | --- |
 | `LoginScreen` (`Login`) | Compact ShiftPay brand area; large `Welcome back` title and product sentence; separately approved construction hero; elevated form card that visually overlaps/layers with the hero; icon-supported email/password fields; visible password action; primary Log in; `or` separator; secondary Create account. |
 | `RegisterScreen` (`Register`) | Shared branded auth/onboarding shell, concise intro, elevated form surface, grouped identity/account/role fields, and clear primary/secondary action hierarchy. |
-| `RestoreSessionScreen` | Branded system-state shell with compact identity, intentional loading/progress feedback, and no blank transitional canvas. |
+| `RestoreSessionScreen` | Branded system-state shell with compact identity, intentional protected-session loading/progress feedback, legacy unprotected-token deletion/forced-login handling, protected-storage failure without fallback, and no blank transitional canvas. |
 | `UnsupportedRoleScreen` | Branded system-state shell, clear unsupported-role explanation, and only the existing recovery/logout action. |
-| `JoinCompanyScreen` (company gate) | Branded onboarding shell, clear worker/company intro, elevated join-code form surface, supporting explanation, and one prominent join action. |
-| `CreateCompanyScreen` (company gate) | Branded onboarding shell, clear foreman/company intro, elevated grouped company/currency/default-rate form, explanatory copy, and prominent create action. |
-| `WorkerDashboardScreen` (`WorkerDashboard`) | Identity/WORKER header, returned company summary, prominent Join shift action, History and Payroll action tiles, current/recent section header, and redesigned shift cards with separate real status dimensions. |
+| `JoinCompanyScreen` (company gate) | Branded onboarding shell, clear worker/company intro, elevated join-code form surface, supporting explanation, one prominent join action, and a visible Settings button that returns here without clearing input. |
+| `CreateCompanyScreen` (company gate) | Branded onboarding shell, clear foreman/company intro, elevated grouped company/currency/default-rate form, explanatory copy, prominent create action, and a visible Settings button that returns here without clearing input. |
+| `WorkerDashboardScreen` (`WorkerDashboard`) | Identity/WORKER header with Settings, returned company summary, one three-across near-square group of tiles (green Join shift; secondary My shift history and Payroll), latest five from `GET /api/v1/me/shifts/page?limit=5`, View all, and expandable shift cards with separate real status dimensions. |
 | `JoinShiftScreen` (`JoinShift`) | Strong header, elevated join-code card, concise eligibility/help copy, reference-like primary action, and clear feedback surface. |
-| `MyShiftHistoryScreen` (`MyShiftHistory`) | Strong header, filter/context surface only if backed by current behavior, section hierarchy, and compact redesigned shift cards separating date, duration, amount, and status. |
+| `MyShiftHistoryScreen` (`MyShiftHistory`; WORKER Shifts) | `GET /api/v1/me/shifts/page?limit=20`, then Load more; strong header, no search/date filter, and compact expandable cards with visible Full view and separate date/duration/amount/status. |
 | `WorkerPayrollScreen` (`WorkerPayroll`) | Strong header; surfaced selection context; selectable payable-work cards; backend-preview metrics in a distinct summary card; primary request action; segmented request history; compact status-aware request cards. |
 | `WorkerShiftDetailsScreen` (`WorkerShiftDetails`) | Strong header; primary shift/attendance/payment status summary; grouped timing, work, and pay cards; returned metrics and breakdown; contextual pause action with clear primary/secondary state. |
-| `ForemanDashboardScreen` (`ForemanDashboard`) | Identity/FOREMAN header, returned company/join-code summary, prominent Create shift action, Company Settings and Payroll Requests action tiles, recent/current section header, and redesigned managed-shift cards. |
+| `ForemanDashboardScreen` (`ForemanDashboard`) | Identity/FOREMAN header with Settings, returned company/join-code summary, one three-across near-square group of tiles (green Create shift; secondary My shift history and Payroll), latest five from `GET /api/v1/me/managed-shifts/page?limit=5`, View all, and expandable managed-shift cards. |
+| WORKER/FOREMAN bottom shell | Integrated only after separate WORKER Shifts, FOREMAN Shifts, and empty More acceptance; Dashboard, full role-specific Shifts, existing role Payroll, and empty selectable More, with accessible selected state and safe-area behavior. |
+| Empty More | A separately accepted selectable destination with no message, action, or promised feature. |
+| FOREMAN Shifts | `GET /api/v1/me/managed-shifts/page?limit=20`, then Load more; backend order, expandable returned details, visible Full view, and all real loading/empty/error/status states. |
+| Own Settings for both roles | Exactly own name, email, and password edit areas plus applicable read-only company timezone; available during onboarding; FOREMAN links to Company Settings and Pay Rules only after company creation. |
 | `CreateShiftScreen` (`CreateShift`) | Strong header, grouped shift/rate form cards with explanations, visible returned company/currency context, and keyboard-safe primary create action. |
 | `ForemanShiftDetailsScreen` (`ForemanShiftDetails`) | Strong header; primary lifecycle/status summary; grouped shift, pause, attendance, and rate cards; metrics; contextual lifecycle actions; clearly separated destructive cancel/discard decisions. |
 | `ShiftSummaryScreen` (`ShiftSummary`) | Strong result header, closed-status summary, metric surfaces for returned totals, grouped worker result cards, and layered read-only attendance/pay breakdown. |
@@ -398,9 +423,16 @@ screen. They must not fabricate values or imply unsupported navigation.
 ### Foreman dashboard
 
 - Show role/name/company context and existing worker join code. Keep Create
-  shift, Company Settings, Payroll requests, refresh, managed shift detail, and
-  logout actions.
-- Prioritize a real ACTIVE shift without fabricating counts or money. Preserve
+  shift, Payroll requests, refresh, managed shift detail, logout, and a
+  separate visible Settings button that opens own Settings, which links to
+  Company Settings.
+- Arrange Create shift, My shift history, and Payroll as three near-square tiles
+  across the available width. Request and show at most five latest managed
+  shifts, with View all to the 20-at-a-time full managed Shifts list. The card
+  chevron expands only the returned fields enumerated in `MOBILE_UX.md`; a
+  separate visible `Full view` action opens the detail screen.
+- Make a real ACTIVE status clear within the backend-ordered list without
+  reordering its latest five records or fabricating counts or money. Preserve
   loading, no-company, no-shifts, error/retry, refresh, and all five canonical
   shift statuses.
 
@@ -408,16 +440,64 @@ screen. They must not fabricate values or imply unsupported navigation.
 
 - Show role/name/company context, Join shift, My shift history, Payroll, recent
   shift details, refresh/retry, and logout.
-- Prioritize a returned active shift and separate shift, attendance, payment,
+- Arrange Join shift, My shift history, and Payroll as three near-square tiles
+  across the available width, with a separate visible Settings button. Show at
+  most five latest personal shifts in backend order and View all to the
+  20-at-a-time full history. The card chevron expands only the returned fields
+  enumerated in `MOBILE_UX.md`; a separate visible `Full view` action opens the
+  detail screen.
+- Make a returned active status clear within the backend-ordered list and
+  separate shift, attendance, payment,
   and pause state. Preserve no-company and no-shifts actions.
 
 ### Shift history
 
-- Preserve backend order and existing detail navigation. Show title, company,
-  location, actual time when returned, separate statuses, payable start/worked
-  time, and stored amount only when available.
+- Preserve backend order and existing detail navigation. Load the first 20 and
+  append older cursor pages only through `Load more`; keep loaded cards during
+  continuation retry. Search and date filtering are deferred. Show title,
+  company, location, actual time when returned, separate statuses, payable
+  start/worked time, and stored amount only when available.
 - Preserve loading, empty/join action, error/retry, legacy null-label, degraded
   breakdown, and non-payable cancelled/discarded states.
+
+### Own Settings
+
+- Use a visible button labelled `Settings`, never an ambiguous hamburger icon.
+  The same screen opens for WORKER and FOREMAN from company onboarding or the
+  joined role flow, and close/back returns to the exact opener.
+- Compose exactly three editable groups: first/last name, email, and password.
+  Timezone is read-only context, not a fourth editable profile field. Do not
+  introduce avatar, phone, language, trade, specialty, notifications, or rate.
+- Email and password groups visibly require current password, preserve safe
+  non-password input after a rejected request, and never repopulate a
+  password. Starting email change transitions that group to a compact pending
+  verification composition: keep the old active email distinct from the
+  pending address, provide a six-digit code field, show code/absolute expiry,
+  attempts remaining and resend countdown, and expose labelled Resend and
+  Cancel actions. Present cooldown, exhausted attempts, expiry, delivery,
+  uniqueness, credential, and rate-limit states without exposing secrets or
+  provider-specific details. Restore this non-secret pending composition when
+  Settings reopens, and use the same state while reconciling an ambiguous
+  start/resend network result.
+- Confirmed email and successful password changes show replacement-session
+  storage progress before success. If storage or response recovery fails and
+  the old credential version is rejected, use the standard authentication-
+  expired treatment, clear the old session, and lead to Login; do not suggest
+  that the mutation was rolled back.
+- The fifth invalid email code is a terminal 409
+  `EMAIL_VERIFICATION_ATTEMPTS_EXHAUSTED` state with no countdown or
+  `Retry-After`; present a new-start action separately from temporary 429
+  throttles. The exhausted-resend 409 is likewise terminal for that pending
+  request and has no countdown, while an unexpired current code remains usable.
+  A 409 `CREDENTIAL_VERSION_CONFLICT` or 401 `SESSION_REVOKED`
+  reconciles a newer protected session if already stored, otherwise clears the
+  stale session and leads to Login.
+- Access tokens are displayed nowhere but may be returned to the session layer
+  and stored only in OS-backed protected storage. Remove the unprotected
+  AsyncStorage fallback: delete legacy fallback tokens and require login rather
+  than migrating or using them; protected-storage failure has no fallback.
+- Show Company Settings and nested Pay Rules only for a FOREMAN who already has
+  a company. Their absence during `CreateCompany` is intentional.
 
 ### Worker payroll
 
@@ -470,6 +550,10 @@ screen. They must not fabricate values or imply unsupported navigation.
   instead of being clipped or placed behind the keyboard.
 - Long person/company/site/currency/rule names wrap. Do not use fixed heights
   that fail under localization or font scaling.
+- Keep three tiles in a left-to-right group with flexible width and growing
+  height where labels need multiple lines; do not clip labels at font scale 1.5.
+  Bottom tabs and card chevrons have at least 44 x 44 touch targets and proper
+  selected/expanded accessibility state.
 - Copy remains concise and localizable. Uppercase enum values are not used as
   visual hierarchy when approved UI copy exists.
 
@@ -491,21 +575,40 @@ After that correction stage, migrate one screen at a time in this order:
 4. `UnsupportedRoleScreen`.
 5. `JoinCompanyScreen`.
 6. `CreateCompanyScreen`.
-7. `WorkerDashboardScreen`.
-8. `JoinShiftScreen`.
-9. `MyShiftHistoryScreen`.
-10. `WorkerPayrollScreen`.
-11. `WorkerShiftDetailsScreen`.
-12. `ForemanDashboardScreen`.
-13. `CreateShiftScreen`.
-14. `ForemanShiftDetailsScreen`.
-15. `ShiftSummaryScreen`.
-16. `ForemanPayrollRequestsScreen`.
-17. `ForemanCompanySettingsScreen`.
-18. `ForemanPayRulesScreen` shell/state, then its rule editor within the same
+7. Own Settings for both roles, including open/return from both company gates,
+   verified email change, password change, replacement-session storage, and
+   revoked-session recovery.
+8. FOREMAN Shifts as its own paged screen stage.
+9. WORKER Shifts (`MyShiftHistoryScreen`) as its own paged screen stage.
+10. Empty More as its own intentionally blank destination stage.
+11. WORKER/FOREMAN bottom shell integration, using the separately accepted
+    Shifts and More destinations.
+12. `WorkerDashboardScreen`.
+13. `JoinShiftScreen`.
+14. `WorkerPayrollScreen`.
+15. `WorkerShiftDetailsScreen`.
+16. `ForemanDashboardScreen`.
+17. `CreateShiftScreen`.
+18. `ForemanShiftDetailsScreen`.
+19. `ShiftSummaryScreen`.
+20. `ForemanPayrollRequestsScreen`.
+21. `ForemanCompanySettingsScreen`.
+22. `ForemanPayRulesScreen` shell/state, then its rule editor within the same
     screen approval boundary.
-19. Verified navigation/header consistency and final regression across all
+23. Verified navigation/header consistency and final regression across all
     screens without adding destinations.
+
+Stages 7 through 11 are not one combined navigation task. Each has its own
+code gate (typecheck, lint, focused tests, relevant regressions, diff check,
+and independent read-only review), Android device gate (all documented states,
+safe areas, back behavior, narrow viewport, and font scale 1.5), and explicit
+user visual-acceptance gate. Record iOS as unavailable where applicable. Do not
+start the next of these five stages until all three gates for the current stage
+pass.
+
+This ordering does not revoke or reopen any earlier completed and accepted
+migration. It adds explicit acceptance boundaries for the two new Shifts
+destinations before their shared shell integration.
 
 Do not redesign all screens in one implementation task. A later screen may
 reuse an already-approved shared primitive, but must still receive its own
@@ -515,8 +618,10 @@ For each migrated screen:
 
 1. Read this document, `MOBILE_UX.md`, `SPEC.md`, and the relevant `API.md`
    sections plus the current implementation/tests.
-2. Change only mobile presentation code and focused tests; preserve typed API,
-   role gates, actions, calculations, and async behavior.
+2. Change mobile presentation and focused tests; the documented own-profile
+   Settings flow additionally updates the typed API client, token storage, and
+   current-user context after its backend contract is available. Preserve other
+   typed APIs, role gates, calculations, and established async behavior.
 3. Implement without commit or push, then run typecheck, lint, focused tests,
    relevant regressions, and `git diff --check`.
 4. Obtain an independent read-only review. Correct every finding and repeat the

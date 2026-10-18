@@ -93,9 +93,26 @@ Fields:
 id
 email
 passwordHash
+credentialVersion
 firstName
 lastName
 role
+createdAt
+updatedAt
+
+PendingEmailChange
+
+Fields:
+
+id
+userId
+normalizedNewEmail
+verificationCodeDigest
+codeExpiresAt
+expiresAt
+resendAvailableAt
+resendCount
+failedAttemptCount
 createdAt
 updatedAt
 Company
@@ -187,6 +204,21 @@ Company Ownership and Membership
 - Company name is exposed in current-user, shift, managed-shift, and worker-history DTOs where useful for mobile dashboards and menus.
 - ADMIN user management remains deferred until after the mobile MVP and should be implemented in Vaadin.
 - The mobile MVP should not add an ADMIN flow.
+
+Own Profile Update
+
+- `GET /api/v1/users/me` remains the public current-user read and session-restore endpoint.
+- The planned `PUT /api/v1/users/me` accepts complete `UpdateMyNameRequest` data (`firstName`, `lastName`) for authenticated WORKER and FOREMAN. It resolves the target from the authenticated principal, validates the two names, updates only those fields in a transaction, and returns the existing public `UserResponse` shape. ADMIN is excluded. Unknown JSON properties reject the complete request with 400 rather than being ignored, preventing mass assignment to email, password, role, company, or rates.
+- Email change is a separate pending-verification aggregate exposed through `GET`/`POST /api/v1/users/me/email-change`, `/confirm`, `/resend`, and `DELETE /api/v1/users/me/email-change`. Initiation requires the current password but does not modify `User.email`; the old address remains authoritative until confirmation. The read endpoint restores non-secret pending metadata after Settings reopen or an ambiguous network result and has no mutation side effects. `PendingEmailChange` is owned one-to-one by the authenticated user, stores the normalized target address and only a slow hash or keyed digest of the six-digit code, expires absolutely after 30 minutes, and applies the 10-minute code lifetime, 60-second resend cooldown, three-resend limit, and five-attempt budget specified in `API.md`. The fifth failed confirmation invalidates it with 409 `EMAIL_VERIFICATION_ATTEMPTS_EXHAUSTED`, no `Retry-After`; only a new rate-limited start can continue the flow. Confirmation rechecks uniqueness and atomically changes the email, consumes the pending aggregate, and revokes older credentials. Cancel, absolute expiry, exhausted attempts, or a late uniqueness conflict leave the old email unchanged.
+- Mail delivery is behind a provider-neutral application boundary. Delivery acceptance is part of start/resend behavior, but provider-specific ids, callbacks, or link formats are not public API. A failed initial delivery leaves no pending aggregate; a failed resend preserves the previous code and does not consume a resend. Temporary per-user initiation/current-password, cooldown, and per-target delivery throttles return 429 with `Retry-After`; exhausted per-pending attempt/resend budgets return their terminal 409 codes without `Retry-After`.
+- `PUT /api/v1/users/me/password` is the separate authenticated password mutation. It requires the current password, validates a different 8-to-72-character new password, and stores only the BCrypt hash. Password recovery remains a separately specified future flow.
+- The controller handles request/response and validation. `UserService` owns authorized profile writes; a dedicated email-change service owns pending state, code lifecycle, delivery orchestration, and transactional confirmation; the existing `PasswordEncoder` verifies and hashes passwords. Name returns `UserResponse` and does not rotate credentials. Confirmed email and password changes return the existing `LoginResponse` shape so the current device can replace its token and public user context as one stored session value.
+- `User.credentialVersion` is a non-negative persisted value initialized to 0. New JWTs contain it; an otherwise valid rollout-era JWT without the claim is interpreted as version 0. Every protected request verifies signature/expiry, loads the user by `sub`, compares the token version with the persisted value, and verifies that the persisted role still matches the token role. A missing subject user, version mismatch, or role mismatch returns 401 `SESSION_REVOKED`; this request-time check, rather than merely issuing a new JWT, makes older tokens unusable.
+- Confirmed email change and password change increment `credentialVersion` exactly once in the same transaction as the credential mutation. The old token on the current phone and tokens on every other device then fail; only the successful caller receives a replacement token at the new version. Initiation, resend, cancellation, expiry, name change, and failed credential changes do not increment it. If the committed response is lost or secure storage fails, the mutation is not rolled back: mobile clears the rejected old session and returns to login, using the new email after email confirmation or the new password after password change.
+- Credential mutations recheck the authenticated token's expected `credentialVersion` inside the serialized credential-write transaction. The write and increment are conditional on equality. Therefore, of two email-confirm/password mutations that entered with the same old version, only one can commit and receive a usable replacement token; the loser changes neither credentials nor pending-email state, receives no token, and returns 409 `CREDENTIAL_VERSION_CONFLICT` without `Retry-After`. If it is already stale before the transaction, authentication returns 401 `SESSION_REVOKED`. Row locking, transaction isolation, or atomic compare-and-set remains an implementation choice as long as this invariant holds.
+- Passwords, verification codes, and their hashes/digests are never returned in response DTOs, logged/traced, or persisted by mobile beyond active input. Access tokens have a separate session contract: login and successful credential mutations return them, and mobile stores them only in OS-backed protected session storage. Tokens remain excluded from logs, analytics, traces, diagnostics, and unprotected storage. The existing `AsyncStorage` fallback must be removed; a legacy fallback-only token is deleted without restore or migration and requires login, while a duplicate legacy copy is deleted in favor of the protected session. Protected-storage unavailability or write failure never falls back to AsyncStorage or reports session establishment as successful.
+- On `CREDENTIAL_VERSION_CONFLICT` or `SESSION_REVOKED`, mobile retains and validates a newer protected session if another local operation already stored one; otherwise it clears the stale session and routes to login. Authorization remains WORKER/FOREMAN only for these self-service mutations; ADMIN and all existing company/role boundaries remain unchanged.
+- Own Settings is reachable for WORKER and FOREMAN even while the root company onboarding gate is active. It returns to the same `JoinCompany` or `CreateCompany` state on close/back. Company Settings and Pay Rules stay gated to a FOREMAN with an existing company.
 
 Shift Creation
 
@@ -449,7 +481,9 @@ Attendance Query
 
 Worker Shift History
 
-- GET /api/v1/me/shifts is available to any authenticated user.
+- Legacy `GET /api/v1/me/shifts` remains available to any authenticated user
+  as the unchanged array compatibility contract; the new dashboard and WORKER
+  Shifts use `/page`.
 - The endpoint always filters by the current user's worker attendance records.
 - WORKER, FOREMAN, and ADMIN all see only attendance where ShiftAttendance.worker.id equals the current user id.
 - FOREMAN and ADMIN do not receive managed-shift attendance through this endpoint unless they also have their own attendance record.
@@ -462,7 +496,9 @@ Worker Shift History
 - History query services/controllers read persisted attendance and snapshot data only and must not calculate, backfill, or reconstruct a snapshot for the DTO.
 - CLOSED approved attendance exposes paymentStatus so the worker can distinguish UNPAID, PAYMENT_REQUESTED, and PAID.
 - The repository fetches attendance with shift in one query to avoid N+1 loading.
-- Results are ordered by joinedAt descending and then attendance id descending.
+- The existing `GET /api/v1/me/shifts` contract remains an unpaged top-level JSON array with its existing body, order, authorization, and fields. It stays compatible while the backend pagination stage ships first and is not repurposed after mobile migration without a separate versioned deprecation decision.
+- New clients use `GET /api/v1/me/shifts/page`. It returns the same item DTOs inside `{ items, nextCursor, hasMore }`; `limit` defaults to 20 and is restricted to 1..20. The opaque cursor represents the last immutable `(joinedAt, attendanceId)` sort key and continuations return strictly older rows in joinedAt-descending, attendance-id-descending order. Cursors are endpoint-specific and invalid cursors return 400 rather than restarting traversal.
+- The dashboard requests `limit=5` from the page endpoint. The full list appends 20-row pages through `Load more` until `nextCursor` is null. A newer record arriving between calls does not displace or duplicate the strictly older continuation. Date search and all other search/filter parameters are deferred.
 - DTOs expose shift and attendance fields only, never User entities, emails, password hashes, foremanHourlyRate, foremanWorkedMinutes, foremanPauseMinutes, or foremanSalary.
 - DTOs include company name, nullable ShiftSession.currencyLabel, payableStartTime, pauseState for active shift display, and persisted pauseMinutes after close-time salary calculation.
 
@@ -470,14 +506,15 @@ Foreman Managed Shifts
 
 - Foreman-created shift lists should not be mixed into worker attendance history.
 - `GET /api/v1/me/shifts` remains personal worker attendance history.
-- `GET /api/v1/me/managed-shifts` supports the Foreman mobile dashboard.
+- `GET /api/v1/me/managed-shifts` supports the currently deployed Foreman mobile client only during the compatibility interval; the new dashboard and Shifts flow use `/page`.
 - The endpoint is available only to FOREMAN and ADMIN.
 - WORKER receives 403 Forbidden.
 - FOREMAN sees shifts where ShiftSession.createdBy equals the current user id.
 - FOREMAN managed-shift DTOs include companyId and companyName.
 - ADMIN can call the endpoint and sees shifts where ShiftSession.createdBy equals the current user id. Because ADMIN cannot create shifts through the REST/mobile API, this is normally empty for admins. Full admin listing is deferred to Vaadin admin UI.
 - The endpoint reuses ShiftSession service/repository logic and does not recalculate salary.
-- Results are ordered by createdAt descending and shift id descending.
+- The existing `GET /api/v1/me/managed-shifts` remains its current unpaged top-level JSON array with unchanged body, order, authorization, and fields for compatibility with the deployed mobile. It is not repurposed after mobile migration without a separate versioned deprecation decision.
+- New clients use `GET /api/v1/me/managed-shifts/page`, whose envelope, `limit` 1..20 validation, invalid-cursor behavior, and `hasMore` invariant match the personal page endpoint. Its endpoint-specific opaque continuation key is `(createdAt, shiftId)` and returns strictly older records in createdAt-descending, shift-id-descending order. Dashboard requests 5; the full list appends 20-row pages through `Load more`. Search and date filtering are deferred.
 - Response DTOs expose shift/session fields needed by the mobile dashboard and do not expose User entities, password hashes, company entity, createdAt, or updatedAt.
 - Monetary shift/session DTOs include nullable ShiftSession.currencyLabel; a legacy null must be returned unchanged.
 - Response DTOs include pauseState for the foreman's own personal pause plus any all-participant pause.
@@ -736,6 +773,11 @@ Concurrency Control
 - Payout request approval locks PayoutRequest first and selected ShiftAttendance rows second before setting paymentStatus to PAID.
 - Concurrent payout request creation for the same attendance serializes so only the first request succeeds.
 - Concurrent approval for the same payout request serializes so only the first PENDING -> APPROVED transition succeeds.
+- Confirmed-email and password mutations serialize on the user credential
+  version. Only the first mutation with the expected old version commits; a
+  concurrent loser returns 409 `CREDENTIAL_VERSION_CONFLICT` without changing
+  credentials or issuing a token. The concrete database locking strategy is
+  intentionally not prescribed.
 
 4. Database
 
@@ -762,9 +804,15 @@ Login flow:
 
 User sends email and password.
 Backend validates credentials.
-Backend returns JWT token.
-Mobile app stores token securely.
+Backend returns a JWT containing the persisted user credential version.
+Mobile app stores the access token only in OS-backed protected storage. It has
+no unprotected AsyncStorage fallback; legacy fallback-only tokens are deleted
+and require login again.
 Mobile app sends token in Authorization header.
+Every protected request loads the user and rejects a token whose credential
+version or role no longer matches persisted state. Password change and
+confirmed email change increment the credential version and return a
+replacement token only to the current caller, so every older token is revoked.
 JWT expiration remains enabled.
 Default MVP JWT/session lifetime should be 8 hours.
 Mobile restores a stored session by calling GET /api/v1/users/me.
@@ -786,6 +834,9 @@ Authorization rules:
 
 WORKER:
 - own profile
+- update own first and last name through `PUT /api/v1/users/me`
+- read, start, confirm, resend, or cancel their own current-password-initiated email verification flow
+- change their own password with current-password confirmation; confirmed email and password changes revoke older credential versions
 - join company
 - own shifts
 - join OPEN shifts and ACTIVE shifts in their company
@@ -795,6 +846,8 @@ WORKER:
 - list own payout requests
 
 FOREMAN:
+- update own first and last name through `PUT /api/v1/users/me`
+- request own email/password changes through the same separate self-service endpoints and constraints as WORKER
 - create own company
 - get and update own Company Settings through `GET`/`PUT /api/v1/me/company`
 - create shift
@@ -808,6 +861,7 @@ FOREMAN:
 - approve PENDING payout requests for their company and managed shifts
 
 ADMIN:
+- no mobile-MVP own name/email/password update endpoints
 - read shift detail, list/approve attendance, and read worker data within shift summaries through REST where implemented
 - no REST/mobile shift create/start/close/cancel/pause access
 - no REST/mobile payout request creation or approval access for the MVP
@@ -877,10 +931,21 @@ must not call backend endpoints, own authorization, or duplicate domain logic.
   where available, or authenticated current-company timezone for its records.
   If neither is available, device timezone is an explicit display fallback
   only and never policy-boundary authority.
-- Navigation remains the typed native-stack boundary documented in
-  `MOBILE_UX.md`. Bottom tabs, Shifts, More, account, or legal routes are not
-  introduced in the first redesign phase. Role gates and existing transitions
-  remain authoritative.
+- The planned WORKER and FOREMAN shell provides bottom navigation for
+  Dashboard, Shifts, Payroll, and More around the existing role-gated flows.
+  Each dashboard reads its role `/page` endpoint with `limit=5`; each Shifts
+  destination reads the same role `/page` endpoint with `limit=20` and appends
+  older records through `Load more`. The endpoints without `/page` remain
+  unchanged JSON-array compatibility contracts only during the backend-first
+  interval. More is an empty selectable destination. A separate visible button labelled `Settings` opens
+  the role's own profile screen, including from `JoinCompany` or
+  `CreateCompany` before a company exists. Closing it returns to that
+  onboarding gate. FOREMAN-only Company Settings and nested Pay Rules appear
+  only after company creation.
+  Existing detail and mutation screens remain native-stack destinations with
+  their current back behavior. Typed navigation, role gates, and existing
+  transition ownership remain authoritative; no ADMIN or legal route follows
+  from the visual reference.
 - Existing contexts and screen coordinators retain loading, refresh, mutation,
   stale-response, focus, and unmount ownership. A visual component may render
   those states but must not weaken their sequencing.
@@ -937,8 +1002,19 @@ must not be treated as independently navigable destinations:
 - `JoinCompanyScreen` when a WORKER has no company
 - `CreateCompanyScreen` when a FOREMAN has no company
 
-This inventory records the implemented navigation structure; it is not an
-independent screen backlog or UX scope. `docs/MOBILE_UX.md` and
+This inventory records the currently implemented navigation structure. The
+planned bottom navigation adds a role-specific Shifts destination, an empty
+More destination, and own Settings for both supported roles. The current
+`MyShiftHistory` can serve the WORKER Shifts view; FOREMAN Shifts must use
+`GET /api/v1/me/managed-shifts/page`, never personal attendance history. The
+WORKER destination uses `GET /api/v1/me/shifts/page`; the two endpoints without
+`/page` remain unchanged compatibility contracts for the installed mobile. The
+implementation may choose stack/tab composition without changing the role or
+data contract. This inventory is not an independent screen backlog or UX scope.
+WORKER Shifts and FOREMAN Shifts each pass separate code, device, and user
+acceptance gates before their shared bottom-shell integration; already accepted
+earlier screen migrations are not reopened by this sequencing correction.
+`docs/MOBILE_UX.md` and
 `docs/UI_DESIGN_SYSTEM.md` canonically own the exact screen UX, composition,
 state coverage, and migration scope so this architecture summary does not
 diverge from them.

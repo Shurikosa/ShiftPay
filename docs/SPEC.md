@@ -76,6 +76,7 @@ A worker can:
 - see CLOSED unpaid attendance records
 - create a payout request from selected unpaid attendance records
 - see own payout request statuses
+- open personal Settings before or after company join and update their own name, email, and password
 
 ### 4.2 Foreman
 
@@ -103,6 +104,7 @@ A foreman can:
 - see company name in the mobile app
 - view payout requests for workers in their company and their managed shifts
 - approve pending payout requests
+- open personal Settings before or after company creation, update their own name, email, and password, and, once a company exists, reach Company Settings with Pay Rules nested inside it
 
 ### 4.3 Admin
 
@@ -118,6 +120,34 @@ Admin features will be available through the Vaadin admin dashboard.
 Advanced admin features are not required for the first MVP, but the backend architecture should support them later.
 ADMIN user management is deferred until after the mobile MVP.
 The mobile MVP should not include an ADMIN flow.
+
+### 4.4 Mobile dashboard, navigation, and profile
+
+WORKER and FOREMAN each have bottom navigation with `Dashboard`, `Shifts`, `Payroll`, and `More`. `Shifts` opens the full role-specific paged list: personal worker attendance history from `GET /api/v1/me/shifts/page` for WORKER, and shifts owned and managed by the foreman from `GET /api/v1/me/managed-shifts/page` for FOREMAN. The legacy endpoints without `/page` remain unchanged arrays for installed-client compatibility and are not the new Shifts-screen pagination contract. `Payroll` opens the existing payroll screen for that role. `More` is selectable but currently has an empty content area, with no feature, message, or promised destination. A separate visible button labelled `Settings` is available to both roles and does not depend on More. It is not a hamburger icon or unnamed menu.
+
+Settings remains reachable while the company gate is active: a WORKER can open it from `JoinCompany`, and a FOREMAN can open it from `CreateCompany`. Closing or navigating back from Settings returns to that same onboarding screen without joining or creating a company; retained onboarding form state must not be discarded merely because Settings was opened. Company Settings and Pay Rules remain unavailable until an authenticated FOREMAN actually has a company, and remain forbidden to WORKER.
+
+Each dashboard has three near-square action tiles in one left-to-right group: WORKER has green `Join shift`, `My shift history`, and `Payroll`; FOREMAN has green `Create shift`, `My shift history` (managed-shift history), and `Payroll`. Company Settings is no longer a foreman dashboard tile; it remains reachable through foreman Settings. On narrow screens and at larger font scales all labels and actions remain readable and reachable.
+
+Dashboard recent shifts request and show at most the five newest entries through new page endpoints. `View all` opens the corresponding full Shifts list, which initially requests 20 entries and offers `Load more` while the backend returns a continuation cursor. Worker history remains ordered by `joinedAt` descending, then `attendanceId` descending; managed shifts by `createdAt` descending, then shift id descending. Cursor continuation preserves this order and access to older records. Search and filters, including searching/filtering by date, are deferred. The existing array-returning `GET /api/v1/me/shifts` and `GET /api/v1/me/managed-shifts` contracts remain unchanged during backend-first rollout so the current mobile works until it adopts `GET /api/v1/me/shifts/page` and `GET /api/v1/me/managed-shifts/page`.
+
+On both dashboard and full history, a card chevron expands or collapses details inline. A separate visible `Full view` action (localized as `Повний перегляд` where Ukrainian copy is used) opens the existing role-specific detail screen. Worker expansion may display only the already-returned company name, location, shift/attendance/payment statuses, actual start/end, payable start, break/pause/worked minutes, active pause state, hourly-rate snapshot, calculated salary, and persisted currency label when each is present. Managed-shift expansion may display only the returned company name, location, status, join code, actual start/end, default break, worker default rate, owner-foreman rate, currency label, and returned personal/global pause state. It does not calculate duration, salary, payout, counts, or missing values; detailed pay-calculation segments remain on the existing detail view.
+
+Own Settings has exactly three editable profile areas for both roles: own first/last name, own email, and own password. Name uses the complete two-field `PUT /api/v1/users/me` request; unrecognized properties reject the whole request with 400 and can never mutate other data. Names do not revoke sessions.
+
+Email change is a pending verification flow, not a direct profile update. The user starts it with the current password; the old email remains the active login/profile address until a six-digit code delivered to the normalized new address is confirmed. Authenticated Settings can read non-secret pending metadata to resume after reopening or an ambiguous network result. The pending request lasts 30 minutes, each code lasts at most 10 minutes, and resend has a 60-second cooldown and three-resend limit. Temporary cooldown/rolling-limit 429 responses carry `Retry-After`; exhausting this pending request's three resends is terminal 409 `EMAIL_VERIFICATION_RESENDS_EXHAUSTED` without it. The fifth failed confirmation likewise invalidates the pending change and returns 409 `EMAIL_VERIFICATION_ATTEMPTS_EXHAUSTED` without `Retry-After`; waiting cannot revive it, while a new start remains subject to its own rate limits. The user may cancel; expiry, cancellation, delivery failure, or confirmation failure leaves the old email unchanged. Initiation and delivery are rate-limited as defined in `API.md`, and the contract is provider-neutral.
+
+Password change requires the current password and a different valid new password. Confirmed email change and successful password change increment a persisted credential version checked on every protected request. Each mutation rechecks the token's expected version inside its serialized write transaction; of concurrent credential mutations using the same old version, only one may change credentials and receive a valid replacement session. The loser makes no credential change and receives 409 `CREDENTIAL_VERSION_CONFLICT` without `Retry-After`; a request already stale at authentication receives 401 `SESSION_REVOKED`. Mobile retains a separately stored newer protected session if one already won locally, otherwise clears the stale session and requires login. All older tokens lose access immediately. If the response or protected-storage update fails after server commit, the old token is rejected and the user recovers by logging in with the new credential. This does not weaken role authorization or create password recovery.
+
+Passwords, verification codes, and their hashes/digests are never response data and are not persisted on the phone. Access tokens are intentionally returned by login and successful credential mutations and may be stored only in OS-backed protected session storage. The existing unprotected `AsyncStorage` token fallback must be removed: no new token may be written there, and a legacy fallback-only token is deleted and replaced by an explicit login rather than being used or copied. If protected storage is unavailable, authentication/session replacement is not treated as complete and there is no unprotected fallback.
+
+The new dashboards and both role Shifts flows use only the `/page` history endpoints: dashboards request five, while each full Shifts view requests 20 and appends older pages through `Load more`. FOREMAN Shifts and WORKER Shifts each require their own code/device/user acceptance before the shared bottom shell is integrated. Previously completed and accepted screen migrations remain complete; this ordering adds gates only for the new Shifts destinations and shell integration.
+
+Worker Settings also shows read-only company timezone when a company exists. Foreman Settings shows the same own-profile controls and timezone and, only after company creation, links to FOREMAN-only Company Settings; Pay Rules remains nested inside Company Settings. Company timezone belongs in Settings, not the dashboard. No other editable own-profile fields are added.
+
+`DesignExample.png` controls visual language and composition, not product data or routes. Under this newer product decision, the second FOREMAN dashboard tile is `My shift history`, not `Company Settings`, and timezone is shown in Settings rather than on the dashboard even if the bitmap depicts otherwise.
+
+Worker requests to change an hourly rate and a worker trade/specialty field are deferred. Neither has a mobile flow or API contract in this phase.
 
 ## 5. Shift Session Flow
 
@@ -777,7 +807,17 @@ Token expiration must not be removed completely.
 
 For MVP, the default JWT/session lifetime should be 8 hours.
 
-Mobile should store the session and automatically restore it by calling GET /api/v1/users/me.
+Mobile should store the access token only in OS-backed protected session
+storage and automatically restore it by calling GET /api/v1/users/me. It must
+not fall back to unprotected AsyncStorage; a legacy fallback-only token is
+deleted and requires login again.
+
+Access-token validity also depends on the authenticated user's persisted
+credential version. Protected requests reject a signed, unexpired token whose
+version does not equal the current user version. Password change and confirmed
+email change increment that version and return a replacement token only to the
+current phone, terminating every other session. Legacy tokens without the new
+claim are version 0 during migration so deployment does not log everyone out.
 
 Future biometric unlock or refresh-token/long-lived session support can be added later.
 

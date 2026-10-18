@@ -112,7 +112,7 @@ POST /api/v1/auth/login
 
 No authentication required.
 
-JWT access tokens keep an expiration. For the MVP, the default JWT/session lifetime should be 8 hours. The mobile app should persist the session token and restore the session by calling `GET /api/v1/users/me` on app start.
+JWT access tokens keep an expiration. For the MVP, the default JWT/session lifetime should be 8 hours. The mobile app persists the access token only in OS-backed protected session storage and restores the session by calling `GET /api/v1/users/me` on app start. It must not use an unprotected AsyncStorage fallback; the migration and failure rules are defined in the credential-version contract below.
 
 Future biometric unlock or refresh-token/long-lived session support can be added later.
 
@@ -224,6 +224,8 @@ For the owner FOREMAN, company may also include joinCode so it can be shared wit
 
 The mobile app uses this endpoint during session restore and can display company.name in the main menu or dashboard when present. `company.currencyLabel` is the company's current display-only currency label; it is not an ISO-4217 code and must not trigger conversion or locale-specific currency arithmetic. It is nullable for a company that predates currency-label onboarding; `null` means no label is known, not that the client may substitute a label. `defaultWorkerHourlyRate` and `defaultForemanHourlyRate` are deliberately not included in this compact current-user company summary: only the FOREMAN-only Company Settings endpoint exposes them. `company.timeZone` is an IANA timezone id and is the source of truth for pay policy day, week, and holiday boundaries. Existing companies can default to the backend configured timezone until configurable company timezone UI exists.
 
+The mobile Settings screen for either supported role reads this same public profile. Company timezone is shown in Settings, not as a dashboard timezone control.
+
 Missing, invalid, or expired token:
 
 Status: 401 Unauthorized
@@ -235,6 +237,182 @@ Status: 401 Unauthorized
   "message": "Unauthorized",
   "path": "/api/v1/users/me"
 }
+
+Update my name (planned; backend implementation follows this contract)
+
+PUT /api/v1/users/me
+
+Only authenticated WORKER and FOREMAN. Company membership is not required, so this remains available from `JoinCompany` and `CreateCompany`. The authenticated user id selects the record; the client cannot update another user by supplying an id.
+
+Headers:
+
+Authorization: Bearer <token>
+
+Request DTO: `UpdateMyNameRequest`
+
+{
+  "firstName": "Jane",
+  "lastName": "Worker"
+}
+
+Both fields are required on every request. Each must pass the existing registration name constraints (`@NotBlank`, `@Size(max = 100)` on the submitted Java string). The backend trims leading and trailing whitespace with the same name handling as registration before persisting either value; an all-whitespace value is invalid. There is no partial update. `UpdateMyNameRequest` accepts exactly `firstName` and `lastName`: any additional JSON property makes the whole request fail with 400 Bad Request as an unrecognized field. The backend must not ignore or bind an extra property. Therefore this endpoint cannot change email, password, role, company, rates, or any other user data.
+
+Response DTO: `UserResponse`, identical in shape and company-summary privacy to `GET /api/v1/users/me`. The response reflects the stored trimmed names.
+
+Status: 200 OK
+
+{
+  "id": 1,
+  "email": "worker@example.com",
+  "firstName": "Jane",
+  "lastName": "Worker",
+  "role": "WORKER",
+  "company": null
+}
+
+Invalid or missing name returns 400 Bad Request with the standard field-validation error shape, for example:
+
+{
+  "timestamp": "2026-07-01T10:00:00Z",
+  "status": 400,
+  "error": "Bad Request",
+  "message": "firstName: must not be blank",
+  "path": "/api/v1/users/me"
+}
+
+Missing, invalid, or expired JWT returns 401 Unauthorized. ADMIN receives 403 Forbidden from this self-name update in the mobile MVP; ADMIN user management remains deferred to Vaadin. No token rotation is required after a name-only update. Mobile updates its current-user context from the successful response so headers reflect the new name.
+
+Start my email change (planned)
+
+POST /api/v1/users/me/email-change
+
+Only authenticated WORKER and FOREMAN. Company membership is not required. The authenticated principal selects the user; no user id is accepted. Starting a change does not update `User.email`: the old address remains the login address and public profile value until confirmation succeeds.
+
+Request DTO: `StartMyEmailChangeRequest`
+
+{
+  "currentPassword": "password123",
+  "newEmail": "jane.worker@example.com"
+}
+
+Rules:
+
+Email-change errors use the standard API error object plus a top-level
+machine-readable `code`. A 429 response includes HTTP `Retry-After` as whole
+seconds. An invalid-code response also includes top-level
+`attemptsRemaining`; clients must not parse human-readable `message` text.
+
+- Both properties are required. Any additional JSON property returns 400 Bad Request and is never bound to the user.
+- `currentPassword` is `@NotBlank`, has the implemented BCrypt input maximum of 72 characters, and must match the authenticated user's current BCrypt hash. A mismatch returns 400 Bad Request with code `CURRENT_PASSWORD_INCORRECT`; it does not clear the valid current session.
+- `newEmail` is `@NotBlank`, `@Email`, and limited to the persisted 255-character boundary. It uses the implemented registration/login normalization exactly: Java `String.trim()` followed by lowercase with `Locale.ROOT`.
+- The normalized address must differ from the current email and must not belong to another user. Those cases return 400 `EMAIL_UNCHANGED` and 409 `EMAIL_ALREADY_IN_USE` respectively.
+- A user may have only one pending email change. An unexpired pending change returns 409 `EMAIL_CHANGE_ALREADY_PENDING`; the user must confirm, cancel, or let it expire before starting another.
+- The backend creates a cryptographically random six-digit decimal verification code. Only a slow hash or keyed digest of the code is persisted; the plaintext code is held only long enough to hand the provider-neutral delivery message to the configured mail-delivery boundary. Passwords, verification codes, and their hashes/digests must never appear in DTO responses, application logs, analytics, traces, error messages, or mobile persistence. Access tokens are different: `LoginResponse` and successful credential-mutation responses must return an access token, and mobile may persist it only in protected session storage; tokens still must never appear in logs, analytics, traces, or error messages.
+- The pending change has an absolute lifetime of 30 minutes. Each issued code is valid for 10 minutes or until that absolute deadline, whichever comes first. A new code invalidates the previous code.
+- The initial message counts as one delivery. Initiation is limited to three accepted starts per authenticated user in a rolling 60-minute window and five total verification messages per normalized target address in a rolling 24-hour window. Exceeding either limit returns 429 Too Many Requests with `Retry-After` and code `EMAIL_CHANGE_RATE_LIMITED`.
+- Current-password failures across email-change initiation and password change are limited to five per user in 15 minutes. Further attempts return 429 with `Retry-After` and code `CURRENT_PASSWORD_RATE_LIMITED`; a successful current-password check clears that failure counter.
+- If the provider-neutral delivery boundary cannot accept the initial message, return 503 Service Unavailable with code `EMAIL_DELIVERY_UNAVAILABLE` and do not leave an active pending change.
+- ADMIN receives 403 Forbidden. Missing, invalid, revoked, or expired bearer authentication returns 401 Unauthorized.
+
+Response DTO: `PendingEmailChangeResponse`
+
+Status: 202 Accepted
+
+{
+  "status": "PENDING",
+  "newEmail": "jane.worker@example.com",
+  "expiresAt": "2026-10-18T10:30:00Z",
+  "codeExpiresAt": "2026-10-18T10:10:00Z",
+  "resendAvailableAt": "2026-10-18T10:01:00Z",
+  "resendsRemaining": 3,
+  "attemptsRemaining": 5
+}
+
+Read my pending email change (planned)
+
+GET /api/v1/users/me/email-change
+
+The same authenticated WORKER or FOREMAN uses this endpoint when Settings
+opens and after an ambiguous start/resend network outcome. An active request
+returns 200 OK with `PendingEmailChangeResponse`; it never returns a plaintext
+verification code, password, token, or digest. If no pending change exists, or
+the absolute deadline has passed, it returns 204 No Content and may remove the
+expired row. Reading state does not resend mail, consume an attempt, extend an
+expiry, change the email, or revoke a session. ADMIN receives 403.
+
+Confirm my email change (planned)
+
+POST /api/v1/users/me/email-change/confirm
+
+Request DTO: `ConfirmMyEmailChangeRequest`
+
+{
+  "code": "483921"
+}
+
+Rules:
+
+- The caller must still be authenticated as the same WORKER or FOREMAN that started the pending change. A code alone is not authentication.
+- `code` is required and must contain exactly six ASCII decimal digits. Missing or malformed input is handled as an invalid confirmation attempt rather than exposing a separate code-format oracle.
+- Every confirmation submission against an active pending change consumes one of five total attempts, including a malformed or incorrect code. An incorrect code before the limit returns 400 with code `INVALID_EMAIL_VERIFICATION_CODE` and the remaining-attempt count.
+- The fifth failed attempt invalidates the pending change and returns 409 Conflict with code `EMAIL_VERIFICATION_ATTEMPTS_EXHAUSTED` and `attemptsRemaining: 0`. It has no `Retry-After`: waiting cannot make that pending change confirmable again. The user must start a new change, and that new start remains subject to its normal initiation and delivery rate limits.
+- An expired code returns 410 Gone with code `EMAIL_VERIFICATION_CODE_EXPIRED` while the absolute pending window remains. Expiry checks happen before code comparison and do not consume an attempt; the user may request a resend if limits allow. An expired absolute pending change, or confirmation after cancellation/exhaustion, returns 410 with code `EMAIL_CHANGE_EXPIRED` and must be started again with the current password.
+- Confirmation rechecks normalized-email uniqueness transactionally. If another account claimed the address after initiation, return 409 `EMAIL_ALREADY_IN_USE`, invalidate the pending change, and leave the current email and credential version unchanged.
+- On success, one transaction updates `User.email`, increments the user's persisted `credentialVersion`, consumes the pending change, and issues a replacement access token containing the new email and new credential version. All previously issued tokens, including the bearer token used for confirmation, then fail protected-request validation. The response token preserves the current phone as the one continuing session.
+
+Status: 200 OK
+
+The response uses the existing `LoginResponse` shape with the replacement access token and updated `UserResponse`.
+
+Resend my email-change code (planned)
+
+POST /api/v1/users/me/email-change/resend
+
+- Requires the same authenticated user and an unexpired pending change.
+- The first resend is available 60 seconds after initiation or the preceding successful resend. At most three resends are allowed for one pending change, and the five-messages-per-target-address 24-hour limit still applies.
+- A successful resend invalidates the previous code, does not reset the five-attempt confirmation budget, and sets `codeExpiresAt` to 10 minutes from resend or the absolute pending expiry, whichever is earlier. It returns 200 OK with `PendingEmailChangeResponse`.
+- A request before `resendAvailableAt` or while the rolling per-target delivery limit is active returns 429 with `Retry-After` and code `EMAIL_CHANGE_RATE_LIMITED`; these are temporary conditions. Exhausting all three resends for this pending change instead returns 409 `EMAIL_VERIFICATION_RESENDS_EXHAUSTED` without `Retry-After`, because waiting does not replenish that pending request's resend budget. The currently issued code remains valid until its existing expiry if it has not expired; otherwise the user must cancel/expire and start again subject to start limits.
+- If delivery cannot be accepted, return 503 `EMAIL_DELIVERY_UNAVAILABLE` and keep the previously issued code and its original expiry valid; do not consume a resend.
+- No pending change, including one already cancelled, exhausted, or absolutely expired, returns 410 `EMAIL_CHANGE_EXPIRED`. It never creates a pending request implicitly.
+
+Cancel my pending email change (planned)
+
+DELETE /api/v1/users/me/email-change
+
+The same authenticated user may cancel the pending change. Cancellation invalidates all its codes, leaves the old email and all sessions unchanged, and returns 204 No Content. It is idempotent when no pending change exists. Expiry has the same data outcome and requires no client cleanup call.
+
+Update my password (planned)
+
+PUT /api/v1/users/me/password
+
+Only authenticated WORKER and FOREMAN. Company membership is not required. This is deliberately separate from both name and email updates.
+
+Request DTO: `UpdateMyPasswordRequest`
+
+{
+  "currentPassword": "password123",
+  "newPassword": "new-password-456"
+}
+
+Rules:
+
+- Both properties are required. Any additional JSON property returns 400 Bad Request and is not ignored or bound.
+- `currentPassword` is `@NotBlank`, has the implemented BCrypt input maximum of 72 characters, and must match the current BCrypt hash. A mismatch returns 400 `CURRENT_PASSWORD_INCORRECT`, participates in the shared five-failures-per-15-minutes throttle, and does not clear the valid bearer session.
+- `newPassword` uses the implemented registration constraints: `@NotBlank` and `@Size(min = 8, max = 72)`. It must differ from the current password; equality returns 400 `PASSWORD_UNCHANGED`. It is hashed with the existing BCrypt `PasswordEncoder`; neither plain password nor either hash is returned or logged.
+- A password-reset/forgot-password flow is not created by this endpoint. A user who cannot supply the current password needs a separately specified recovery flow.
+- ADMIN receives 403 Forbidden. Missing, invalid, or expired bearer authentication returns 401 Unauthorized.
+
+On success, status is 200 OK: one transaction stores the new BCrypt hash, increments the user's persisted `credentialVersion`, and returns the existing `LoginResponse` shape with a replacement token at the new version. Every previously issued token immediately fails protected-request validation. Mobile replaces its stored session with the response, clears both password fields, and remains authorized on the current phone. Names, email, role, company, rates, and history do not change.
+
+Credential-version and session-revocation contract
+
+- Add a non-negative persisted `User.credentialVersion`, initialized to 0. New access tokens include a `credentialVersion` claim. For rollout compatibility, an otherwise valid pre-migration token without this claim is interpreted as version 0.
+- Every protected request validates signature and expiry, loads the current user by the JWT `sub`, and requires the token version to equal the persisted user version. A missing subject user, version mismatch, or token role inconsistent with the persisted role returns 401 Unauthorized with code `SESSION_REVOKED`; authorization rules for WORKER, FOREMAN, and ADMIN remain unchanged.
+- Password change and confirmed email change each increment the version exactly once in the same transaction as the credential mutation. This is the revocation event: tokens from every other device and the old token on the current phone lose access immediately. A replacement token at the new version is returned only to the current request, so that phone can continue.
+- Each confirmed-email or password mutation takes the authenticated token's credential version as its expected version and rechecks it against `User.credentialVersion` inside the serialized credential-write transaction. The credential write and increment succeed only when they still match. Of two concurrent mutations authenticated with the same old version, exactly one may change credentials and receive a usable replacement token. The transaction that observes a changed version performs no credential or pending-email mutation, issues no token, and returns 409 Conflict with code `CREDENTIAL_VERSION_CONFLICT` and no `Retry-After`. The database locking or compare-and-set technique is an implementation choice as long as this invariant holds. A request rejected before entering the mutation because its token is already stale receives 401 `SESSION_REVOKED`; both errors use the same mobile reconciliation described below.
+- Name changes, email initiation/resend/cancel/expiry, and failed credential mutations do not increment the version or revoke sessions.
+- Mobile must persist the replacement token and returned user as one protected session value before reporting final success. On `CREDENTIAL_VERSION_CONFLICT` or `SESSION_REVOKED`, it first checks whether another in-flight operation already stored a newer protected session: if so, it retains that session and validates it through `GET /api/v1/users/me`; otherwise it clears the stale session and routes to login. If the response is lost after the server committed, or protected storage fails, the server mutation and revocation are not rolled back. Recovery login uses the unchanged email plus new password after password change, or the new email plus current password after confirmed email change.
+- Passwords, verification codes, and their hashes/digests are credential secrets: they are never returned in response DTOs, logged, or persisted by mobile beyond active password/code input state. Access tokens are session credentials: they are deliberately returned in `LoginResponse` and replacement-session responses and may be persisted only in OS-backed protected session storage. Mobile must not write a token to an unprotected `AsyncStorage` fallback. During migration, it deletes any token found only in the legacy unprotected fallback without using or copying it and requires login again; when both stores contain values, it deletes the legacy copy and uses only the protected session. If protected storage is unavailable or a write fails, mobile does not fall back, does not report authentication/session replacement as complete, clears transient token state, and requires login again when protected storage is available.
 
 3. Companies
 Create company
@@ -1966,6 +2144,7 @@ Rules:
 - The response includes pauseState for active shift display and pauseMinutes after close-time salary calculation.
 - The response includes payableStartTime when the backend knows the worker's effective salary start.
 - Results are sorted by joinedAt descending, then attendanceId descending.
+- Compatibility contract: this existing endpoint keeps its current top-level JSON array response and does not accept the new pagination contract. This change does not alter or later repurpose its body shape, default contents, ordering, authorization, or field visibility; any future deprecation requires a separate versioned decision. During the backend-first interval it remains available to the installed mobile, while the new dashboard/history uses the separate page endpoint below.
 - The response does not expose User entities, worker records, email, or passwordHash.
 - The repository fetches attendance with shift in one query to avoid N+1 loading.
 
@@ -2046,6 +2225,48 @@ Status: 401 Unauthorized
   "path": "/api/v1/me/shifts"
 }
 
+Get my shift history page (planned compatibility endpoint)
+
+GET /api/v1/me/shifts/page?limit=20&cursor=<opaque-cursor>
+
+This endpoint uses the same authorization, privacy, item DTO, persisted-data rules, and field semantics as `GET /api/v1/me/shifts`; only its top-level response and pagination parameters differ.
+
+Rules:
+
+- `limit` is optional, defaults to 20, and must be an integer from 1 through 20. Omit `cursor` for the newest page.
+- Results are ordered by joinedAt descending, then attendanceId descending. A continuation returns only rows strictly older than the last `(joinedAt, attendanceId)` key represented by the opaque cursor, preserving deterministic traversal when newer records arrive.
+- A cursor is issued only by this endpoint and must not be parsed, edited, or reused with managed history. A malformed or endpoint-incompatible cursor, or an out-of-range limit, returns 400 Bad Request without falling back to the first page.
+- Dashboard uses `limit=5`. Full personal history uses `limit=20` and follows `nextCursor` through visible `Load more` actions. Search and filters, including date search/filtering, are deferred.
+
+Response DTO: `MyShiftHistoryPageResponse`
+
+Status: 200 OK
+
+{
+  "items": [
+    {
+      "shiftId": 100,
+      "attendanceId": 500,
+      "companyId": 10,
+      "companyName": "Acme Construction",
+      "currencyLabel": "EUR",
+      "title": "Tuesday 10:00 - Acme Construction",
+      "location": "Cologne",
+      "status": "CLOSED",
+      "actualStartTime": "2026-07-01T08:05:00Z",
+      "actualEndTime": "2026-07-01T17:00:00Z",
+      "attendanceStatus": "APPROVED",
+      "paymentStatus": "UNPAID",
+      "workedMinutes": 480,
+      "calculatedSalary": 120.00
+    }
+  ],
+  "nextCursor": "opaque-next-page-token",
+  "hasMore": true
+}
+
+Each `items` element has the complete same shape and conditional fields as the legacy endpoint; the shortened example does not remove `pauseState`, `payCalculation`, or any other documented item property. `hasMore` is true exactly when `nextCursor` is non-null. The oldest page returns `"nextCursor": null` and `"hasMore": false`.
+
 Get my managed shifts
 
 GET /api/v1/me/managed-shifts
@@ -2064,6 +2285,7 @@ Access rules:
 - Missing, invalid, or expired JWT returns 401.
 - The endpoint does not include attendance data and does not recalculate salary.
 - Results are sorted by createdAt descending, then shift id descending.
+- Compatibility contract: this existing endpoint keeps its current top-level JSON array response and does not accept the new pagination contract. This change does not alter or later repurpose its body shape, default contents, ordering, authorization, or field visibility; any future deprecation requires a separate versioned decision. During the backend-first interval it remains available to the installed mobile, while the new dashboard/history uses the separate page endpoint below.
 - The response uses shift DTO fields and does not expose User entities, passwordHash, company entity, createdAt, or updatedAt.
 
 Response for owner FOREMAN:
@@ -2127,6 +2349,44 @@ Status: 403 Forbidden
   "message": "Forbidden",
   "path": "/api/v1/me/managed-shifts"
 }
+
+Get my managed shifts page (planned compatibility endpoint)
+
+GET /api/v1/me/managed-shifts/page?limit=20&cursor=<opaque-cursor>
+
+This endpoint uses the same authorization, privacy, item DTO, persisted-data rules, and owner filtering as `GET /api/v1/me/managed-shifts`; only its top-level response and pagination parameters differ.
+
+Rules:
+
+- `limit` is optional, defaults to 20, and must be an integer from 1 through 20. Omit `cursor` for the newest page.
+- Results are ordered by createdAt descending, then shift id descending. A continuation returns only records strictly older than the cursor's `(createdAt, shiftId)` key. The sort fields need not be exposed in each item.
+- A cursor is issued only by this endpoint and cannot be reused with personal history. Malformed or endpoint-incompatible cursors and out-of-range limits return 400 Bad Request.
+- Dashboard uses `limit=5`. Full FOREMAN Shifts uses `limit=20` and visible `Load more` until `nextCursor` is null. Search and filters, including date search/filtering, are deferred.
+
+Response DTO: `ManagedShiftPageResponse`
+
+Status: 200 OK
+
+{
+  "items": [
+    {
+      "id": 100,
+      "companyId": 10,
+      "companyName": "Acme Construction",
+      "currencyLabel": "EUR",
+      "title": "Tuesday 10:00 - Acme Construction",
+      "location": "Cologne",
+      "status": "OPEN",
+      "joinCode": "ABCD12",
+      "actualStartTime": null,
+      "actualEndTime": null
+    }
+  ],
+  "nextCursor": "opaque-next-page-token",
+  "hasMore": true
+}
+
+Each `items` element has the complete same shape and role-conditioned fields as the legacy endpoint; the shortened example does not remove rates, `pauseState`, or `createdBy`. `hasMore` is true exactly when `nextCursor` is non-null. The oldest page returns `"nextCursor": null` and `"hasMore": false`. ADMIN receives the same empty page envelope when no owned shifts exist; WORKER still receives 403.
 
 8. Pay Policies and Premium Pay
 
@@ -3525,6 +3785,9 @@ All API errors should use this format:
 11. Authorization Rules
 WORKER:
 - can see own profile
+- can update only own first and last name through `PUT /api/v1/users/me`
+- can read, start, confirm, resend, or cancel only their own verified email-change flow through `/api/v1/users/me/email-change` endpoints
+- can change only their own password through `PUT /api/v1/users/me/password`; successful email/password changes revoke all earlier credential-version tokens
 - can join company by company join code
 - cannot read or update Company Settings or company default rates
 - can join OPEN shifts and ACTIVE shifts in their company
@@ -3536,6 +3799,8 @@ WORKER:
 - can list own payout requests
 
 FOREMAN:
+- can update only own first and last name through `PUT /api/v1/users/me`
+- can use the same own email-verification and password-change endpoints and session-revocation rules as WORKER
 - can create own company
 - can get and update Company Settings only for own company through `GET`/`PUT /api/v1/me/company`
 - can manage pay policy for their current company
@@ -3554,6 +3819,8 @@ FOREMAN:
 - can approve only PENDING payout requests for their company and shifts they created
 
 ADMIN:
+- cannot use the mobile-MVP `PUT /api/v1/users/me` name update
+- cannot use the mobile-MVP own email/password update endpoints
 - can read shift detail, list attendance, approve attendance, and see worker-only shift summary through current REST endpoints
 - cannot create, start, close, cancel, or pause shifts through the REST/mobile API
 - can call `GET /api/v1/me/managed-shifts`, normally returning an empty list because ADMIN REST shift creation is disabled

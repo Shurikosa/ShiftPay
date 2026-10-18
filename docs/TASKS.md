@@ -306,13 +306,17 @@ Future hardening:
 
 Decisions:
 
-- Managed foreman-created shifts should use a separate endpoint. `GET /api/v1/me/shifts` remains worker attendance history only.
-- Planned endpoint: `GET /api/v1/me/managed-shifts`.
+- Managed foreman-created shifts use a separate history contract.
+  `GET /api/v1/me/shifts` remains the legacy worker-attendance array only.
+- The implemented legacy managed array is `GET /api/v1/me/managed-shifts`; it
+  now remains unchanged solely for installed-mobile compatibility. New
+  dashboards and Shifts use the additive `/page` endpoints documented below.
 - ADMIN user management is deferred until after the mobile MVP and should be implemented as part of the Vaadin admin dashboard work.
 
 Follow-up backend tasks:
 
-- [x] Implement `GET /api/v1/me/managed-shifts` for the Foreman mobile dashboard
+- [x] Implement the legacy `GET /api/v1/me/managed-shifts` array used by the
+  currently deployed Foreman mobile dashboard
 - [x] Implement company creation
 - [x] Implement company join by code
 - [x] Enforce company membership before worker joins shift
@@ -373,20 +377,35 @@ accepted when it merely applies new colors, fonts, spacing, or radii to the old
 composition and information hierarchy without a documented screen-specific
 reason.
 
+The bitmap remains unchanged. Its style and composition apply, but the newer
+Markdown decision overrides two literal details: the second FOREMAN tile is
+`My shift history`, not `Company Settings`, and timezone appears in Settings,
+not on the dashboard.
+
 The frozen mobile commit `ec75bbd` is not visually approved and must not be
 used as acceptance evidence. Its correct behavior/accessibility work may be
 retained and evolved after the canonical docs gate passes.
 
 Required phase order:
 
-1. Complete this canonical UI documentation update.
+1. Complete this canonical UI documentation update, including the new
+   navigation/dashboard/profile contract.
 2. Complete an independent read-only canonical Docs Review, correct all
    findings, and repeat until the reviewer reports `NO FINDINGS`.
 3. The user commits and pushes the reviewed canonical docs. This is a
    user-owned workflow gate, not an agent checkbox.
-4. Complete the shared visual-foundation correction stage.
-5. Migrate and approve every screen strictly in the listed order.
-6. Complete navigation/header consistency and final regression/smoke review.
+4. Implement and independently review the own-name API, verified email-change
+   flow, password change, credential-version revocation, and additive cursor-
+   paged history APIs. Keep both existing history array endpoints compatible
+   for the installed mobile during this backend-first stage.
+5. Complete the shared visual-foundation correction stage.
+6. Complete Own Settings, FOREMAN Shifts, WORKER Shifts, empty More, and the
+   bottom shell as five separate sequential stages, each with its own code,
+   device, and user acceptance gates. Both Shifts stages must pass before the
+   shell stage; already completed and accepted earlier migrations stay closed.
+7. Migrate and approve each remaining affected screen through its
+   code/device/user gates.
+8. Complete navigation/header consistency and final regression/smoke review.
 
 The user-owned documentation commit/push checkpoint is a workflow gate, not an
 agent task. Mobile implementation must not start before that gate passes.
@@ -396,16 +415,16 @@ Common contract for every mobile task:
 - Sources: canonical `docs/UI_DESIGN_SYSTEM.md`, `docs/MOBILE_UX.md`,
   `docs/SPEC.md`, relevant `docs/API.md` sections, current implementation/tests,
   and `docs/DesignExample.png` for approved visual language and composition.
-- Scope: change only `mobile/` presentation code/assets and focused tests. Do
-  not change backend/API/data contracts, permissions, role flows, calculations,
-  persistence, or canonical docs during implementation. If genuinely required,
-  report `docs change required` or `backend change required` and stop divergent
-  work.
+- Scope: mobile work implements the documented role shell, profile client/UI,
+  and presentation interactions in `mobile/` after the separate backend API
+  gate. It does not independently change backend contracts, permissions, pay
+  calculations, or canonical docs. If another contract change is genuinely
+  required, report `docs change required` or `backend change required`.
 - Boundaries: keep React Navigation native stacks, WORKER/FOREMAN gates,
   existing routes/back/transitions, and Company Settings -> Pay Rules nesting.
-  Do not add bottom tabs, hamburger/settings destinations, Shifts/More/account/
-  legal routes, fabricated data, client pay calculations, substituted currency
-  labels, or missing-as-zero behavior.
+  Add the documented four bottom tabs and both-role visible Settings button;
+  do not infer an independent hamburger, legal route, fabricated data, client
+  pay calculation, substituted currency label, or missing-as-zero behavior.
 - Visual contract: use the light cool canvas, slate type, teal/emerald accents,
   clear title hierarchy, layered cards, semantic chips, compact icon metadata,
   primary/secondary/tertiary actions, section headers, grouped forms/settings,
@@ -445,6 +464,83 @@ Documentation gates:
   FINDINGS` before the user commits and pushes it; confirm `API.md`, `SPEC.md`,
   `ARCHITECTURE.md`, and `DOCS_POLICY.md` remain unchanged
 
+New navigation, dashboard, and own-profile change (current gate):
+
+This is a targeted revision of the earlier redesign. Prior approvals for
+unaffected screens remain valid; the changed dashboard/navigation/profile/card
+surfaces require fresh review. A prior Android visual pass for Join Shift does
+not by itself close the user's outstanding visual acceptance decision.
+
+- [ ] Update the canonical API, product, architecture, mobile UX, visual, and
+  task docs for four role tabs, both-role Settings before/after onboarding,
+  name/email/password updates, latest-five dashboards, cursor-paged histories,
+  expandable shift cards, and visible Full view; preserve all existing
+  role/privacy/pay/status contracts.
+- [ ] Independently review these canonical docs read-only, correct findings,
+  and repeat until `NO FINDINGS`.
+- [ ] User commits and pushes the reviewed canonical docs. Agents do not
+  perform this checkpoint or begin dependent backend/mobile implementation
+  before it.
+- [ ] Backend: implement `PUT /api/v1/users/me` for authenticated WORKER and
+  FOREMAN with complete firstName/lastName validation, rejection of unknown
+  fields, and `UserResponse`; verify only names change, ADMIN is forbidden, and
+  GET/session behavior remains intact. Obtain independent backend review.
+- [ ] Backend: add pending email-change persistence and a provider-neutral
+  delivery boundary; implement read/start/confirm/resend/cancel with current-password
+  verification, normalized uniqueness checks, 30-minute pending and 10-minute
+  code lifetimes, 60-second cooldown, three resends, five confirmation attempts,
+  the documented per-user/per-target throttles, delivery-failure semantics,
+  idempotent cancellation, secret redaction, and security/API tests. Assert
+  that the fifth failed confirmation returns terminal 409
+  `EMAIL_VERIFICATION_ATTEMPTS_EXHAUSTED` with no `Retry-After`, while only
+  temporary 429 throttles include `Retry-After`; exhausted per-pending resends
+  return 409 `EMAIL_VERIFICATION_RESENDS_EXHAUSTED` without it.
+- [ ] Backend: add `User.credentialVersion` initialized to 0, include it in new
+  JWTs, interpret a missing rollout-era claim as 0, and compare it with the
+  persisted user on every protected request. Implement transactional version
+  increments and replacement `LoginResponse` for confirmed email/password
+  change; test that every old token receives `SESSION_REVOKED`, the returned
+  current-phone token works, role checks remain intact, and committed changes
+  recover through login when the response or mobile storage fails. Add a
+  concurrency test that launches two credential mutations with the same old
+  version and proves exactly one commits/receives a usable replacement token;
+  the loser must make no credential/pending-state change and return 409
+  `CREDENTIAL_VERSION_CONFLICT` without `Retry-After`. Keep the concrete DB
+  serialization/locking mechanism an implementation choice.
+- [ ] Backend: implement current-password-confirmed
+  `PUT /api/v1/users/me/password` with the documented validation, shared
+  credential-failure throttle, BCrypt handling, version increment, secret
+  redaction, and no implied password-recovery flow. Obtain independent security
+  and API review for both credential flows.
+- [ ] Backend: add `GET /api/v1/me/shifts/page` and
+  `GET /api/v1/me/managed-shifts/page` with opaque cursor envelopes,
+  deterministic tie-break ordering, `limit` 1..20, endpoint-specific invalid-
+  cursor errors, and the exact legacy item DTOs. Test traversal to the oldest
+  row with concurrent newer inserts and independently review it.
+- [ ] Backend compatibility gate: do not modify the response shape, default
+  contents, ordering, authorization, or field visibility of existing
+  `GET /api/v1/me/shifts` and `GET /api/v1/me/managed-shifts`. Run the current
+  mobile typed-client/integration expectations against the backend-stage API
+  before merge so the installed mobile works until the mobile migration.
+- [ ] Mobile dashboards: three near-square action tiles in a row, latest five
+  backend-ordered shifts from the role `/page` endpoint with `limit=5`, View all
+  to the matching `/page` Shifts flow with `limit=20` and Load more,
+  inline returned-field expansion, visible Full view action, and semantic icon
+  colors. Verify narrow viewport, font scale 1.5, accessibility, role/privacy
+  boundaries, and no local pay math.
+- [ ] Obtain independent mobile code review, Android/Fabric visual review,
+  and explicit user visual acceptance for each affected screen/flow. Record
+  iOS as unavailable until it can be reviewed.
+- [ ] Mobile session-storage security gate: remove token writes/reads through
+  the unprotected AsyncStorage fallback; store login/replacement tokens only in
+  OS-backed protected storage. Delete a legacy fallback-only token and require
+  login instead of using or copying it; delete a duplicate legacy copy when a
+  protected session exists; clear both locations on logout during transition;
+  and test protected-storage unavailable/read/write failures with no fallback
+  or false success. Passwords, verification codes, and their hashes/digests
+  never enter persistence; access tokens remain allowed only in documented
+  auth responses and protected session storage.
+
 Shared visual-foundation correction, before screens:
 
 - [ ] Re-audit `theme.ts`, status/format helpers, and shared components against
@@ -476,22 +572,89 @@ Screen migrations, strictly sequential:
   shell and existing recovery/logout behavior; do not create an ADMIN flow
 - [ ] Join Company (`JoinCompanyScreen.tsx`, WORKER company gate) — use branded
   onboarding, elevated join-code form, explanations, and clear feedback/action;
-  preserve company join validation and role gate
+  preserve company join validation, role gate, and visible Settings open/return
+  with retained join-code input
 - [ ] Create Company (`CreateCompanyScreen.tsx`, FOREMAN company gate) — use
   branded onboarding and grouped company/currency/default-rate surfaces;
-  preserve exact validation, optional defaults, create/refresh behavior, and
-  role gate
+  preserve exact validation, optional defaults, create/refresh behavior, role
+  gate, and visible Settings open/return with retained form state
+
+Separately gated navigation/profile stages, strictly sequential:
+
+- [ ] Stage A — Own Settings for both roles: expose a visible button labelled
+  `Settings` from `JoinCompany`, `CreateCompany`, and the joined role flows;
+  edit only name/email/password, show applicable timezone, return to the exact
+  opener, and expose Company Settings/Pay Rules only to a FOREMAN with a
+  company. Implement pending-state restore plus verified email
+  start/confirm/resend/cancel, password change, replacement-session storage,
+  secret clearing, and revoked/conflicting-session recovery only after the
+  documented backend contracts are available. This stage includes the session-
+  storage security gate above; it must not retain the existing AsyncStorage
+  token fallback.
+  - [ ] Code gate: typed clients/context/token storage as applicable,
+    onboarding-return and authorization tests, pending restore/ambiguous
+    network recovery, terminal fifth-attempt 409 without `Retry-After`, email
+    expiry/resend/delivery/temporary-rate-limit states, protected replacement-
+    storage failure with no fallback, legacy-token deletion/forced login, and
+    `CREDENTIAL_VERSION_CONFLICT`/`SESSION_REVOKED` reconciliation; then
+    typecheck, lint, focused Jest, relevant regressions, `git diff --check`, and
+    independent read-only review.
+  - [ ] Device gate: Android/Fabric review for both roles before/after company,
+    return with retained onboarding input, validation/error/saving states,
+    keyboard, narrow viewport, font scale 1.5, and iOS availability recorded.
+  - [ ] User gate: explicit visual and interaction approval for both role flows.
+- [ ] Stage B — FOREMAN Shifts: use
+  `GET /api/v1/me/managed-shifts/page?limit=20` for the distinct managed-history
+  screen with Load more/retry, returned-field expansion, visible Full view, and
+  no personal-history endpoint, legacy array endpoint, or search/date filter.
+  - [ ] Code gate: pagination/order/duplicate protection, role/privacy and
+    detail-navigation tests, typecheck, lint, focused Jest, regressions,
+    `git diff --check`, and independent read-only review.
+  - [ ] Device gate: Android/Fabric review of first/next/last page, continuation
+    error, empty/refresh/all statuses, expansion/Full view, narrow/font-scale
+    states, and iOS availability recorded.
+  - [ ] User gate: explicit visual and interaction approval.
+- [ ] Stage C — WORKER Shifts (`MyShiftHistoryScreen`): use
+  `GET /api/v1/me/shifts/page?limit=20` for personal attendance, with Load
+  more/retry, returned-field expansion, visible Full view, and no managed-shift
+  endpoint, legacy array endpoint, or search/date filter.
+  - [ ] Code gate: pagination/order/duplicate protection, personal-history
+    privacy and detail-navigation tests, typecheck, lint, focused Jest,
+    regressions, `git diff --check`, and independent read-only review.
+  - [ ] Device gate: Android/Fabric review of first/next/last page, continuation
+    error, empty/refresh/status and nullable-data states, expansion/Full view,
+    narrow/font-scale states, and iOS availability recorded.
+  - [ ] User gate: explicit visual and interaction approval.
+- [ ] Stage D — Empty More: build the selectable destination with intentionally
+  empty content and no explanatory copy, action, or promised feature.
+  - [ ] Code gate: role routing/selected-state/back tests, typecheck, lint,
+    focused Jest, regressions, `git diff --check`, and independent review.
+  - [ ] Device gate: Android/Fabric safe-area, selection/restoration, both
+    roles, narrow/font-scale states, and iOS availability recorded.
+  - [ ] User gate: explicit approval of the intentionally empty presentation.
+- [ ] Stage E — Bottom shell: integrate Dashboard, the separately accepted
+  WORKER Shifts and FOREMAN Shifts, Payroll, and accepted More for
+  WORKER/FOREMAN without weakening onboarding gates, native-stack details,
+  Android back, or the separate Settings button.
+  - [ ] Code gate: typed navigation and both-role route/back/restore tests,
+    typecheck, lint, focused Jest, regressions, `git diff --check`, and
+    independent read-only review.
+  - [ ] Device gate: Android/Fabric both-role tab switching, selected state,
+    nested details/back, safe areas, narrow/font-scale states, and iOS
+    availability recorded.
+  - [ ] User gate: explicit bottom-shell visual and interaction approval.
+
+Stages A through E add acceptance boundaries for new work only; they do not
+reopen or cancel any previously completed and accepted screen migration.
+
 - [ ] Worker Dashboard (`WorkerDashboardScreen.tsx`, route `WorkerDashboard`) —
-  add identity/role and returned-company summary, prominent Join shift,
-  History/Payroll action tiles, section header, and redesigned shift cards;
-  preserve refresh, recent-three behavior, logout, and separate real states
+  add identity/role and returned-company summary, Settings, three near-square
+  Join shift/My shift history/Payroll tiles, latest five backend-ordered cards,
+  View all, and inline card expansion; preserve refresh, logout, detail access,
+  and separate real states
 - [ ] Join Shift (`JoinShiftScreen.tsx`, route `JoinShift`) — add strong header,
   elevated code card, contextual help, feedback surface, and keyboard-safe
   action; preserve all join validation/lifecycle outcomes
-- [ ] Shift History (`MyShiftHistoryScreen.tsx`, route `MyShiftHistory`) — add
-  reference-like hierarchy and redesigned compact shift cards with icon
-  metadata and separate date/duration/amount/status; preserve backend ordering,
-  navigation, null/currency, and breakdown semantics
 - [ ] Worker Payroll (`WorkerPayrollScreen.tsx`, route `WorkerPayroll`) — add
   surfaced selection, compact payable cards, backend-preview metrics, primary
   request action, segmented history, and redesigned request cards; preserve
@@ -503,8 +666,9 @@ Screen migrations, strictly sequential:
   lifecycle, returned calculation states, and no client calculation
 - [ ] Foreman Dashboard (`ForemanDashboardScreen.tsx`, route
   `ForemanDashboard`) — add identity/role and returned-company/join-code
-  summary, prominent Create shift, Settings/Payroll action tiles, section
-  header, and redesigned managed-shift cards; fabricate no counts or money
+  summary, separate visible Settings button, three near-square Create shift/My
+  shift history/Payroll tiles, latest five backend-ordered managed cards, View
+  all, and inline expansion; fabricate no counts or money
 - [ ] Create Shift (`CreateShiftScreen.tsx`, route `CreateShift`) — add strong
   header and grouped shift/rate cards with company/currency context and
   keyboard-safe action; preserve settings sequencing, edit guards, fallback/
@@ -542,9 +706,10 @@ Final integration:
 
 - [ ] Verified navigation/header consistency — inspect `AppNavigator.tsx`,
   `types/navigation.ts`, role tests, and every header/back action; preserve
-  native stacks, gates, destinations, Company Settings -> Pay Rules, Android
-  hardware back, and transitions; add no bottom tabs, hamburger/gear
-  destinations, Shifts, More, account, admin, or legal routes
+  native-stack details, gates, Company Settings -> Pay Rules, Android hardware
+  back, and transitions; verify documented bottom Dashboard/Shifts/Payroll/More
+  for both roles and separate Settings. Add no independent hamburger, admin, or
+  legal destination
 - [ ] Final regression, independent review, and Android smoke review — run full
   typecheck, lint, Jest, and `git diff --check`; audit behavior/privacy/status/
   null/currency/timezone/calculation and visual-system consistency across all
