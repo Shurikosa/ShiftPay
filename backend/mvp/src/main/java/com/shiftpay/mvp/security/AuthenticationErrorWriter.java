@@ -27,7 +27,16 @@ public class AuthenticationErrorWriter {
 	 */
 	public void writeUnauthorized(HttpServletRequest request, HttpServletResponse response, String message)
 			throws IOException {
-		writeError(request, response, HttpStatus.UNAUTHORIZED, message);
+		writeError(request, response, HttpStatus.UNAUTHORIZED, message, null);
+	}
+
+	public void writeUnauthorized(
+			HttpServletRequest request,
+			HttpServletResponse response,
+			String message,
+			String code
+	) throws IOException {
+		writeError(request, response, HttpStatus.UNAUTHORIZED, message, code);
 	}
 
 	/**
@@ -40,7 +49,7 @@ public class AuthenticationErrorWriter {
 	 */
 	public void writeForbidden(HttpServletRequest request, HttpServletResponse response, String message)
 			throws IOException {
-		writeError(request, response, HttpStatus.FORBIDDEN, message);
+		writeError(request, response, HttpStatus.FORBIDDEN, message, null);
 	}
 
 	/**
@@ -52,7 +61,13 @@ public class AuthenticationErrorWriter {
 	 * @param message API error message
 	 * @throws IOException if the servlet response cannot be written
 	 */
-	private void writeError(HttpServletRequest request, HttpServletResponse response, HttpStatus status, String message)
+	private void writeError(
+			HttpServletRequest request,
+			HttpServletResponse response,
+			HttpStatus status,
+			String message,
+			String code
+	)
 			throws IOException {
 		if (response.isCommitted()) {
 			return;
@@ -60,14 +75,16 @@ public class AuthenticationErrorWriter {
 
 		response.setStatus(status.value());
 		response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+		String codeJson = code == null ? "" : ",\"code\":\"" + escapeJson(code) + "\"";
 		response.getWriter().write("""
-				{"timestamp":"%s","status":%d,"error":"%s","message":"%s","path":"%s"}"""
+				{"timestamp":"%s","status":%d,"error":"%s","message":"%s","path":"%s"%s}"""
 				.formatted(
 						Instant.now(),
 						status.value(),
 						status.getReasonPhrase(),
 						escapeJson(message),
-						escapeJson(request.getRequestURI())
+						escapeJson(request.getRequestURI()),
+						codeJson
 				));
 	}
 

@@ -1,5 +1,7 @@
 package com.shiftpay.mvp.security;
 
+import com.shiftpay.mvp.entity.User;
+import com.shiftpay.mvp.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -27,6 +29,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
 	private final JwtService jwtService;
 	private final AuthenticationErrorWriter errorWriter;
+	private final UserRepository userRepository;
 
 	/**
 	 * Creates the filter with token validation and security error writing dependencies.
@@ -34,9 +37,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 	 * @param jwtService service that validates JWT signatures and claims
 	 * @param errorWriter writer used for invalid token responses
 	 */
-	public JwtAuthenticationFilter(JwtService jwtService, AuthenticationErrorWriter errorWriter) {
+	public JwtAuthenticationFilter(
+			JwtService jwtService,
+			AuthenticationErrorWriter errorWriter,
+			UserRepository userRepository
+	) {
 		this.jwtService = jwtService;
 		this.errorWriter = errorWriter;
+		this.userRepository = userRepository;
 	}
 
 	/**
@@ -63,7 +71,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 		try {
 			String token = authorizationHeader.substring(BEARER_PREFIX.length()).trim();
 			JwtClaims claims = jwtService.validateAccessToken(token);
-			AuthenticatedUserPrincipal principal = AuthenticatedUserPrincipal.from(claims);
+			User user = userRepository.findById(claims.userId()).orElse(null);
+			if (user == null || user.getCredentialVersion() != claims.credentialVersion()
+					|| user.getRole() != claims.role()) {
+				errorWriter.writeUnauthorized(request, response, "Session revoked", "SESSION_REVOKED");
+				return;
+			}
+			AuthenticatedUserPrincipal principal = new AuthenticatedUserPrincipal(
+					user.getId(), user.getEmail(), user.getRole(), user.getCredentialVersion());
 			UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
 					principal,
 					null,

@@ -1,6 +1,8 @@
 package com.shiftpay.mvp.controller;
 
 import com.shiftpay.mvp.dto.MyShiftHistoryResponse;
+import com.shiftpay.mvp.dto.MyShiftHistoryPageResponse;
+import com.shiftpay.mvp.dto.ManagedShiftPageResponse;
 import com.shiftpay.mvp.dto.PayoutAttendanceResponse;
 import com.shiftpay.mvp.dto.PayoutRequestPreviewResponse;
 import com.shiftpay.mvp.dto.PayoutRequestResponse;
@@ -9,6 +11,13 @@ import com.shiftpay.mvp.dto.PayPolicyResponse;
 import com.shiftpay.mvp.dto.PayPolicyUpdateRequest;
 import com.shiftpay.mvp.dto.PayPolicyVersionSummaryResponse;
 import com.shiftpay.mvp.dto.ShiftResponse;
+import com.shiftpay.mvp.dto.ApiErrorResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import com.shiftpay.mvp.entity.PayoutRequestStatus;
 import com.shiftpay.mvp.security.AuthenticatedUserPrincipal;
 import com.shiftpay.mvp.service.AttendanceService;
@@ -17,6 +26,7 @@ import com.shiftpay.mvp.service.PayoutRequestService;
 import com.shiftpay.mvp.service.ShiftSessionService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -79,6 +89,26 @@ public class MeController {
 		return attendanceService.getMyShiftHistory(principal);
 	}
 
+	@GetMapping(value = "/shifts/page", produces = MediaType.APPLICATION_JSON_VALUE)
+	@Operation(summary = "Get a cursor page of personal attendance history")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "Personal history page",
+					content = @Content(schema = @Schema(implementation = MyShiftHistoryPageResponse.class))),
+			@ApiResponse(responseCode = "400", description = "Invalid limit or endpoint/user-bound cursor",
+					content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+			@ApiResponse(responseCode = "401", description = "Missing, invalid, expired, or revoked session",
+					content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+	})
+	public MyShiftHistoryPageResponse getMyShiftHistoryPage(
+			@Parameter(description = "Page size", schema = @Schema(defaultValue = "20", minimum = "1", maximum = "20"))
+			@RequestParam(required = false) Integer limit,
+			@Parameter(description = "Opaque continuation cursor issued to this user by this endpoint")
+			@RequestParam(required = false) String cursor,
+			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
+	) {
+		return attendanceService.getMyShiftHistoryPage(limit, cursor, principal);
+	}
+
 	/**
 	 * Handles {@code GET /api/v1/me/managed-shifts}.
 	 *
@@ -94,6 +124,28 @@ public class MeController {
 			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
 	) {
 		return shiftSessionService.getMyManagedShifts(principal);
+	}
+
+	@GetMapping(value = "/managed-shifts/page", produces = MediaType.APPLICATION_JSON_VALUE)
+	@Operation(summary = "Get a cursor page of shifts managed by the authenticated foreman")
+	@ApiResponses({
+			@ApiResponse(responseCode = "200", description = "Managed-shift history page",
+					content = @Content(schema = @Schema(implementation = ManagedShiftPageResponse.class))),
+			@ApiResponse(responseCode = "400", description = "Invalid limit or endpoint/user-bound cursor",
+					content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+			@ApiResponse(responseCode = "401", description = "Missing, invalid, expired, or revoked session",
+					content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+			@ApiResponse(responseCode = "403", description = "Role cannot read managed shifts",
+					content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+	})
+	public ManagedShiftPageResponse getMyManagedShiftsPage(
+			@Parameter(description = "Page size", schema = @Schema(defaultValue = "20", minimum = "1", maximum = "20"))
+			@RequestParam(required = false) Integer limit,
+			@Parameter(description = "Opaque continuation cursor issued to this user by this endpoint")
+			@RequestParam(required = false) String cursor,
+			@AuthenticationPrincipal AuthenticatedUserPrincipal principal
+	) {
+		return shiftSessionService.getMyManagedShiftsPage(limit, cursor, principal);
 	}
 
 	/**

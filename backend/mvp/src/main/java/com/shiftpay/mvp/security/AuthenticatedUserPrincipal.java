@@ -12,8 +12,12 @@ import com.shiftpay.mvp.entity.Role;
 public record AuthenticatedUserPrincipal(
 		Long id,
 		String email,
-		Role role
+		Role role,
+		long credentialVersion
 ) {
+	public AuthenticatedUserPrincipal(Long id, String email, Role role) {
+		this(id, email, role, 0);
+	}
 
 	/**
 	 * Converts validated JWT claims into the principal used by controllers and services.
@@ -22,6 +26,7 @@ public record AuthenticatedUserPrincipal(
 	 * @return principal for the current request
 	 */
 	public static AuthenticatedUserPrincipal from(JwtClaims claims) {
-		return new AuthenticatedUserPrincipal(claims.userId(), claims.email(), claims.role());
+		return new AuthenticatedUserPrincipal(
+				claims.userId(), claims.email(), claims.role(), claims.credentialVersion());
 	}
 }

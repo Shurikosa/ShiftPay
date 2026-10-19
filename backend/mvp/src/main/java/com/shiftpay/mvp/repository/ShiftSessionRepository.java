@@ -6,7 +6,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Pageable;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -57,6 +59,24 @@ public interface ShiftSessionRepository extends JpaRepository<ShiftSession, Long
 			order by shiftSession.createdAt desc, shiftSession.id desc
 			""")
 	List<ShiftSession> findManagedShiftsByCreatedById(@Param("createdById") Long createdById);
+
+	@Query("""
+			select shiftSession
+			from ShiftSession shiftSession
+			join fetch shiftSession.company
+			join fetch shiftSession.createdBy
+			where shiftSession.createdBy.id = :createdById
+			  and (:cursorCreatedAt is null
+			       or shiftSession.createdAt < :cursorCreatedAt
+			       or (shiftSession.createdAt = :cursorCreatedAt and shiftSession.id < :cursorId))
+			order by shiftSession.createdAt desc, shiftSession.id desc
+			""")
+	List<ShiftSession> findManagedShiftsPageByCreatedById(
+			@Param("createdById") Long createdById,
+			@Param("cursorCreatedAt") Instant cursorCreatedAt,
+			@Param("cursorId") Long cursorId,
+			Pageable pageable
+	);
 
 	/**
 	 * Loads a shift by id with a pessimistic write lock for start, close, and approval workflows.

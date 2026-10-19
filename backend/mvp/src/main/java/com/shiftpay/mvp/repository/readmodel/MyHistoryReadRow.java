@@ -31,5 +31,6 @@ public record MyHistoryReadRow(
 	OffsetDateTime payableStartTime,
 	Integer pauseMinutes,
 	Integer workedMinutes,
-	BigDecimal calculatedSalary
+	BigDecimal calculatedSalary,
+	OffsetDateTime joinedAt
 ) { }

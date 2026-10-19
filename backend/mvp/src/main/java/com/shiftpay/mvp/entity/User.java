@@ -42,6 +42,10 @@ public class User {
 	private String passwordHash;
 
 	@Setter
+	@Column(name = "credential_version", nullable = false)
+	private long credentialVersion;
+
+	@Setter
 	@Column(name = "first_name", nullable = false, length = 100)
 	private String firstName;
 

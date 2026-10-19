@@ -15,8 +15,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Locale;
-
 /**
  * Business service for registration and login.
  *
@@ -29,6 +27,7 @@ public class AuthService {
 	private final UserRepository userRepository;
 	private final PasswordEncoder passwordEncoder;
 	private final JwtService jwtService;
+	private final EmailIdentityLockService emailIdentityLockService;
 
 	/**
 	 * Creates the service with persistence, password hashing, and JWT dependencies.
@@ -37,10 +36,16 @@ public class AuthService {
 	 * @param passwordEncoder password hashing and verification component
 	 * @param jwtService JWT token service
 	 */
-	public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService) {
+	public AuthService(
+			UserRepository userRepository,
+			PasswordEncoder passwordEncoder,
+			JwtService jwtService,
+			EmailIdentityLockService emailIdentityLockService
+	) {
 		this.userRepository = userRepository;
 		this.passwordEncoder = passwordEncoder;
 		this.jwtService = jwtService;
+		this.emailIdentityLockService = emailIdentityLockService;
 	}
 
 	/**
@@ -56,7 +61,8 @@ public class AuthService {
 	public UserResponse register(RegisterRequest request) {
 		validatePublicRegistrationRole(request.role());
 
-		String normalizedEmail = normalizeEmail(request.email());
+		String normalizedEmail = EmailNormalizer.normalize(request.email());
+		emailIdentityLockService.acquire(normalizedEmail);
 		if (userRepository.existsByEmail(normalizedEmail)) {
 			throw new DuplicateEmailException(normalizedEmail);
 		}
@@ -79,7 +85,7 @@ public class AuthService {
 	 */
 	@Transactional(readOnly = true)
 	public LoginResponse login(LoginRequest request) {
-		String normalizedEmail = normalizeEmail(request.email());
+		String normalizedEmail = EmailNormalizer.normalize(request.email());
 		User user = userRepository.findWithCompanyByEmail(normalizedEmail)
 				.orElseThrow(InvalidCredentialsException::new);
 
@@ -107,7 +113,4 @@ public class AuthService {
 	 * @param email request email
 	 * @return trimmed lowercase email
 	 */
-	private String normalizeEmail(String email) {
-		return email.trim().toLowerCase(Locale.ROOT);
-	}
 }

@@ -6,6 +6,7 @@ import com.shiftpay.mvp.dto.AttendanceResponse;
 import com.shiftpay.mvp.dto.JoinShiftRequest;
 import com.shiftpay.mvp.dto.JoinShiftResponse;
 import com.shiftpay.mvp.dto.MyShiftHistoryResponse;
+import com.shiftpay.mvp.dto.MyShiftHistoryPageResponse;
 import com.shiftpay.mvp.dto.PauseStateResponse;
 import com.shiftpay.mvp.dto.PayCalculationResponse;
 import com.shiftpay.mvp.entity.AttendanceStatus;
@@ -32,6 +33,7 @@ import com.shiftpay.mvp.security.JwtAuthenticationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -56,6 +58,7 @@ public class AttendanceService {
 	private final PayCalculationRepository payCalculationRepository;
 	private final PauseViewFactory pauseViewFactory;
 	private final UserRepository userRepository;
+	private final HistoryCursorCodec historyCursorCodec;
 
 	/**
 	 * Creates the service with repositories required for attendance workflows.
@@ -73,7 +76,8 @@ public class AttendanceService {
 			ShiftSessionRepository shiftSessionRepository,
 			PayCalculationRepository payCalculationRepository,
 			PauseViewFactory pauseViewFactory,
-			UserRepository userRepository
+			UserRepository userRepository,
+			HistoryCursorCodec historyCursorCodec
 	) {
 		this.shiftAttendanceRepository = shiftAttendanceRepository;
 		this.shiftPauseIntervalRepository = shiftPauseIntervalRepository;
@@ -81,6 +85,7 @@ public class AttendanceService {
 		this.payCalculationRepository = payCalculationRepository;
 		this.pauseViewFactory = pauseViewFactory;
 		this.userRepository = userRepository;
+		this.historyCursorCodec = historyCursorCodec;
 	}
 
 	/**
@@ -142,6 +147,40 @@ public class AttendanceService {
 	@Transactional(readOnly = true)
 	public List<MyShiftHistoryResponse> getMyShiftHistory(AuthenticatedUserPrincipal principal) {
 		List<MyHistoryReadRow> attendanceRows = shiftAttendanceRepository.findMyHistoryReadRowsByWorkerId(principal.id());
+		return mapHistoryRows(attendanceRows, principal);
+	}
+
+	@Transactional(readOnly = true)
+	public MyShiftHistoryPageResponse getMyShiftHistoryPage(
+			Integer requestedLimit,
+			String cursor,
+			AuthenticatedUserPrincipal principal
+	) {
+		int limit = historyCursorCodec.validateLimit(requestedLimit);
+		HistoryCursorCodec.Cursor decoded = cursor == null
+				? null
+				: historyCursorCodec.decode(cursor, HistoryCursorCodec.PERSONAL, principal.id());
+		OffsetDateTime joinedAt = decoded == null ? null : decoded.timestamp().atOffset(ZoneOffset.UTC);
+		Long attendanceId = decoded == null ? null : decoded.id();
+		List<MyHistoryReadRow> rows = shiftAttendanceRepository.findMyHistoryPageByWorkerId(
+				principal.id(), joinedAt, attendanceId, PageRequest.of(0, limit + 1));
+		boolean hasMore = rows.size() > limit;
+		List<MyHistoryReadRow> visibleRows = hasMore ? rows.subList(0, limit) : rows;
+		List<MyShiftHistoryResponse> items = mapHistoryRows(visibleRows, principal);
+		String nextCursor = hasMore
+				? historyCursorCodec.encode(
+						HistoryCursorCodec.PERSONAL,
+						principal.id(),
+						visibleRows.getLast().joinedAt().toInstant(),
+						visibleRows.getLast().attendanceId())
+				: null;
+		return new MyShiftHistoryPageResponse(items, nextCursor, hasMore);
+	}
+
+	private List<MyShiftHistoryResponse> mapHistoryRows(
+			List<MyHistoryReadRow> attendanceRows,
+			AuthenticatedUserPrincipal principal
+	) {
 		List<Long> attendanceIds = attendanceRows.stream()
 				.filter(this::isFinalized)
 				.map(MyHistoryReadRow::attendanceId)

@@ -62,4 +62,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("select user from User user left join fetch user.company where user.id = :id")
 	Optional<User> findByIdWithCompanyForUpdate(@Param("id") Long id);
+
+	/** Loads the authenticated account while serializing credential writes. */
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("select user from User user left join fetch user.company where user.id = :id")
+	Optional<User> findCredentialByIdForUpdate(@Param("id") Long id);
 }
