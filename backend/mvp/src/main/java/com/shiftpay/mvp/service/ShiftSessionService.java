@@ -2,6 +2,7 @@ package com.shiftpay.mvp.service;
 
 import com.shiftpay.mvp.dto.CreateShiftRequest;
 import com.shiftpay.mvp.dto.PayCalculationResponse;
+import com.shiftpay.mvp.dto.ManagedShiftPageResponse;
 import com.shiftpay.mvp.dto.PauseStateResponse;
 import com.shiftpay.mvp.dto.ShiftCloseRequest;
 import com.shiftpay.mvp.dto.ShiftCloseResponse;
@@ -40,6 +41,7 @@ import com.shiftpay.mvp.security.AuthenticatedUserPrincipal;
 import com.shiftpay.mvp.security.JwtAuthenticationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -90,6 +92,7 @@ public class ShiftSessionService {
 	private final PremiumPayCalculationService premiumPayCalculationService;
 	private final SalaryCalculationService salaryCalculationService;
 	private final Clock clock;
+	private final HistoryCursorCodec historyCursorCodec;
 	private final SecureRandom secureRandom;
 
 	/**
@@ -120,7 +123,8 @@ public class ShiftSessionService {
 			PayPolicyService payPolicyService,
 			PremiumPayCalculationService premiumPayCalculationService,
 			SalaryCalculationService salaryCalculationService,
-			Clock clock
+			Clock clock,
+			HistoryCursorCodec historyCursorCodec
 	) {
 		this.shiftAttendanceRepository = shiftAttendanceRepository;
 		this.shiftPauseIntervalRepository = shiftPauseIntervalRepository;
@@ -134,6 +138,7 @@ public class ShiftSessionService {
 		this.premiumPayCalculationService = premiumPayCalculationService;
 		this.salaryCalculationService = salaryCalculationService;
 		this.clock = clock;
+		this.historyCursorCodec = historyCursorCodec;
 		this.secureRandom = new SecureRandom();
 	}
 
@@ -229,6 +234,40 @@ public class ShiftSessionService {
 	@Transactional(readOnly = true)
 	public List<ShiftResponse> getMyManagedShifts(AuthenticatedUserPrincipal principal) {
 		List<ShiftSession> shiftSessions = shiftSessionRepository.findManagedShiftsByCreatedById(principal.id());
+		return mapManagedShifts(shiftSessions, principal);
+	}
+
+	@Transactional(readOnly = true)
+	public ManagedShiftPageResponse getMyManagedShiftsPage(
+			Integer requestedLimit,
+			String cursor,
+			AuthenticatedUserPrincipal principal
+	) {
+		int limit = historyCursorCodec.validateLimit(requestedLimit);
+		HistoryCursorCodec.Cursor decoded = cursor == null
+				? null
+				: historyCursorCodec.decode(cursor, HistoryCursorCodec.MANAGED, principal.id());
+		Instant createdAt = decoded == null ? null : decoded.timestamp();
+		Long shiftId = decoded == null ? null : decoded.id();
+		List<ShiftSession> rows = shiftSessionRepository.findManagedShiftsPageByCreatedById(
+				principal.id(), createdAt, shiftId, PageRequest.of(0, limit + 1));
+		boolean hasMore = rows.size() > limit;
+		List<ShiftSession> visibleRows = hasMore ? rows.subList(0, limit) : rows;
+		List<ShiftResponse> items = mapManagedShifts(visibleRows, principal);
+		String nextCursor = hasMore
+				? historyCursorCodec.encode(
+						HistoryCursorCodec.MANAGED,
+						principal.id(),
+						visibleRows.getLast().getCreatedAt(),
+						visibleRows.getLast().getId())
+				: null;
+		return new ManagedShiftPageResponse(items, nextCursor, hasMore);
+	}
+
+	private List<ShiftResponse> mapManagedShifts(
+			List<ShiftSession> shiftSessions,
+			AuthenticatedUserPrincipal principal
+	) {
 		List<Long> shiftIds = shiftSessions.stream().map(ShiftSession::getId).toList();
 		List<ShiftPauseInterval> pauseIntervals = shiftIds.isEmpty()
 				? List.of()

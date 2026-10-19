@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
+import org.springframework.data.domain.Pageable;
 
 import java.time.OffsetDateTime;
 import java.util.Collection;
@@ -198,7 +199,8 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 				attendance.payableStartTime,
 				attendance.pauseMinutes,
 				attendance.workedMinutes,
-				attendance.calculatedSalary
+				attendance.calculatedSalary,
+				attendance.joinedAt
 			)
 			from ShiftAttendance attendance
 			join attendance.shiftSession shift
@@ -214,6 +216,51 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 			order by attendance.joinedAt desc, attendance.id desc
 			""")
 	List<MyHistoryReadRow> findMyHistoryReadRowsByWorkerId(@Param("workerId") Long workerId);
+
+	@Query("""
+			select new com.shiftpay.mvp.repository.readmodel.MyHistoryReadRow(
+				shift.id,
+				attendance.id,
+				company.id,
+				company.name,
+				shift.currencyLabel,
+				shift.title,
+				shift.location,
+				shift.status,
+				shift.actualStartTime,
+				shift.actualEndTime,
+				attendance.status,
+				attendance.paymentStatus,
+				attendance.hourlyRate,
+				attendance.breakMinutes,
+				attendance.payableStartTime,
+				attendance.pauseMinutes,
+				attendance.workedMinutes,
+				attendance.calculatedSalary,
+				attendance.joinedAt
+			)
+			from ShiftAttendance attendance
+			join attendance.shiftSession shift
+			join shift.company company
+			where attendance.worker.id = :workerId
+			  and shift.status in (
+				com.shiftpay.mvp.entity.ShiftStatus.OPEN,
+				com.shiftpay.mvp.entity.ShiftStatus.ACTIVE,
+				com.shiftpay.mvp.entity.ShiftStatus.CLOSED,
+				com.shiftpay.mvp.entity.ShiftStatus.DISCARDED,
+				com.shiftpay.mvp.entity.ShiftStatus.CANCELLED
+			  )
+			  and (:cursorJoinedAt is null
+			       or attendance.joinedAt < :cursorJoinedAt
+			       or (attendance.joinedAt = :cursorJoinedAt and attendance.id < :cursorId))
+			order by attendance.joinedAt desc, attendance.id desc
+			""")
+	List<MyHistoryReadRow> findMyHistoryPageByWorkerId(
+			@Param("workerId") Long workerId,
+			@Param("cursorJoinedAt") OffsetDateTime cursorJoinedAt,
+			@Param("cursorId") Long cursorId,
+			Pageable pageable
+	);
 
 	/**
 	 * Lists payable closed attendance for the worker payroll screen.

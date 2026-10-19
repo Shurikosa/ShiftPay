@@ -28,6 +28,18 @@ spring:
         jdbc:
           time_zone: UTC
 
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail.smtp.auth: ${SMTP_AUTH:true}
+      mail.smtp.starttls.enable: ${SMTP_STARTTLS:true}
+      mail.smtp.connectiontimeout: ${SMTP_CONNECTION_TIMEOUT_MS:5000}
+      mail.smtp.timeout: ${SMTP_READ_TIMEOUT_MS:5000}
+      mail.smtp.writetimeout: ${SMTP_WRITE_TIMEOUT_MS:5000}
+
 security:
   jwt:
     secret: ${JWT_SECRET:shiftpay-dev-secret-change-me}
@@ -35,3 +47,9 @@ security:
 
 shiftpay:
   default-time-zone: ${SHIFTPAY_DEFAULT_TIME_ZONE:Europe/Berlin}
+  cursor:
+    secret: ${SHIFTPAY_CURSOR_SECRET:shiftpay-dev-cursor-secret-change-me}
+  email:
+    from: ${SHIFTPAY_EMAIL_FROM:no-reply@shiftpay.invalid}
+    smtp:
+      enabled: ${SHIFTPAY_EMAIL_SMTP_ENABLED:false}

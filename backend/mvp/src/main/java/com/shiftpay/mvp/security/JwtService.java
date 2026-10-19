@@ -61,11 +61,12 @@ public class JwtService {
 		Instant expiresAt = now.plusSeconds(expirationSeconds);
 
 		String header = "{\"alg\":\"HS256\",\"typ\":\"JWT\"}";
-		String payload = "{\"sub\":\"%s\",\"email\":\"%s\",\"role\":\"%s\",\"iat\":%d,\"exp\":%d}"
+		String payload = "{\"sub\":\"%s\",\"email\":\"%s\",\"role\":\"%s\",\"credentialVersion\":%d,\"iat\":%d,\"exp\":%d}"
 				.formatted(
 						user.getId(),
 						escapeJson(user.getEmail()),
 						user.getRole().name(),
+						user.getCredentialVersion(),
 						now.getEpochSecond(),
 						expiresAt.getEpochSecond()
 				);
@@ -103,7 +104,13 @@ public class JwtService {
 		Long userId = readLongClaim(payload, "sub");
 		String email = readStringClaim(payload, "email");
 		Role role = readRoleClaim(payload);
-		return new JwtClaims(userId, email, role);
+		long credentialVersion = payload.containsKey("credentialVersion")
+				? readLongClaim(payload, "credentialVersion")
+				: 0;
+		if (credentialVersion < 0) {
+			throw new JwtAuthenticationException("Invalid token claim: credentialVersion");
+		}
+		return new JwtClaims(userId, email, role, credentialVersion);
 	}
 
 	/**

@@ -1,11 +1,13 @@
 package com.shiftpay.mvp.exception;
 
 import com.shiftpay.mvp.dto.CodedErrorResponse;
+import com.shiftpay.mvp.dto.ApiErrorResponse;
 import com.shiftpay.mvp.dto.ErrorResponse;
 import com.shiftpay.mvp.dto.ShortShiftConflictResponse;
 import com.shiftpay.mvp.security.JwtAuthenticationException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -22,6 +24,27 @@ import java.time.Instant;
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+	@ExceptionHandler(ApiErrorException.class)
+	public ResponseEntity<ApiErrorResponse> handleApiErrorException(
+			ApiErrorException exception,
+			HttpServletRequest request
+	) {
+		ApiErrorResponse body = new ApiErrorResponse(
+				Instant.now(),
+				exception.getStatus().value(),
+				exception.getStatus().getReasonPhrase(),
+				exception.getMessage(),
+				request.getRequestURI(),
+				exception.getCode(),
+				exception.getAttemptsRemaining()
+		);
+		ResponseEntity.BodyBuilder response = ResponseEntity.status(exception.getStatus());
+		if (exception.getRetryAfterSeconds() != null) {
+			response.header(HttpHeaders.RETRY_AFTER, exception.getRetryAfterSeconds().toString());
+		}
+		return response.body(body);
+	}
 
 	/**
 	 * Handles Bean Validation failures from request DTOs.

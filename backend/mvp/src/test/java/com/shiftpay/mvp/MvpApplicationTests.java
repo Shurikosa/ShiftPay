@@ -6,6 +6,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mail.javamail.JavaMailSenderImpl;
+import org.springframework.core.env.Environment;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -30,11 +32,31 @@ class MvpApplicationTests {
 	@Autowired
 	private JdbcTemplate jdbcTemplate;
 
+	@Autowired
+	private Environment environment;
+
+	@Autowired
+	private JavaMailSenderImpl mailSender;
+
 	/**
 	 * Starts the full Spring context to catch configuration, bean wiring, and migration startup failures.
 	 */
 	@Test
 	void contextLoads() {
+	}
+
+	@Test
+	void smtpOperationsHaveFiniteTimeouts() {
+		assertThat(environment.getProperty("spring.mail.properties.mail.smtp.connectiontimeout"))
+				.isEqualTo("5000");
+		assertThat(environment.getProperty("spring.mail.properties.mail.smtp.timeout"))
+				.isEqualTo("5000");
+		assertThat(environment.getProperty("spring.mail.properties.mail.smtp.writetimeout"))
+				.isEqualTo("5000");
+		assertThat(mailSender.getJavaMailProperties())
+				.containsEntry("mail.smtp.connectiontimeout", "5000")
+				.containsEntry("mail.smtp.timeout", "5000")
+				.containsEntry("mail.smtp.writetimeout", "5000");
 	}
 
 	/**
@@ -65,12 +87,16 @@ class MvpApplicationTests {
 		assertThat(countRows("pay_policy_rules")).isNotNegative();
 		assertThat(countRows("pay_calculations")).isNotNegative();
 		assertThat(countRows("pay_segments")).isNotNegative();
+		assertThat(countRows("pending_email_changes")).isNotNegative();
+		assertThat(countRows("credential_security_events")).isNotNegative();
+		assertThat(countRows("email_identity_locks")).isNotNegative();
 		assertThat(countColumn("companies", "join_code")).isEqualTo(1);
 		assertThat(countColumn("companies", "time_zone")).isEqualTo(1);
 		assertThat(countColumn("companies", "default_worker_hourly_rate")).isEqualTo(1);
 		assertThat(countColumn("companies", "default_foreman_hourly_rate")).isEqualTo(1);
 		assertThat(countColumn("companies", "currency_label")).isEqualTo(1);
 		assertThat(countColumn("users", "company_id")).isEqualTo(1);
+		assertThat(countColumn("users", "credential_version")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "default_hourly_rate")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "foreman_hourly_rate")).isEqualTo(1);
 		assertThat(countColumn("shift_sessions", "foreman_worked_minutes")).isEqualTo(1);
@@ -92,7 +118,7 @@ class MvpApplicationTests {
 		assertThat(countColumn("payout_request_items", "rounded_item_amount_exact")).isEqualTo(1);
 		assertThat(countColumn("payout_request_items", "total_base_amount")).isEqualTo(1);
 		assertThat(countColumn("payout_request_items", "total_premium_amount")).isEqualTo(1);
-		assertThat(latestFlywayVersion()).isEqualTo("14");
+		assertThat(latestFlywayVersion()).isEqualTo("15");
 	}
 
 	/**
