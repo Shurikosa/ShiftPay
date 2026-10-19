@@ -170,7 +170,7 @@ describe("StatusBadge", () => {
     expect(view.toJSON()).toBeNull();
   });
 
-  it.each(["error", "#ff00ff", "unknown", 42, null, { tone: "danger" }])(
+  it.each(["primary", "error", "#ff00ff", "unknown", 42, null, { tone: "danger" }])(
     "falls back to the canonical neutral palette for invalid runtime tone %p",
     async (tone) => {
       const unsafeProps = {
@@ -191,20 +191,6 @@ describe("StatusBadge", () => {
       });
     }
   );
-
-  it("maps the one production legacy primary input to canonical info presentation", async () => {
-    const view = await renderBadge({
-      label: "Pay breakdown",
-      testID: "legacy-primary",
-      tone: "primary"
-    });
-    const badge = findBadge(view, "legacy-primary");
-
-    expect(StyleSheet.flatten(badge.props.style)).toMatchObject({
-      backgroundColor: theme.colors.info.bg,
-      borderColor: theme.colors.info.fg
-    });
-  });
 
   it("keeps long Ukrainian, English, and currency copy scalable and unclipped", async () => {
     const label =
@@ -265,10 +251,11 @@ describe("StatusBadge", () => {
   it("keeps canonical tone and non-interactive public contracts narrow", () => {
     type Props = ComponentProps<typeof StatusBadge>;
     const canonical: StatusTone = "danger";
-    const primaryCompatibility: Props = { label: "Pay breakdown", tone: "primary" };
 
     // @ts-expect-error `primary` is not a canonical status tone.
     const primaryCanonical: StatusTone = "primary";
+    // @ts-expect-error The completed WorkerShiftCard migration removed the bridge.
+    const primaryProps: Props = { label: "Pay breakdown", tone: "primary" };
     // @ts-expect-error `error` is replaced by canonical `danger`.
     const errorCanonical: StatusTone = "error";
     // @ts-expect-error The unused legacy error input is not part of StatusBadge.
@@ -290,7 +277,7 @@ describe("StatusBadge", () => {
       legacyError,
       onPress,
       primaryCanonical,
-      primaryCompatibility,
+      primaryProps,
       style
     }).toBeTruthy();
   });

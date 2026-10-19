@@ -186,10 +186,12 @@ export function Button({
       aria-hidden={false}
       aria-label={accessibleName}
       disabled={isDisabled}
+      focusable={!isDisabled}
       hitSlop={{ bottom: 0, left: horizontalHitSlop, right: horizontalHitSlop, top: 0 }}
       importantForAccessibility="yes"
       nativeID={nativeID}
       onPress={isDisabled ? undefined : onPress}
+      pointerEvents={isDisabled ? "none" : "auto"}
       role="button"
       style={({ pressed }) => [
         styles.base,

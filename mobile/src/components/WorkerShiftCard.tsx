@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import type { WorkerShiftHistoryItem } from "../types/shifts";
 import {
   formatDateTime,
@@ -6,14 +6,17 @@ import {
   formatMinutes,
   formatOptionalLocation
 } from "../utils/format";
-import { getWorkerPauseBadgeLabel } from "../utils/pauseDisplay";
 import {
-  formatStatusLabel,
-  getAttendanceStatusTone,
-  getPaymentStatusTone,
-  getShiftStatusTone
+  getAttendanceStatusPresentation,
+  getPayCalculationStatusPresentation,
+  getPaymentStatusPresentation,
+  getShiftStatusPresentation,
+  pauseStatusPresentation,
+  type StatusPresentation
 } from "../utils/status";
-import { colors, radii, spacing, typography } from "../utils/theme";
+import { theme } from "../utils/theme";
+import type { AppIconName, AppIconProps } from "./AppIcon";
+import { Card } from "./Card";
 import { StatusBadge } from "./StatusBadge";
 
 type WorkerShiftCardProps = {
@@ -21,153 +24,220 @@ type WorkerShiftCardProps = {
   onPress?: () => void;
 };
 
-export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
-  const isDiscarded = shift.status === "DISCARDED";
-  const startTime = shift.actualStartTime ?? null;
-  const payableStartTime = isDiscarded ? null : shift.payableStartTime ?? null;
-  const approvalLabel =
-    !isDiscarded && shift.attendanceStatus === "JOINED"
-      ? "Waiting for foreman approval"
-      : null;
-  const pauseBadgeLabel = isDiscarded ? null : getWorkerPauseBadgeLabel(shift.pauseState);
-  const hasPayBreakdown =
-    shift.status === "CLOSED" &&
-    shift.attendanceStatus === "APPROVED" &&
-    shift.calculatedSalary !== null &&
-    shift.payCalculation != null;
+type MetadataRowProps = {
+  icon: AppIconName;
+  text: string;
+};
 
+type MetadataRowValue = MetadataRowProps & {
+  key: string;
+};
+
+function SemanticIcon(props: AppIconProps) {
+  // Keep native icon loading on rendered card paths, not module import.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { AppIcon } = require("./AppIcon") as typeof import("./AppIcon");
+  return <AppIcon {...props} />;
+}
+
+function MetadataRow({ icon, text }: MetadataRowProps) {
   return (
-    <Pressable
-      accessibilityRole={onPress ? "button" : undefined}
-      disabled={!onPress}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.card,
-        pressed && Boolean(onPress) && styles.pressed
-      ]}
-    >
-      <View style={styles.header}>
-        <View style={styles.titleBlock}>
-          <Text numberOfLines={2} style={styles.title}>
-            {shift.title}
-          </Text>
-          <Text numberOfLines={1} style={styles.location}>
-            {formatOptionalLocation(shift.location)}
-          </Text>
-          <Text numberOfLines={1} style={styles.company}>
-            {shift.companyName}
-          </Text>
-        </View>
-        <View style={styles.badges}>
-          <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
-          {shift.paymentStatus && !isDiscarded ? (
-            <StatusBadge
-              label={formatStatusLabel(shift.paymentStatus)}
-              tone={getPaymentStatusTone(shift.paymentStatus)}
-            />
-          ) : null}
-          {pauseBadgeLabel ? (
-            <StatusBadge label={pauseBadgeLabel} tone="warning" />
-          ) : null}
-          {hasPayBreakdown ? (
-            <StatusBadge label="Pay breakdown" tone="primary" />
-          ) : null}
-        </View>
-      </View>
-
-      <Text style={styles.time}>
-        {startTime ? formatDateTime(startTime) : "Not started yet"}
+    <View style={styles.metadataRow}>
+      <SemanticIcon name={icon} size="metadata" tone="muted" />
+      <Text allowFontScaling style={styles.metadataText}>
+        {text}
       </Text>
-
-      <View style={styles.metaRow}>
-        <StatusBadge
-          label={shift.attendanceStatus}
-          tone={getAttendanceStatusTone(shift.attendanceStatus)}
-        />
-        <View style={styles.numbers}>
-          {approvalLabel ? <Text style={styles.metaText}>{approvalLabel}</Text> : null}
-          {payableStartTime ? (
-            <Text style={styles.metaText}>
-              Pay starts {formatDateTime(payableStartTime)}
-            </Text>
-          ) : null}
-          {isDiscarded ? (
-            <Text style={styles.metaText}>Discarded short shift. No payroll.</Text>
-          ) : (
-            <>
-              <Text style={styles.metaText}>
-                {shift.workedMinutes === null
-                  ? "Worked time pending"
-                  : `Worked ${formatMinutes(shift.workedMinutes)}`}
-              </Text>
-              <Text style={styles.metaText}>
-                {shift.calculatedSalary === null
-                  ? "Salary pending"
-                  : `Salary ${formatMoneyWithCurrencyLabel(shift.calculatedSalary, shift.currencyLabel)}`}
-              </Text>
-            </>
-          )}
-          {shift.paidAt && !isDiscarded ? (
-            <Text style={styles.metaText}>Paid {formatDateTime(shift.paidAt)}</Text>
-          ) : null}
-        </View>
-      </View>
-    </Pressable>
+    </View>
   );
 }
 
+function Status({ presentation }: { presentation?: StatusPresentation }) {
+  return presentation ? (
+    <StatusBadge label={presentation.label} tone={presentation.tone} />
+  ) : null;
+}
+
+function accessibilityAnnouncement(parts: readonly string[]): string {
+  return parts
+    .map((part) => (/[.!?…]$/u.test(part) ? part : `${part}.`))
+    .join(" ");
+}
+
+export function WorkerShiftCard({ shift, onPress }: WorkerShiftCardProps) {
+  const isDiscarded = shift.status === "DISCARDED";
+  const location = formatOptionalLocation(shift.location);
+  const shiftStatus = getShiftStatusPresentation(shift.status);
+  const attendanceStatus = getAttendanceStatusPresentation(shift.attendanceStatus);
+  const paymentStatus =
+    !isDiscarded && shift.paymentStatus
+      ? getPaymentStatusPresentation(shift.paymentStatus)
+      : undefined;
+  const calculationStatus =
+    !isDiscarded && shift.payCalculation
+      ? getPayCalculationStatusPresentation(shift.payCalculation.snapshotStatus)
+      : undefined;
+  const statusPresentations = [
+    shiftStatus,
+    attendanceStatus,
+    paymentStatus,
+    shift.pauseState?.personallyPaused
+      ? pauseStatusPresentation.personalActive
+      : undefined,
+    shift.pauseState?.allPaused
+      ? pauseStatusPresentation.crewActive
+      : undefined,
+    calculationStatus
+  ].filter((presentation): presentation is StatusPresentation => presentation !== undefined);
+  const startText = shift.actualStartTime
+    ? `Started ${formatDateTime(shift.actualStartTime)}`
+    : "Start time pending";
+  const detailMetadata: MetadataRowValue[] = isDiscarded
+    ? [
+        { icon: "calendar", key: "start", text: startText },
+        {
+          icon: "warning",
+          key: "discarded",
+          text: "Discarded short shift. No payroll."
+        }
+      ]
+    : [
+        { icon: "calendar", key: "start", text: startText },
+        ...(shift.payableStartTime
+          ? [
+              {
+                icon: "time" as const,
+                key: "payable-start",
+                text: `Pay starts ${formatDateTime(shift.payableStartTime)}`
+              }
+            ]
+          : []),
+        {
+          icon: "time",
+          key: "worked",
+          text:
+            shift.workedMinutes === null || shift.workedMinutes === undefined
+              ? "Worked time pending"
+              : `Worked ${formatMinutes(shift.workedMinutes)}`
+        },
+        {
+          icon: "wallet",
+          key: "salary",
+          text:
+            shift.calculatedSalary === null ||
+            shift.calculatedSalary === undefined
+              ? "Salary pending"
+              : `Salary ${formatMoneyWithCurrencyLabel(
+                  shift.calculatedSalary,
+                  shift.currencyLabel
+                )}`
+        },
+        ...(shift.paidAt
+          ? [
+              {
+                icon: "success" as const,
+                key: "paid",
+                text: `Paid ${formatDateTime(shift.paidAt)}`
+              }
+            ]
+          : [])
+      ];
+  const metadata: MetadataRowValue[] = [
+    { icon: "company", key: "company", text: shift.companyName },
+    { icon: "location", key: "location", text: location },
+    ...detailMetadata
+  ];
+  const accessibleName = accessibilityAnnouncement([
+    "View shift details",
+    shift.title,
+    shift.companyName,
+    location,
+    ...statusPresentations.map((presentation) => presentation.label),
+    ...detailMetadata.map((item) => item.text)
+  ]);
+
+  const content = (
+    <View
+      accessibilityElementsHidden={onPress ? true : undefined}
+      accessible={onPress ? false : undefined}
+      aria-hidden={onPress ? true : undefined}
+      importantForAccessibility={onPress ? "no-hide-descendants" : undefined}
+      style={styles.content}
+    >
+      <View style={styles.heading}>
+        <Text allowFontScaling style={styles.title}>
+          {shift.title}
+        </Text>
+        <View style={styles.badges}>
+          {statusPresentations.map((presentation) => (
+            <Status key={presentation.label} presentation={presentation} />
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.metadata}>
+        {metadata.map((item) => (
+          <MetadataRow icon={item.icon} key={item.key} text={item.text} />
+        ))}
+      </View>
+    </View>
+  );
+
+  if (onPress) {
+    return (
+      <Card
+        accessibilityHint="Opens this shift's worker details."
+        accessibilityLabel={accessibleName}
+        onPress={onPress}
+        testID={`worker-shift-card-${shift.attendanceId}`}
+      >
+        {content}
+      </Card>
+    );
+  }
+
+  return <Card testID={`worker-shift-card-${shift.attendanceId}`}>{content}</Card>;
+}
+
 const styles = StyleSheet.create({
-  card: {
-    gap: spacing.md,
-    borderRadius: radii.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.white,
-    padding: spacing.md
+  content: {
+    flexShrink: 1,
+    gap: theme.space[3],
+    maxWidth: "100%"
   },
-  pressed: {
-    opacity: 0.88
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: spacing.md
-  },
-  titleBlock: {
-    flex: 1,
-    gap: spacing.xs
-  },
-  badges: {
-    alignItems: "flex-end",
-    gap: spacing.xs
+  heading: {
+    flexShrink: 1,
+    gap: theme.space[2],
+    maxWidth: "100%"
   },
   title: {
-    ...typography.label,
-    color: colors.text
+    ...theme.typography.cardTitle,
+    color: theme.colors.ink.primary,
+    flexShrink: 1
   },
-  location: {
-    ...typography.caption,
-    color: colors.textSecondary
-  },
-  company: {
-    ...typography.caption,
-    color: colors.textMuted
-  },
-  time: {
-    ...typography.caption,
-    color: colors.textSecondary
-  },
-  metaRow: {
+  badges: {
+    alignItems: "flex-start",
     flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md
+    flexShrink: 1,
+    flexWrap: "wrap",
+    gap: theme.space[2],
+    maxWidth: "100%"
   },
-  numbers: {
+  metadata: {
+    flexShrink: 1,
+    gap: theme.space[2],
+    maxWidth: "100%"
+  },
+  metadataRow: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    flexShrink: 1,
+    gap: theme.space[2],
+    maxWidth: "100%"
+  },
+  metadataText: {
+    ...theme.typography.supporting,
+    color: theme.colors.ink.secondary,
     flex: 1,
-    gap: spacing.xs
-  },
-  metaText: {
-    ...typography.caption,
-    color: colors.textSecondary
+    flexShrink: 1
   }
 });

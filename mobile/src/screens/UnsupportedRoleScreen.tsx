@@ -1,49 +1,106 @@
 import { StyleSheet, Text, View } from "react-native";
 import { Button } from "../components/Button";
+import { Feedback } from "../components/Feedback";
 import { Screen } from "../components/Screen";
-import { StateMessage } from "../components/StateMessage";
 import { useAuth } from "../context/AuthContext";
-import { colors, spacing, typography } from "../utils/theme";
+import { theme } from "../utils/theme";
 
 export function UnsupportedRoleScreen() {
   const { user, signOut } = useAuth();
+  const accountEmail =
+    typeof user?.email === "string" && user.email.trim().length > 0
+      ? user.email
+      : null;
 
   const handleLogout = () => {
     void signOut();
   };
 
   return (
-    <Screen>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Unsupported mobile role</Text>
-          <Text style={styles.subtitle}>{user?.email}</Text>
+    <Screen scroll>
+      <View style={styles.page} testID="unsupported-role-content">
+        <View style={styles.header} testID="unsupported-role-header">
+          <Text allowFontScaling style={styles.brand}>
+            ShiftPay
+          </Text>
+          <Text
+            accessibilityRole="header"
+            allowFontScaling
+            style={styles.title}
+          >
+            Unsupported mobile role
+          </Text>
+          {accountEmail ? (
+            <Text allowFontScaling style={styles.email}>
+              {accountEmail}
+            </Text>
+          ) : null}
         </View>
-        <StateMessage
-          message="Mobile MVP supports worker and foreman accounts. Admin work is handled in the backend Vaadin dashboard."
-          title="Admin role is not available here"
-          tone="error"
-        />
-        <Button label="Log out" onPress={handleLogout} />
+
+        <View style={styles.feedback} testID="unsupported-role-state">
+          <Feedback
+            message="Mobile MVP supports worker and foreman accounts. Admin work is handled in the backend Vaadin dashboard."
+            mode="screen"
+            testID="unsupported-role-feedback"
+            title="Admin role is not available here"
+            tone="warning"
+          />
+        </View>
+
+        <View style={styles.actions} testID="unsupported-role-actions">
+          <Button
+            accessibilityHint="Signs out of this account and returns to the sign-in flow."
+            label="Log out"
+            leadingIcon="logout"
+            onPress={handleLogout}
+            testID="unsupported-role-logout"
+          />
+        </View>
       </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    gap: spacing.xl
+  page: {
+    flexGrow: 1,
+    justifyContent: "center",
+    gap: theme.gap.section,
+    maxWidth: "100%",
+    width: "100%"
   },
   header: {
-    gap: spacing.sm
+    alignItems: "center",
+    flexShrink: 1,
+    gap: theme.space[2],
+    maxWidth: "100%"
+  },
+  brand: {
+    ...theme.typography.screenTitle,
+    color: theme.colors.brand.primary,
+    flexShrink: 1,
+    textAlign: "center"
   },
   title: {
-    ...typography.screenTitle,
-    color: colors.text
+    ...theme.typography.display,
+    color: theme.colors.ink.primary,
+    flexShrink: 1,
+    textAlign: "center"
   },
-  subtitle: {
-    ...typography.body,
-    color: colors.textSecondary
+  email: {
+    ...theme.typography.body,
+    color: theme.colors.ink.secondary,
+    flexShrink: 1,
+    textAlign: "center"
+  },
+  feedback: {
+    alignSelf: "stretch",
+    flexShrink: 1,
+    maxWidth: "100%"
+  },
+  actions: {
+    alignSelf: "stretch",
+    flexShrink: 1,
+    maxWidth: "100%"
   }
 });

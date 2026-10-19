@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { joinCompany } from "../api/companies";
 import { getErrorMessage } from "../api/errors";
 import { Button } from "../components/Button";
+import { Card } from "../components/Card";
+import { Feedback } from "../components/Feedback";
 import { FormField } from "../components/FormField";
 import { Screen } from "../components/Screen";
-import { StateMessage } from "../components/StateMessage";
 import { useAuth } from "../context/AuthContext";
-import { colors, spacing, typography } from "../utils/theme";
+import { theme } from "../utils/theme";
 import { isBlank } from "../utils/validation";
 
 export function JoinCompanyScreen() {
@@ -17,8 +18,16 @@ export function JoinCompanyScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+  const submitInFlight = useRef(false);
 
-  const normalizedJoinCode = joinCode.trim().toUpperCase();
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const handleJoinCodeChange = (value: string) => {
     setJoinCode(value.toUpperCase());
@@ -28,70 +37,146 @@ export function JoinCompanyScreen() {
   };
 
   const handleSubmit = () => {
+    if (submitInFlight.current) {
+      return;
+    }
+
+    const normalizedJoinCode = joinCode.trim().toUpperCase();
+
     if (isBlank(normalizedJoinCode)) {
       setJoinCodeError("Enter a company join code.");
       return;
     }
 
+    submitInFlight.current = true;
     setSubmitting(true);
     setJoinCodeError(undefined);
     setError(null);
     setSuccessMessage(null);
 
-    void authenticatedRequest((token) =>
-      joinCompany(token, {
-        joinCode: normalizedJoinCode
-      })
-    )
-      .then((company) => {
-        setSuccessMessage(`Joined ${company.name}.`);
-        setSubmitting(false);
-        return applyCompany(company).then(() =>
-          refreshCurrentUser().catch((refreshError) => {
-            console.warn("Failed to refresh user after company join.", refreshError);
+    void Promise.resolve()
+      .then(() =>
+        authenticatedRequest((token) =>
+          joinCompany(token, {
+            joinCode: normalizedJoinCode
           })
-        );
+        )
+      )
+      .then(async (company) => {
+        if (!mountedRef.current) {
+          return;
+        }
+
+        setSuccessMessage(`Joined ${company.name}.`);
+        await applyCompany(company);
+
+        try {
+          await refreshCurrentUser();
+        } catch (refreshError) {
+          console.warn("Failed to refresh user after company join.", refreshError);
+        }
       })
       .catch((caughtError) => {
+        if (!mountedRef.current) {
+          return;
+        }
+
+        setSuccessMessage(null);
         setError(getErrorMessage(caughtError));
-        setSubmitting(false);
+      })
+      .finally(() => {
+        submitInFlight.current = false;
+        if (mountedRef.current) {
+          setSubmitting(false);
+        }
       });
   };
 
   const handleLogout = () => {
+    if (submitInFlight.current) {
+      return;
+    }
+
     void signOut();
   };
 
   return (
-    <Screen>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.kicker}>Worker setup</Text>
-          <Text style={styles.title}>Join company</Text>
-          <Text style={styles.subtitle}>
+    <Screen scroll>
+      <View style={styles.page} testID="join-company-content">
+        <View style={styles.header} testID="join-company-header">
+          <Text allowFontScaling style={styles.brand}>
+            ShiftPay
+          </Text>
+          <Text allowFontScaling style={styles.eyebrow}>
+            Worker setup
+          </Text>
+          <Text accessibilityRole="header" allowFontScaling style={styles.title}>
+            Join company
+          </Text>
+          <Text allowFontScaling style={styles.supporting}>
             Enter the company join code shared by your foreman.
           </Text>
         </View>
 
-        {successMessage ? (
-          <StateMessage title="Company joined" message={successMessage} tone="success" />
-        ) : null}
-        {error ? (
-          <StateMessage title="Could not join company" message={error} tone="error" />
-        ) : null}
+        <Card testID="join-company-card">
+          <View style={styles.form} testID="join-company-form">
+            <FormField
+              accessibilityHint="Enter the code shared by your foreman."
+              allowFontScaling
+              autoCapitalize="characters"
+              autoCorrect={false}
+              editable={!submitting}
+              error={joinCodeError}
+              label="Company join code"
+              leadingIcon="company"
+              onChangeText={handleJoinCodeChange}
+              onSubmitEditing={handleSubmit}
+              placeholder="CMP123"
+              returnKeyType="done"
+              submitBehavior="submit"
+              testID="company-join-code-input"
+              value={joinCode}
+            />
 
-        <View style={styles.form}>
-          <FormField
-            autoCapitalize="characters"
-            autoCorrect={false}
-            error={joinCodeError}
-            label="Company join code"
-            onChangeText={handleJoinCodeChange}
-            placeholder="CMP123"
-            value={joinCode}
+            {successMessage ? (
+              <Feedback
+                message={successMessage}
+                testID="join-company-success"
+                title="Company joined"
+                tone="success"
+              />
+            ) : null}
+            {error ? (
+              <Feedback
+                message={error}
+                testID="join-company-error"
+                title="Could not join company"
+                tone="error"
+              />
+            ) : null}
+
+            <Button
+              accessibilityHint="Joins the company using this code."
+              disabled={submitting}
+              label="Join company"
+              leadingIcon="join"
+              loading={submitting}
+              onPress={handleSubmit}
+              testID="join-company-submit"
+            />
+          </View>
+        </Card>
+
+        <View style={styles.recovery} testID="join-company-recovery">
+          <Button
+            accessibilityHint="Signs out of this account and returns to the sign-in flow."
+            disabled={submitting}
+            label="Log out"
+            leadingIcon="logout"
+            onPress={handleLogout}
+            testID="join-company-logout"
+            variant="ghost"
           />
-          <Button label="Join company" loading={submitting} onPress={handleSubmit} />
-          <Button label="Log out" onPress={handleLogout} variant="ghost" />
         </View>
       </View>
     </Screen>
@@ -99,27 +184,46 @@ export function JoinCompanyScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  page: {
+    flexGrow: 1,
     justifyContent: "center",
-    gap: spacing.xl
+    gap: theme.gap.section,
+    maxWidth: "100%",
+    width: "100%"
   },
   header: {
-    gap: spacing.sm
+    flexShrink: 1,
+    gap: theme.space[2],
+    maxWidth: "100%"
   },
-  kicker: {
-    ...typography.label,
-    color: colors.primary
+  brand: {
+    ...theme.typography.screenTitle,
+    color: theme.colors.brand.primary,
+    flexShrink: 1
+  },
+  eyebrow: {
+    ...theme.typography.label,
+    color: theme.colors.brand.primary,
+    flexShrink: 1
   },
   title: {
-    ...typography.screenTitle,
-    color: colors.text
+    ...theme.typography.display,
+    color: theme.colors.ink.primary,
+    flexShrink: 1
   },
-  subtitle: {
-    ...typography.body,
-    color: colors.textSecondary
+  supporting: {
+    ...theme.typography.body,
+    color: theme.colors.ink.secondary,
+    flexShrink: 1
   },
   form: {
-    gap: spacing.md
+    flexShrink: 1,
+    gap: theme.space[4],
+    maxWidth: "100%"
+  },
+  recovery: {
+    alignSelf: "stretch",
+    flexShrink: 1,
+    maxWidth: "100%"
   }
 });

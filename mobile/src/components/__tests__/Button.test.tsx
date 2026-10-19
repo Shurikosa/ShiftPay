@@ -3,6 +3,7 @@ import type { ComponentProps } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import {
   ActivityIndicator,
+  Platform,
   StyleSheet,
   Text,
   View,
@@ -11,6 +12,15 @@ import {
 import { theme } from "../../utils/theme";
 import { AppIcon } from "../AppIcon";
 import { Button } from "../Button";
+
+const initialPlatformOS = Platform.OS;
+
+function setTestPlatform(os: "android" | "ios" | "web"): void {
+  Object.defineProperty(Platform, "OS", {
+    configurable: true,
+    value: os
+  });
+}
 
 jest.mock("@expo/vector-icons/Ionicons", () => {
   const actualReact = jest.requireActual<typeof import("react")>("react");
@@ -43,10 +53,42 @@ async function renderButton(
   return view;
 }
 
+function findNativeAccessibleHost(
+  view: ReactTestRenderer,
+  label: string,
+  testID?: string
+) {
+  return view.root.find(
+    (node) =>
+      typeof node.type === "string" &&
+      node.props.accessible === true &&
+      node.props.accessibilityLabel === label &&
+      (testID === undefined || node.props.testID === testID)
+  );
+}
+
+function findPressableContractHost(
+  view: ReactTestRenderer,
+  label: string,
+  testID?: string
+) {
+  return view.root.find(
+    (node) =>
+      node.props.accessible === true &&
+      node.props.accessibilityLabel === label &&
+      typeof node.props.style === "function" &&
+      (testID === undefined || node.props.testID === testID)
+  );
+}
+
 describe("Button", () => {
   beforeAll(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean })
       .IS_REACT_ACT_ENVIRONMENT = true;
+  });
+
+  afterEach(() => {
+    setTestPlatform(initialPlatformOS as "android" | "ios" | "web");
   });
 
   it.each([
@@ -96,6 +138,7 @@ describe("Button", () => {
         "aria-disabled": false,
         "aria-label": label,
         disabled: false,
+        focusable: true,
         hitSlop: { bottom: 0, left: 2, right: 2, top: 0 },
         importantForAccessibility: "yes",
         role: "button"
@@ -129,20 +172,38 @@ describe("Button", () => {
   );
 
   it("keeps the visible label and spinner identity during loading while blocking press", async () => {
+    setTestPlatform("android");
     const onPress = jest.fn();
     const label = "Зберегти дуже довгу зміну";
     const view = await renderButton({ label, loading: true, onPress });
-    const button = view.root.findByProps({ accessibilityLabel: label });
+    const button = findNativeAccessibleHost(view, label);
+    const pressable = findPressableContractHost(view, label);
 
     expect(button.props).toMatchObject({
+      accessibilityLabel: label,
+      accessibilityRole: "button",
+      accessibilityState: { busy: true, disabled: true },
+      focusable: false,
+      pointerEvents: "none",
+      role: "button"
+    });
+    expect(button.props.accessibilityLiveRegion).toBeUndefined();
+    expect(pressable.props).toMatchObject({
+      accessibilityLabel: label,
+      accessibilityRole: "button",
       accessibilityState: { busy: true, disabled: true },
       "aria-busy": true,
       "aria-disabled": true,
-      disabled: true
+      "aria-label": label,
+      disabled: true,
+      focusable: false,
+      onPress: undefined,
+      role: "button"
     });
+    expect(typeof button.type).toBe("string");
     expect(button.props.onPress).toBeUndefined();
     expect(button.props.onLongPress).toBeUndefined();
-    expect(StyleSheet.flatten(button.props.style({ pressed: false }))).toMatchObject({
+    expect(StyleSheet.flatten(button.props.style)).toMatchObject({
       borderStyle: "dashed",
       borderWidth: 2,
       minHeight: theme.height.control.min,
@@ -159,14 +220,221 @@ describe("Button", () => {
       "aria-hidden": true,
       importantForAccessibility: "no-hide-descendants"
     });
+    expect(
+      view.root.findAll(
+        (node) =>
+          typeof node.type === "string" && node.props.accessible === true
+      )
+    ).toHaveLength(1);
+    expect(
+      view.root.findAll(
+        (node) =>
+          node.props.accessibilityRole === "progressbar" ||
+          String(node.props.accessibilityLabel).includes("In progress")
+      )
+    ).toHaveLength(0);
 
+    expect(
+      StyleSheet.flatten(pressable.props.style({ pressed: true }))
+    ).toMatchObject({ borderStyle: "dashed", borderWidth: 2, opacity: 0.62 });
+    expect(
+      StyleSheet.flatten(pressable.props.style({ pressed: true })).transform
+    ).toBeUndefined();
     await act(async () => {
-      button.props.onPress?.();
+      button.props.onClick({ currentTarget: 1, nativeEvent: {}, target: 1 });
     });
     expect(onPress).not.toHaveBeenCalled();
   });
 
+  it("transitions the native host from actionable to loading and back", async () => {
+    setTestPlatform("android");
+    const onPress = jest.fn();
+    let view!: ReactTestRenderer;
+    await act(async () => {
+      view = create(
+        <Button
+          label="Create account"
+          nativeID="submit-native"
+          onPress={onPress}
+          style={{ marginTop: 4 }}
+          testID="submit"
+        />
+      );
+    });
+
+    let pressable = findPressableContractHost(view, "Create account", "submit");
+    const stableHostType = pressable.type;
+    expect(pressable.props).toMatchObject({
+      accessibilityLabel: "Create account",
+      accessibilityRole: "button",
+      accessibilityState: { busy: false, disabled: false },
+      disabled: false,
+      focusable: true,
+      nativeID: "submit-native",
+      onPress,
+      role: "button"
+    });
+    let nativeHost = findNativeAccessibleHost(
+      view,
+      "Create account",
+      "submit"
+    );
+    const stableNativeHostType = nativeHost.type;
+    expect(nativeHost.props).toMatchObject({
+      accessibilityRole: "button",
+      accessibilityState: { busy: false, disabled: false },
+      focusable: true,
+      nativeID: "submit-native"
+    });
+    expect(StyleSheet.flatten(nativeHost.props.style)).toMatchObject({
+      marginTop: 4
+    });
+    expect(typeof nativeHost.props.onClick).toBe("function");
+    expect(typeof nativeHost.props.onResponderRelease).toBe("function");
+
+    await act(async () => {
+      view.update(
+        <Button
+          label="Create account"
+          loading
+          nativeID="submit-native"
+          onPress={onPress}
+          style={{ marginTop: 4 }}
+          testID="submit"
+        />
+      );
+    });
+    pressable = findPressableContractHost(view, "Create account", "submit");
+    expect(pressable.type).toBe(stableHostType);
+    expect(pressable.props).toMatchObject({
+      accessibilityLabel: "Create account",
+      accessibilityRole: "button",
+      accessibilityState: { busy: true, disabled: true },
+      "aria-busy": true,
+      "aria-disabled": true,
+      "aria-label": "Create account",
+      disabled: true,
+      focusable: false,
+      nativeID: "submit-native",
+      pointerEvents: "none",
+      role: "button"
+    });
+    expect(pressable.props.onPress).toBeUndefined();
+    nativeHost = findNativeAccessibleHost(view, "Create account", "submit");
+    expect(nativeHost.type).toBe(stableNativeHostType);
+    expect(nativeHost.props).toMatchObject({
+      accessibilityRole: "button",
+      accessibilityState: { busy: true, disabled: true },
+      focusable: false,
+      nativeID: "submit-native",
+      role: "button"
+    });
+    expect(StyleSheet.flatten(nativeHost.props.style)).toMatchObject({
+      marginTop: 4
+    });
+    await act(async () => {
+      nativeHost.props.onClick({ currentTarget: 1, nativeEvent: {}, target: 1 });
+    });
+    expect(onPress).not.toHaveBeenCalled();
+
+    await act(async () => {
+      view.update(
+        <Button
+          label="Create account"
+          nativeID="submit-native"
+          onPress={onPress}
+          style={{ marginTop: 4 }}
+          testID="submit"
+        />
+      );
+    });
+    pressable = findPressableContractHost(view, "Create account", "submit");
+    expect(pressable.type).toBe(stableHostType);
+    expect(pressable.props).toMatchObject({
+      accessibilityLabel: "Create account",
+      accessibilityRole: "button",
+      accessibilityState: { busy: false, disabled: false },
+      "aria-busy": false,
+      "aria-disabled": false,
+      "aria-label": "Create account",
+      disabled: false,
+      focusable: true,
+      nativeID: "submit-native",
+      onPress,
+      role: "button"
+    });
+    nativeHost = findNativeAccessibleHost(
+      view,
+      "Create account",
+      "submit"
+    );
+    expect(nativeHost.type).toBe(stableNativeHostType);
+    expect(nativeHost.props).toMatchObject({
+      accessibilityRole: "button",
+      accessibilityState: { busy: false, disabled: false },
+      focusable: true,
+      nativeID: "submit-native"
+    });
+    expect(StyleSheet.flatten(nativeHost.props.style)).toMatchObject({
+      marginTop: 4
+    });
+    expect(typeof nativeHost.props.onClick).toBe("function");
+    expect(typeof nativeHost.props.onResponderRelease).toBe("function");
+    await act(async () => {
+      pressable.props.onPress();
+    });
+    expect(onPress).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let hostile caller props restore loading interaction", async () => {
+    setTestPlatform("android");
+    const onPress = jest.fn();
+    const onLongPress = jest.fn();
+    const onPressIn = jest.fn();
+    const hostileExtras = {
+      accessibilityRole: "link",
+      accessibilityState: { busy: false, disabled: false },
+      focusable: true,
+      onLongPress,
+      onPressIn,
+      pointerEvents: "auto",
+      role: "link"
+    } as unknown as Partial<ComponentProps<typeof Button>>;
+    let view!: ReactTestRenderer;
+    await act(async () => {
+      view = create(
+        <Button
+          {...hostileExtras}
+          label="Submit"
+          loading
+          onPress={onPress}
+          testID="hostile-loading"
+        />
+      );
+    });
+
+    const host = findPressableContractHost(view, "Submit", "hostile-loading");
+    expect(host.props).toMatchObject({
+      accessibilityLabel: "Submit",
+      accessibilityRole: "button",
+      accessibilityState: { busy: true, disabled: true },
+      "aria-busy": true,
+      "aria-disabled": true,
+      disabled: true,
+      focusable: false,
+      pointerEvents: "none",
+      role: "button"
+    });
+    expect(host.props.onLongPress).toBeUndefined();
+    expect(host.props.onPress).toBeUndefined();
+    expect(host.props.onPressIn).toBeUndefined();
+    expect(onPress).not.toHaveBeenCalled();
+    expect(onLongPress).not.toHaveBeenCalled();
+    expect(onPressIn).not.toHaveBeenCalled();
+  });
+
   it("removes executable press handlers when disabled and uses a structural cue", async () => {
+    setTestPlatform("android");
     const onPress = jest.fn();
     const view = await renderButton({
       accessibilityHint: "Unavailable until the form is complete",
@@ -177,29 +445,74 @@ describe("Button", () => {
     });
     const button = view.root.findAll(
       (node) =>
+        typeof node.type === "string" &&
         node.props.testID === "continue" &&
-        node.props.accessibilityRole === "button"
+        node.props.accessible === true
     )[0]!;
 
     expect(button.props).toMatchObject({
       accessibilityHint: "Unavailable until the form is complete",
       accessibilityLabel: "Continue",
+      accessibilityRole: "button",
       accessibilityState: { busy: false, disabled: true },
-      disabled: true
+      focusable: false,
+      pointerEvents: "none",
+      role: "button"
     });
+    expect(button.props.accessibilityLiveRegion).toBeUndefined();
+    expect(typeof button.type).toBe("string");
     expect(button.props.onPress).toBeUndefined();
     expect(button.props.onLongPress).toBeUndefined();
-    expect(StyleSheet.flatten(button.props.style({ pressed: false }))).toMatchObject({
+    expect(StyleSheet.flatten(button.props.style)).toMatchObject({
       borderStyle: "dashed",
       borderWidth: theme.border.default,
       opacity: 0.62
     });
 
+    const pressable = findPressableContractHost(view, "Continue", "continue");
+    expect(pressable.props).toMatchObject({
+      accessibilityRole: "button",
+      accessibilityState: { busy: false, disabled: true },
+      "aria-busy": false,
+      "aria-disabled": true,
+      "aria-label": "Continue",
+      disabled: true,
+      focusable: false,
+      onPress: undefined
+    });
+    expect(
+      StyleSheet.flatten(pressable.props.style({ pressed: true }))
+    ).not.toMatchObject({ transform: [{ translateY: theme.border.default }] });
+    expect(
+      StyleSheet.flatten(pressable.props.style({ pressed: true }))
+        .backgroundColor
+    ).toBe(theme.colors.brand.primary);
     await act(async () => {
-      button.props.onPress?.();
+      button.props.onClick({ currentTarget: 1, nativeEvent: {}, target: 1 });
     });
     expect(onPress).not.toHaveBeenCalled();
   });
+
+  it.each(["ios", "web"] as const)(
+    "retains button role semantics for a disabled %s host",
+    async (platform) => {
+      setTestPlatform(platform);
+      const view = await renderButton({
+        disabled: true,
+        label: "Continue",
+        onPress: jest.fn()
+      });
+      const button = findNativeAccessibleHost(view, "Continue");
+
+      expect(typeof button.type).toBe("string");
+      expect(button.props).toMatchObject({
+        accessibilityRole: "button",
+        accessibilityState: { busy: false, disabled: true },
+        role: "button"
+      });
+      expect(button.props.onPress).toBeUndefined();
+    }
+  );
 
   it("renders semantic leading and trailing icons as decorative button content", async () => {
     const view = await renderButton({
@@ -289,11 +602,10 @@ describe("Button", () => {
       onPress: "run"
     } as unknown as ComponentProps<typeof Button>;
     const view = await renderButton(unsafeProps);
-    const button = view.root.findByProps({ accessibilityLabel: "Continue" });
+    const button = findNativeAccessibleHost(view, "Continue");
 
     expect(button.props).toMatchObject({
-      accessibilityState: { busy: false, disabled: true },
-      disabled: true
+      accessibilityState: { busy: false, disabled: true }
     });
     expect(button.props.onPress).toBeUndefined();
     expect(button.props.onLongPress).toBeUndefined();
@@ -436,7 +748,7 @@ describe("Button", () => {
     expect(button.props.onLongPress).toBeUndefined();
     expect(button.props.onPressIn).toBeUndefined();
     expect(button.props.onTouchStart).toBeUndefined();
-    expect(button.props.pointerEvents).toBeUndefined();
+    expect(button.props.pointerEvents).toBe("auto");
     expect(view.root.findAllByProps({ children: "Injected child" })).toHaveLength(0);
 
     const flattened = StyleSheet.flatten(button.props.style({ pressed: false }));
@@ -503,9 +815,7 @@ describe("Button", () => {
     });
     expect(
       StyleSheet.flatten(
-        disabledView.root
-          .findByProps({ accessibilityLabel: "Disabled" })
-          .props.style({ pressed: false })
+        findNativeAccessibleHost(disabledView, "Disabled").props.style
       )
     ).toMatchObject({ borderStyle: "dashed" });
 
@@ -517,9 +827,7 @@ describe("Button", () => {
     expect(loadingView.root.findByType(ActivityIndicator)).toBeTruthy();
     expect(
       StyleSheet.flatten(
-        loadingView.root
-          .findByProps({ accessibilityLabel: "Loading" })
-          .props.style({ pressed: false })
+        findNativeAccessibleHost(loadingView, "Loading").props.style
       )
     ).toMatchObject({ borderStyle: "dashed", borderWidth: 2 });
   });

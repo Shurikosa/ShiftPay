@@ -2,15 +2,12 @@ import { StyleSheet, Text, View, type ViewProps } from "react-native";
 import type { StatusTone } from "../utils/status";
 import { theme } from "../utils/theme";
 
-/** Temporary compile bridge for WorkerShiftCard until the deferred F5 adoption. */
-type LegacyStatusTone = "primary";
-
 export type StatusBadgeProps = Pick<
   ViewProps,
   "accessibilityHint" | "accessibilityLabel" | "nativeID" | "testID"
 > & {
   label: string;
-  tone?: StatusTone | LegacyStatusTone;
+  tone?: StatusTone;
 };
 
 function normalizeAccessiblePart(value: string): string {
@@ -87,8 +84,6 @@ function resolveTone(value: unknown): StatusTone {
     case "danger":
     case "neutral":
       return value;
-    case "primary":
-      return "info";
     default:
       return "neutral";
   }

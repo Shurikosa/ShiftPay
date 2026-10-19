@@ -53,7 +53,7 @@ const approvedHeroPath = (
   require as typeof require & { resolve: (path: string) => string }
 ).resolve("../../../assets/images/login-hero.png");
 const approvedHeroSha256 =
-  "037d34718d532e1068b4596ed0bdb9e2a43bab5cdc4fdca866b01ce0ad573c6a";
+  "0082ebe6add3c50366ce4677236b874f3686b8e8c0ffc6171b3838b48ac33f9e";
 const nodeCrypto = jest.requireActual("crypto") as {
   createHash: (algorithm: string) => {
     update: (content: unknown) => { digest: (encoding: "hex") => string };
