@@ -15,6 +15,7 @@ import { Feedback } from "../components/Feedback";
 import { FormField } from "../components/FormField";
 import { Screen } from "../components/Screen";
 import { useAuth } from "../context/AuthContext";
+import { useLogoutAction } from "../hooks/useLogoutAction";
 import {
   getCompanySettingsFieldError,
   parseOptionalRate,
@@ -34,8 +35,9 @@ function getKeyboardBottomInset(event: KeyboardEvent): number {
   return getPositiveFiniteNumber(event?.endCoordinates?.height) ?? 0;
 }
 
-export function CreateCompanyScreen() {
-  const { applyCompany, authenticatedRequest, refreshCurrentUser, signOut } = useAuth();
+export function CreateCompanyScreen({ onOpenSettings }: { onOpenSettings?: () => void }) {
+  const { applyCompany, authenticatedRequest, refreshCurrentUser } = useAuth();
+  const { loggingOut, logoutError, requestLogout } = useLogoutAction();
   const [name, setName] = useState("");
   const [currencyLabel, setCurrencyLabel] = useState("");
   const [defaultWorkerHourlyRate, setDefaultWorkerHourlyRate] = useState("");
@@ -221,7 +223,7 @@ export function CreateCompanyScreen() {
       return;
     }
 
-    void signOut();
+    requestLogout();
   };
 
   return (
@@ -348,12 +350,33 @@ export function CreateCompanyScreen() {
           </View>
         </Card>
 
+        {onOpenSettings ? (
+          <Button
+            accessibilityHint="Opens your personal settings and returns to this form when closed."
+            disabled={submitting}
+            label="Settings"
+            leadingIcon="settings"
+            onPress={onOpenSettings}
+            testID="create-company-settings"
+            variant="secondary"
+          />
+        ) : null}
+
         <View style={styles.recovery} testID="create-company-recovery">
+          {logoutError ? (
+            <Feedback
+              message={logoutError}
+              testID="create-company-logout-error"
+              title="Could not log out"
+              tone="error"
+            />
+          ) : null}
           <Button
             accessibilityHint="Signs out of this account and returns to the sign-in flow."
             disabled={submitting}
             label="Log out"
             leadingIcon="logout"
+            loading={loggingOut}
             onPress={handleLogout}
             testID="create-company-logout"
             variant="ghost"

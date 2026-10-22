@@ -16,10 +16,12 @@ export type WorkerStackParamList = {
   WorkerShiftDetails: {
     shift: WorkerShiftHistoryItem;
   };
+  OwnSettings: undefined;
 };
 
 export type ForemanStackParamList = {
   ForemanDashboard: undefined;
+  ForemanShifts: undefined;
   ForemanCompanySettings: {
     notice?: string;
   } | undefined;
@@ -34,4 +36,15 @@ export type ForemanStackParamList = {
     shiftId: number;
     shiftTitle?: string;
   };
+  OwnSettings: undefined;
+};
+
+export type WorkerGateStackParamList = {
+  JoinCompany: undefined;
+  OwnSettings: undefined;
+};
+
+export type ForemanGateStackParamList = {
+  CreateCompany: undefined;
+  OwnSettings: undefined;
 };

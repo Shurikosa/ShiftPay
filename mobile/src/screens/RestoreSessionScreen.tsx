@@ -1,9 +1,13 @@
 import { StyleSheet, Text, View } from "react-native";
 import { Feedback } from "../components/Feedback";
 import { Screen } from "../components/Screen";
+import { useAuth } from "../context/AuthContext";
 import { theme } from "../utils/theme";
 
 export function RestoreSessionScreen() {
+  const { error, retrySessionRecovery, status } = useAuth();
+  const recovering = status === "recovering";
+
   return (
     <Screen scroll={false}>
       <View style={styles.page} testID="restore-session-content">
@@ -15,11 +19,19 @@ export function RestoreSessionScreen() {
 
         <View style={styles.feedback} testID="restore-session-state">
           <Feedback
-            loading
-            message="Checking saved sign-in state."
+            action={recovering ? {
+              label: "Try again",
+              onPress: () => void retrySessionRecovery(),
+              testID: "restore-session-retry"
+            } : undefined}
+            loading={!recovering}
+            message={recovering
+              ? error ?? "The saved session could not be verified."
+              : "Checking saved sign-in state."}
             mode="screen"
             testID="restore-session-feedback"
-            title="Restoring session"
+            title={recovering ? "Session check needs attention" : "Restoring session"}
+            tone={recovering ? "error" : "neutral"}
           />
         </View>
       </View>

@@ -9,6 +9,7 @@ import { Feedback } from "../components/Feedback";
 import { Screen } from "../components/Screen";
 import { WorkerShiftCard } from "../components/WorkerShiftCard";
 import { useAuth } from "../context/AuthContext";
+import { useLogoutAction } from "../hooks/useLogoutAction";
 import { useWorkerShiftHistory } from "../hooks/useWorkerShiftHistory";
 import type { WorkerStackParamList } from "../types/navigation";
 import { theme } from "../utils/theme";
@@ -37,14 +38,11 @@ function getWorkerName(user: ReturnType<typeof useAuth>["user"]): string {
 }
 
 export function WorkerDashboardScreen({ navigation }: WorkerDashboardScreenProps) {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
+  const { loggingOut, logoutError, requestLogout } = useLogoutAction();
   const { shifts, loading, error, refresh } = useWorkerShiftHistory();
   const company = user?.company ?? null;
   const recentShifts = shifts.slice(0, RECENT_SHIFT_LIMIT);
-
-  const handleLogout = () => {
-    void signOut();
-  };
 
   const handleRetry = () => {
     void refresh().catch(() => undefined);
@@ -72,6 +70,14 @@ export function WorkerDashboardScreen({ navigation }: WorkerDashboardScreenProps
           <Text allowFontScaling style={styles.supporting}>
             Join shifts and review your attendance history.
           </Text>
+          <Button
+            accessibilityHint="Opens your personal profile and credential settings."
+            label="Settings"
+            leadingIcon="settings"
+            onPress={() => navigation.navigate("OwnSettings")}
+            testID="worker-settings"
+            variant="secondary"
+          />
         </View>
 
         {company ? (
@@ -204,11 +210,20 @@ export function WorkerDashboardScreen({ navigation }: WorkerDashboardScreenProps
         </View>
 
         <View style={styles.logout}>
+          {logoutError ? (
+            <Feedback
+              message={logoutError}
+              testID="worker-logout-error"
+              title="Could not log out"
+              tone="error"
+            />
+          ) : null}
           <Button
             accessibilityHint="Signs out of this account and returns to the sign-in flow."
             label="Log out"
             leadingIcon="logout"
-            onPress={handleLogout}
+            loading={loggingOut}
+            onPress={requestLogout}
             testID="worker-logout"
             variant="ghost"
           />

@@ -187,7 +187,7 @@ describe("WorkerDashboardScreen", () => {
     expect(output).not.toContain("PRIVATE-CODE");
     expect(output).not.toContain("worker count");
     expect(output).not.toContain("hourly rate");
-    expect(output).not.toContain("Settings");
+    expect(output).toContain("Settings");
     expect(output).not.toContain("fake activity");
   });
 
@@ -223,10 +223,37 @@ describe("WorkerDashboardScreen", () => {
   it("delegates Log out exactly once", async () => {
     const { signOut, view } = await renderDashboard();
 
-    act(() => {
+    await act(async () => {
       buttonByTestID(view, "worker-logout").props.onPress();
+      await Promise.resolve();
     });
     expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a retryable logout error without leaving the worker dashboard", async () => {
+    const { signOut, view } = await renderDashboard();
+    signOut
+      .mockRejectedValueOnce(new Error("marker write failed"))
+      .mockResolvedValueOnce(undefined);
+
+    await act(async () => {
+      buttonByTestID(view, "worker-logout").props.onPress();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(view.root.findByProps({ testID: "worker-logout-error" })).toBeDefined();
+    expect(JSON.stringify(view.toJSON())).toContain("Your session is still active");
+    expect(buttonByTestID(view, "worker-logout").props.accessibilityState).toEqual({
+      busy: false,
+      disabled: false
+    });
+
+    await act(async () => {
+      buttonByTestID(view, "worker-logout").props.onPress();
+      await Promise.resolve();
+    });
+    expect(signOut).toHaveBeenCalledTimes(2);
   });
 
   it("shows intentional busy loading feedback with one spinner", async () => {

@@ -229,6 +229,28 @@ describe("UnsupportedRoleScreen", () => {
 
   });
 
+  it("shows logout failure and retries without leaving the role gate", async () => {
+    const signOut = jest.fn()
+      .mockRejectedValueOnce(new Error("marker write failed"))
+      .mockResolvedValueOnce(undefined);
+    const rendered = await renderUnsupportedRole(signOut);
+
+    await act(async () => {
+      rendered.root.findByType(Button).props.onPress();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(rendered.root.findByProps({ testID: "unsupported-role-logout-error" })).toBeDefined();
+    expect(JSON.stringify(rendered.toJSON())).toContain("Your session is still active");
+    expect(rendered.root.findByType(Button).props.loading).toBe(false);
+
+    await act(async () => {
+      rendered.root.findByType(Button).props.onPress();
+      await Promise.resolve();
+    });
+    expect(signOut).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ["blank", { ...adminUser, email: "   " }],
     [

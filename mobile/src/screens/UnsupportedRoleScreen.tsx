@@ -3,18 +3,16 @@ import { Button } from "../components/Button";
 import { Feedback } from "../components/Feedback";
 import { Screen } from "../components/Screen";
 import { useAuth } from "../context/AuthContext";
+import { useLogoutAction } from "../hooks/useLogoutAction";
 import { theme } from "../utils/theme";
 
 export function UnsupportedRoleScreen() {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
+  const { loggingOut, logoutError, requestLogout } = useLogoutAction();
   const accountEmail =
     typeof user?.email === "string" && user.email.trim().length > 0
       ? user.email
       : null;
-
-  const handleLogout = () => {
-    void signOut();
-  };
 
   return (
     <Screen scroll>
@@ -48,11 +46,20 @@ export function UnsupportedRoleScreen() {
         </View>
 
         <View style={styles.actions} testID="unsupported-role-actions">
+          {logoutError ? (
+            <Feedback
+              message={logoutError}
+              testID="unsupported-role-logout-error"
+              title="Could not log out"
+              tone="error"
+            />
+          ) : null}
           <Button
             accessibilityHint="Signs out of this account and returns to the sign-in flow."
             label="Log out"
             leadingIcon="logout"
-            onPress={handleLogout}
+            loading={loggingOut}
+            onPress={requestLogout}
             testID="unsupported-role-logout"
           />
         </View>

@@ -24,6 +24,16 @@ function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
   return typeof candidate.status === "number" && typeof candidate.message === "string";
 }
 
+function getRetryAfterSeconds(response: Response): number | undefined {
+  const value = response.headers.get("Retry-After");
+  if (!value || !/^\d+$/.test(value)) {
+    return undefined;
+  }
+
+  const seconds = Number(value);
+  return Number.isSafeInteger(seconds) ? seconds : undefined;
+}
+
 export async function apiRequest<TResponse>(
   path: string,
   options: RequestOptions = {}
@@ -62,11 +72,17 @@ export async function apiRequest<TResponse>(
   }
 
   if (!response.ok) {
+    const retryAfterSeconds = getRetryAfterSeconds(response);
     if (isApiErrorResponse(data)) {
-      throw new ApiError(data.message, response.status, data);
+      throw new ApiError(data.message, response.status, data, retryAfterSeconds);
     }
 
-    throw new ApiError(`Request failed with status ${response.status}`, response.status);
+    throw new ApiError(
+      `Request failed with status ${response.status}`,
+      response.status,
+      undefined,
+      retryAfterSeconds
+    );
   }
 
   return data as TResponse;

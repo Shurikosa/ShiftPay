@@ -1,12 +1,13 @@
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { StyleSheet, Text, View } from "react-native";
+import { RefreshControl, StyleSheet, Text, View } from "react-native";
 import { Button } from "../components/Button";
 import { Screen } from "../components/Screen";
 import { StateMessage } from "../components/StateMessage";
-import { WorkerShiftCard } from "../components/WorkerShiftCard";
-import { useWorkerShiftHistory } from "../hooks/useWorkerShiftHistory";
+import { WorkerShiftHistoryCard } from "../components/WorkerShiftHistoryCard";
+import { useAuth } from "../context/AuthContext";
+import { useWorkerShiftHistoryPages } from "../hooks/useWorkerShiftHistoryPages";
 import type { WorkerStackParamList } from "../types/navigation";
-import { colors, spacing, typography } from "../utils/theme";
+import { theme } from "../utils/theme";
 
 type MyShiftHistoryScreenProps = NativeStackScreenProps<
   WorkerStackParamList,
@@ -14,33 +15,78 @@ type MyShiftHistoryScreenProps = NativeStackScreenProps<
 >;
 
 export function MyShiftHistoryScreen({ navigation }: MyShiftHistoryScreenProps) {
-  const { shifts, loading, error, refresh } = useWorkerShiftHistory();
+  const { user } = useAuth();
+  const canAccess = user?.role === "WORKER" && user.company !== null;
+  const {
+    shifts,
+    hasMore,
+    initialLoading,
+    refreshing,
+    continuationLoading,
+    initialError,
+    refreshError,
+    continuationError,
+    refresh,
+    loadMore,
+    retryContinuation
+  } = useWorkerShiftHistoryPages(canAccess);
 
-  const handleRetry = () => {
+  const requestRefresh = () => {
     void refresh().catch(() => undefined);
   };
 
+  const requestNextPage = () => {
+    void loadMore().catch(() => undefined);
+  };
+
+  const retryNextPage = () => {
+    void retryContinuation().catch(() => undefined);
+  };
+
   return (
-    <Screen>
+    <Screen
+      scrollProps={{
+        refreshControl: canAccess ? (
+          <RefreshControl onRefresh={requestRefresh} refreshing={refreshing} />
+        ) : undefined,
+        testID: "worker-shifts-scroll"
+      }}
+    >
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.kicker}>Worker</Text>
           <Text style={styles.title}>My shift history</Text>
-          <Text style={styles.subtitle}>Your joined shifts, attendance status, and stored salary results.</Text>
+          <Text style={styles.subtitle}>
+            Your joined shifts and returned attendance results, in backend order.
+          </Text>
         </View>
 
-        {loading ? (
-          <StateMessage loading title="Loading history" message="Fetching your joined shifts." />
-        ) : error ? (
+        {!canAccess ? (
+          <StateMessage
+            message="Personal shift history is available only to a worker with a company."
+            title="Worker company required"
+            tone="error"
+          />
+        ) : initialLoading ? (
+          <StateMessage
+            loading
+            message="Fetching your joined shifts."
+            title="Loading history"
+          />
+        ) : initialError ? (
           <View style={styles.stateBlock}>
-            <StateMessage title="Could not load history" message={error} tone="error" />
-            <Button label="Retry" onPress={handleRetry} variant="secondary" />
+            <StateMessage
+              message={initialError}
+              title="Could not load history"
+              tone="error"
+            />
+            <Button label="Retry" onPress={requestRefresh} variant="secondary" />
           </View>
         ) : shifts.length === 0 ? (
           <View style={styles.stateBlock}>
             <StateMessage
-              title="No shifts joined"
               message="Join your first shift with the code from your foreman."
+              title="No shifts joined"
             />
             <Button
               label="Join shift"
@@ -49,19 +95,68 @@ export function MyShiftHistoryScreen({ navigation }: MyShiftHistoryScreenProps) 
               }}
               variant="secondary"
             />
+            <Button label="Refresh" onPress={requestRefresh} variant="ghost" />
           </View>
         ) : (
-          <View style={styles.list}>
-            {shifts.map((shift) => (
-              <WorkerShiftCard
-                key={shift.attendanceId}
-                shift={shift}
-                onPress={() => {
-                  navigation.navigate("WorkerShiftDetails", { shift });
-                }}
+          <>
+            <View style={styles.list}>
+              {refreshError ? (
+                <View style={styles.stateBlock}>
+                  <StateMessage
+                    message={refreshError}
+                    title="Could not refresh history"
+                    tone="error"
+                  />
+                  <Button
+                    label="Retry refresh"
+                    onPress={requestRefresh}
+                    variant="secondary"
+                  />
+                </View>
+              ) : null}
+
+              <Button
+                label="Refresh"
+                loading={refreshing}
+                onPress={requestRefresh}
+                variant="ghost"
               />
-            ))}
-          </View>
+
+              {shifts.map((shift) => (
+                <WorkerShiftHistoryCard
+                  key={shift.attendanceId}
+                  onFullView={() => {
+                    navigation.navigate("WorkerShiftDetails", { shift });
+                  }}
+                  shift={shift}
+                />
+              ))}
+            </View>
+
+            {continuationError ? (
+              <View style={styles.stateBlock}>
+                <StateMessage
+                  message={continuationError}
+                  title="Could not load more shifts"
+                  tone="error"
+                />
+                <Button
+                  disabled={refreshing}
+                  label="Retry load more"
+                  onPress={retryNextPage}
+                  variant="secondary"
+                />
+              </View>
+            ) : hasMore ? (
+              <Button
+                disabled={refreshing}
+                label="Load more"
+                loading={continuationLoading}
+                onPress={requestNextPage}
+                variant="secondary"
+              />
+            ) : null}
+          </>
         )}
 
         <Button
@@ -79,27 +174,27 @@ export function MyShiftHistoryScreen({ navigation }: MyShiftHistoryScreenProps) 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    gap: spacing.xl
+    gap: theme.gap.section
   },
   header: {
-    gap: spacing.sm
+    gap: theme.space[2]
   },
   kicker: {
-    ...typography.label,
-    color: colors.primary
+    ...theme.typography.label,
+    color: theme.colors.brand.primary
   },
   title: {
-    ...typography.screenTitle,
-    color: colors.text
+    ...theme.typography.screenTitle,
+    color: theme.colors.ink.primary
   },
   subtitle: {
-    ...typography.body,
-    color: colors.textSecondary
+    ...theme.typography.body,
+    color: theme.colors.ink.secondary
   },
   stateBlock: {
-    gap: spacing.md
+    gap: theme.space[3]
   },
   list: {
-    gap: spacing.md
+    gap: theme.space[3]
   }
 });

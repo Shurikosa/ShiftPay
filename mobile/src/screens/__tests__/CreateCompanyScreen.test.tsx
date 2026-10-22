@@ -290,7 +290,7 @@ function findField(label: string): ReactTestInstance {
   return result;
 }
 
-function findButton(label: "Create company" | "Log out"): ReactTestInstance {
+function findButton(label: "Create company" | "Log out" | "Settings"): ReactTestInstance {
   const result = rendered!.root
     .findAllByType(Button)
     .find((node) => node.props.label === label);
@@ -301,7 +301,7 @@ function findButton(label: "Create company" | "Log out"): ReactTestInstance {
 }
 
 function findNativeButton(
-  label: "Create company" | "Log out"
+  label: "Create company" | "Log out" | "Settings"
 ): ReactTestInstance {
   const result = rendered!.root.findAll(
     (node) =>
@@ -360,7 +360,7 @@ async function submitCreate(): Promise<void> {
   });
 }
 
-async function renderCreateCompany(): Promise<ReactTestRenderer> {
+async function renderCreateCompany(onOpenSettings?: () => void): Promise<ReactTestRenderer> {
   mockedUseAuth.mockReturnValue({
     applyCompany,
     authenticatedRequest,
@@ -371,7 +371,7 @@ async function renderCreateCompany(): Promise<ReactTestRenderer> {
   } as unknown as ReturnType<typeof useAuth>);
 
   await act(async () => {
-    rendered = create(<CreateCompanyScreen />);
+    rendered = create(<CreateCompanyScreen onOpenSettings={onOpenSettings} />);
   });
   return rendered!;
 }
@@ -393,6 +393,20 @@ describe("CreateCompanyScreen", () => {
     refreshCurrentUser.mockResolvedValue(foremanAfterCreate);
     signOut.mockResolvedValue(undefined);
     mockedCreateCompany.mockResolvedValue(createdCompany);
+  });
+
+  it("opens Settings without clearing in-progress company onboarding values", async () => {
+    const onOpenSettings = jest.fn();
+    await renderCreateCompany(onOpenSettings);
+    fillRequired("Keep Construction", "грн");
+    changeField("Default worker hourly rate", "22.50");
+
+    act(() => void findButton("Settings").props.onPress());
+
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+    expect(findField("Company name").props.value).toBe("Keep Construction");
+    expect(findField("Currency label").props.value).toBe("грн");
+    expect(findField("Default worker hourly rate").props.value).toBe("22.50");
   });
 
   afterEach(() => {
@@ -1276,6 +1290,28 @@ describe("CreateCompanyScreen", () => {
     expect(useNavigation).not.toHaveBeenCalled();
     expect(loginUser).not.toHaveBeenCalled();
     expect(registerUser).not.toHaveBeenCalled();
+  });
+
+  it("shows safe logout failure and keeps Log out available for retry", async () => {
+    signOut
+      .mockRejectedValueOnce(new Error("marker write failed"))
+      .mockResolvedValueOnce(undefined);
+    await renderCreateCompany();
+
+    await act(async () => {
+      findButton("Log out").props.onPress();
+      await flushPromises();
+    });
+    expect(findFeedback("Could not log out").props.message).toContain(
+      "Your session is still active"
+    );
+    expect(findButton("Log out").props.loading).toBe(false);
+
+    await act(async () => {
+      findButton("Log out").props.onPress();
+      await flushPromises();
+    });
+    expect(signOut).toHaveBeenCalledTimes(2);
   });
 
   it("unlocks after an async rejection and retries exactly once", async () => {

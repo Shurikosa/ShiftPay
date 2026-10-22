@@ -10,10 +10,12 @@ import { ForemanCompanySettingsScreen } from "../screens/ForemanCompanySettingsS
 import { ForemanPayRulesScreen } from "../screens/ForemanPayRulesScreen";
 import { ForemanPayrollRequestsScreen } from "../screens/ForemanPayrollRequestsScreen";
 import { ForemanShiftDetailsScreen } from "../screens/ForemanShiftDetailsScreen";
+import { ForemanShiftsScreen } from "../screens/ForemanShiftsScreen";
 import { JoinCompanyScreen } from "../screens/JoinCompanyScreen";
 import { JoinShiftScreen } from "../screens/JoinShiftScreen";
 import { LoginScreen } from "../screens/LoginScreen";
 import { MyShiftHistoryScreen } from "../screens/MyShiftHistoryScreen";
+import { OwnSettingsScreen } from "../screens/OwnSettingsScreen";
 import { RegisterScreen } from "../screens/RegisterScreen";
 import { RestoreSessionScreen } from "../screens/RestoreSessionScreen";
 import { ShiftSummaryScreen } from "../screens/ShiftSummaryScreen";
@@ -23,13 +25,18 @@ import { WorkerPayrollScreen } from "../screens/WorkerPayrollScreen";
 import { WorkerShiftDetailsScreen } from "../screens/WorkerShiftDetailsScreen";
 import type {
   AuthStackParamList,
+  ForemanGateStackParamList,
   ForemanStackParamList,
+  WorkerGateStackParamList,
   WorkerStackParamList
 } from "../types/navigation";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 
 const AuthStack = createNativeStackNavigator<AuthStackParamList>();
 const WorkerStack = createNativeStackNavigator<WorkerStackParamList>();
 const ForemanStack = createNativeStackNavigator<ForemanStackParamList>();
+const WorkerGateStack = createNativeStackNavigator<WorkerGateStackParamList>();
+const ForemanGateStack = createNativeStackNavigator<ForemanGateStackParamList>();
 
 function AuthNavigator() {
   return (
@@ -49,6 +56,7 @@ function WorkerNavigator() {
         <WorkerStack.Screen component={MyShiftHistoryScreen} name="MyShiftHistory" />
         <WorkerStack.Screen component={WorkerPayrollScreen} name="WorkerPayroll" />
         <WorkerStack.Screen component={WorkerShiftDetailsScreen} name="WorkerShiftDetails" />
+        <WorkerStack.Screen component={OwnSettingsScreen} name="OwnSettings" />
       </WorkerStack.Navigator>
     </WorkerShiftHistoryProvider>
   );
@@ -59,6 +67,7 @@ function ForemanNavigator() {
     <ForemanManagedShiftsProvider>
       <ForemanStack.Navigator screenOptions={{ headerShown: false }}>
         <ForemanStack.Screen component={ForemanDashboardScreen} name="ForemanDashboard" />
+        <ForemanStack.Screen component={ForemanShiftsScreen} name="ForemanShifts" />
         <ForemanStack.Screen
           component={ForemanCompanySettingsScreen}
           name="ForemanCompanySettings"
@@ -74,8 +83,43 @@ function ForemanNavigator() {
           name="ForemanShiftDetails"
         />
         <ForemanStack.Screen component={ShiftSummaryScreen} name="ShiftSummary" />
+        <ForemanStack.Screen component={OwnSettingsScreen} name="OwnSettings" />
       </ForemanStack.Navigator>
     </ForemanManagedShiftsProvider>
+  );
+}
+
+function JoinCompanyGateScreen({ navigation }: NativeStackScreenProps<WorkerGateStackParamList, "JoinCompany">) {
+  return (
+    <JoinCompanyScreen
+      onOpenSettings={() => navigation.navigate("OwnSettings")}
+    />
+  );
+}
+
+function WorkerGateNavigator() {
+  return (
+    <WorkerGateStack.Navigator screenOptions={{ headerShown: false }}>
+      <WorkerGateStack.Screen component={JoinCompanyGateScreen} name="JoinCompany" />
+      <WorkerGateStack.Screen component={OwnSettingsScreen} name="OwnSettings" />
+    </WorkerGateStack.Navigator>
+  );
+}
+
+function CreateCompanyGateScreen({ navigation }: NativeStackScreenProps<ForemanGateStackParamList, "CreateCompany">) {
+  return (
+    <CreateCompanyScreen
+      onOpenSettings={() => navigation.navigate("OwnSettings")}
+    />
+  );
+}
+
+function ForemanGateNavigator() {
+  return (
+    <ForemanGateStack.Navigator screenOptions={{ headerShown: false }}>
+      <ForemanGateStack.Screen component={CreateCompanyGateScreen} name="CreateCompany" />
+      <ForemanGateStack.Screen component={OwnSettingsScreen} name="OwnSettings" />
+    </ForemanGateStack.Navigator>
   );
 }
 
@@ -84,7 +128,7 @@ function RoleNavigator() {
 
   if (user?.role === "WORKER") {
     if (!user.company) {
-      return <JoinCompanyScreen />;
+      return <WorkerGateNavigator />;
     }
 
     return <WorkerNavigator />;
@@ -92,7 +136,7 @@ function RoleNavigator() {
 
   if (user?.role === "FOREMAN") {
     if (!user.company) {
-      return <CreateCompanyScreen />;
+      return <ForemanGateNavigator />;
     }
 
     return <ForemanNavigator />;
@@ -106,7 +150,7 @@ export function AppNavigator() {
 
   return (
     <NavigationContainer>
-      {status === "restoring" ? (
+      {status === "restoring" || status === "recovering" ? (
         <RestoreSessionScreen />
       ) : status === "authenticated" ? (
         <RoleNavigator />

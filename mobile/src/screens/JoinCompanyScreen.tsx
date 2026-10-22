@@ -8,11 +8,13 @@ import { Feedback } from "../components/Feedback";
 import { FormField } from "../components/FormField";
 import { Screen } from "../components/Screen";
 import { useAuth } from "../context/AuthContext";
+import { useLogoutAction } from "../hooks/useLogoutAction";
 import { theme } from "../utils/theme";
 import { isBlank } from "../utils/validation";
 
-export function JoinCompanyScreen() {
-  const { applyCompany, authenticatedRequest, refreshCurrentUser, signOut } = useAuth();
+export function JoinCompanyScreen({ onOpenSettings }: { onOpenSettings?: () => void }) {
+  const { applyCompany, authenticatedRequest, refreshCurrentUser } = useAuth();
+  const { loggingOut, logoutError, requestLogout } = useLogoutAction();
   const [joinCode, setJoinCode] = useState("");
   const [joinCodeError, setJoinCodeError] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
@@ -97,7 +99,7 @@ export function JoinCompanyScreen() {
       return;
     }
 
-    void signOut();
+    requestLogout();
   };
 
   return (
@@ -167,12 +169,33 @@ export function JoinCompanyScreen() {
           </View>
         </Card>
 
+        {onOpenSettings ? (
+          <Button
+            accessibilityHint="Opens your personal settings and returns to this form when closed."
+            disabled={submitting}
+            label="Settings"
+            leadingIcon="settings"
+            onPress={onOpenSettings}
+            testID="join-company-settings"
+            variant="secondary"
+          />
+        ) : null}
+
         <View style={styles.recovery} testID="join-company-recovery">
+          {logoutError ? (
+            <Feedback
+              message={logoutError}
+              testID="join-company-logout-error"
+              title="Could not log out"
+              tone="error"
+            />
+          ) : null}
           <Button
             accessibilityHint="Signs out of this account and returns to the sign-in flow."
             disabled={submitting}
             label="Log out"
             leadingIcon="logout"
+            loading={loggingOut}
             onPress={handleLogout}
             testID="join-company-logout"
             variant="ghost"

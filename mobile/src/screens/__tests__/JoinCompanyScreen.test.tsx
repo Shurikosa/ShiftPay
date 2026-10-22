@@ -141,7 +141,7 @@ function findField(): ReactTestInstance {
   return rendered!.root.findByType(FormField);
 }
 
-function findButton(label: "Join company" | "Log out"): ReactTestInstance {
+function findButton(label: "Join company" | "Log out" | "Settings"): ReactTestInstance {
   const result = rendered!.root
     .findAllByType(Button)
     .find((node) => node.props.label === label);
@@ -151,7 +151,7 @@ function findButton(label: "Join company" | "Log out"): ReactTestInstance {
   return result;
 }
 
-function findNativeButton(label: "Join company" | "Log out"): ReactTestInstance {
+function findNativeButton(label: "Join company" | "Log out" | "Settings"): ReactTestInstance {
   const result = rendered!.root.findAll(
     (node) =>
       typeof node.type === "string" &&
@@ -188,7 +188,7 @@ async function submitJoin(): Promise<void> {
   });
 }
 
-async function renderJoinCompany(): Promise<ReactTestRenderer> {
+async function renderJoinCompany(onOpenSettings?: () => void): Promise<ReactTestRenderer> {
   mockedUseAuth.mockReturnValue({
     applyCompany,
     authenticatedRequest,
@@ -199,7 +199,7 @@ async function renderJoinCompany(): Promise<ReactTestRenderer> {
   } as unknown as ReturnType<typeof useAuth>);
 
   await act(async () => {
-    rendered = create(<JoinCompanyScreen />);
+    rendered = create(<JoinCompanyScreen onOpenSettings={onOpenSettings} />);
   });
   return rendered!;
 }
@@ -221,6 +221,17 @@ describe("JoinCompanyScreen", () => {
     refreshCurrentUser.mockResolvedValue(workerAfterJoin);
     signOut.mockResolvedValue(undefined);
     mockedJoinCompany.mockResolvedValue(joinedCompany);
+  });
+
+  it("opens Settings without clearing the in-progress join code", async () => {
+    const onOpenSettings = jest.fn();
+    await renderJoinCompany(onOpenSettings);
+    enterJoinCode("keep12");
+
+    act(() => void findButton("Settings").props.onPress());
+
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+    expect(findField().props.value).toBe("KEEP12");
   });
 
   afterEach(() => {
@@ -651,6 +662,28 @@ describe("JoinCompanyScreen", () => {
     expect(useNavigation).not.toHaveBeenCalled();
     expect(loginUser).not.toHaveBeenCalled();
     expect(registerUser).not.toHaveBeenCalled();
+  });
+
+  it("shows safe logout failure and keeps Log out available for retry", async () => {
+    signOut
+      .mockRejectedValueOnce(new Error("marker write failed"))
+      .mockResolvedValueOnce(undefined);
+    await renderJoinCompany();
+
+    await act(async () => {
+      findButton("Log out").props.onPress();
+      await flushPromises();
+    });
+    expect(findFeedback("Could not log out").props.message).toContain(
+      "Your session is still active"
+    );
+    expect(findButton("Log out").props.loading).toBe(false);
+
+    await act(async () => {
+      findButton("Log out").props.onPress();
+      await flushPromises();
+    });
+    expect(signOut).toHaveBeenCalledTimes(2);
   });
 
   it("unlocks after an async rejection and retries exactly once", async () => {

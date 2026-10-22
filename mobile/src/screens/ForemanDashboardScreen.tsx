@@ -2,11 +2,13 @@ import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { StyleSheet, Text, View } from "react-native";
 import { Button } from "../components/Button";
 import { DetailRow } from "../components/DetailRow";
+import { Feedback } from "../components/Feedback";
 import { ManagedShiftCard } from "../components/ManagedShiftCard";
 import { Screen } from "../components/Screen";
 import { StateMessage } from "../components/StateMessage";
 import { useAuth } from "../context/AuthContext";
 import { useForemanManagedShifts } from "../hooks/useForemanManagedShifts";
+import { useLogoutAction } from "../hooks/useLogoutAction";
 import type { ForemanStackParamList } from "../types/navigation";
 import { colors, radii, spacing, typography } from "../utils/theme";
 
@@ -16,13 +18,10 @@ type ForemanDashboardScreenProps = NativeStackScreenProps<
 >;
 
 export function ForemanDashboardScreen({ navigation }: ForemanDashboardScreenProps) {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
+  const { loggingOut, logoutError, requestLogout } = useLogoutAction();
   const { shifts, loading, error, refresh } = useForemanManagedShifts();
   const company = user?.company ?? null;
-
-  const handleLogout = () => {
-    void signOut();
-  };
 
   const handleRetry = () => {
     void refresh().catch(() => undefined);
@@ -37,6 +36,13 @@ export function ForemanDashboardScreen({ navigation }: ForemanDashboardScreenPro
             {user ? `${user.firstName} ${user.lastName}` : "Foreman"}
           </Text>
           <Text style={styles.subtitle}>Create shifts and manage crew attendance.</Text>
+          <Button
+            label="Settings"
+            onPress={() => {
+              navigation.navigate("OwnSettings");
+            }}
+            variant="secondary"
+          />
         </View>
 
         {company ? (
@@ -61,9 +67,9 @@ export function ForemanDashboardScreen({ navigation }: ForemanDashboardScreenPro
         />
         <Button
           disabled={!company}
-          label="Company settings"
+          label="My shift history"
           onPress={() => {
-            navigation.navigate("ForemanCompanySettings");
+            navigation.navigate("ForemanShifts");
           }}
           variant="secondary"
         />
@@ -124,7 +130,21 @@ export function ForemanDashboardScreen({ navigation }: ForemanDashboardScreenPro
           )}
         </View>
 
-        <Button label="Log out" onPress={handleLogout} variant="ghost" />
+        {logoutError ? (
+          <Feedback
+            message={logoutError}
+            testID="foreman-logout-error"
+            title="Could not log out"
+            tone="error"
+          />
+        ) : null}
+        <Button
+          label="Log out"
+          loading={loggingOut}
+          onPress={requestLogout}
+          testID="foreman-logout"
+          variant="ghost"
+        />
       </View>
     </Screen>
   );

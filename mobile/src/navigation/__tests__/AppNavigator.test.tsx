@@ -54,6 +54,14 @@ jest.mock("../../screens/UnsupportedRoleScreen", () => {
     UnsupportedRoleScreen: () => React.createElement(Text, null, "UnsupportedRoleGate")
   };
 });
+jest.mock("../../screens/OwnSettingsScreen", () => {
+  const React = jest.requireActual<typeof import("react")>("react");
+  const { Text } = jest.requireActual<typeof import("react-native")>("react-native");
+
+  return {
+    OwnSettingsScreen: () => React.createElement(Text, null, "OwnSettingsScreen")
+  };
+});
 
 const mockedUseAuth = jest.mocked(useAuth);
 
@@ -83,6 +91,19 @@ describe("AppNavigator role behavior", () => {
     expect(rendered).not.toContain("ForemanDashboard");
   });
 
+  it("keeps a temporarily unverified protected session behind the recovery gate", () => {
+    mockedUseAuth.mockReturnValue({
+      status: "recovering",
+      user: null
+    } as ReturnType<typeof useAuth>);
+
+    const rendered = output();
+    expect(rendered).toContain("RestoreSessionGate");
+    expect(rendered).not.toContain("Login");
+    expect(rendered).not.toContain("WorkerDashboard");
+    expect(rendered).not.toContain("ForemanDashboard");
+  });
+
   it("keeps the auth stack for unauthenticated state", () => {
     mockedUseAuth.mockReturnValue({
       status: "unauthenticated",
@@ -107,6 +128,7 @@ describe("AppNavigator role behavior", () => {
     const rendered = output();
     expect(rendered).toContain("WorkerDashboard");
     expect(rendered).toContain("JoinShift");
+    expect(rendered).toContain("MyShiftHistory");
     expect(rendered).not.toContain("JoinCompanyGate");
     expect(rendered).not.toContain("RestoreSessionGate");
     expect(rendered).not.toContain("UnsupportedRoleGate");
@@ -121,7 +143,8 @@ describe("AppNavigator role behavior", () => {
     } as ReturnType<typeof useAuth>);
 
     const rendered = output();
-    expect(rendered).toContain("JoinCompanyGate");
+    expect(rendered).toContain("JoinCompany");
+    expect(rendered).toContain("OwnSettings");
     expect(rendered).not.toContain("RestoreSessionGate");
     expect(rendered).not.toContain("UnsupportedRoleGate");
     expect(rendered).not.toContain("Login");
@@ -137,6 +160,8 @@ describe("AppNavigator role behavior", () => {
     const rendered = output();
     expect(rendered).toContain("ForemanCompanySettings");
     expect(rendered).toContain("ForemanPayRules");
+    expect(rendered).toContain("ForemanShifts");
+    expect(rendered).not.toContain("MyShiftHistory");
     expect(rendered).not.toContain("JoinCompanyGate");
     expect(rendered).not.toContain("UnsupportedRoleGate");
   });
@@ -148,7 +173,8 @@ describe("AppNavigator role behavior", () => {
     } as ReturnType<typeof useAuth>);
 
     const rendered = output();
-    expect(rendered).toContain("CreateCompanyGate");
+    expect(rendered).toContain("CreateCompany");
+    expect(rendered).toContain("OwnSettings");
     expect(rendered).not.toContain("JoinCompanyGate");
     expect(rendered).not.toContain("UnsupportedRoleGate");
     expect(rendered).not.toContain("WorkerDashboard");
@@ -181,5 +207,6 @@ describe("AppNavigator role behavior", () => {
     } as ReturnType<typeof useAuth>);
     expect(output()).not.toContain("ForemanCompanySettings");
     expect(output()).not.toContain("ForemanPayRules");
+    expect(output()).not.toContain("ForemanShifts");
   });
 });

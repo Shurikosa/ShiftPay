@@ -3,12 +3,19 @@ import type { ApiErrorResponse } from "../types/auth";
 export class ApiError extends Error {
   public readonly status: number;
   public readonly details?: ApiErrorResponse;
+  public readonly retryAfterSeconds?: number;
 
-  public constructor(message: string, status: number, details?: ApiErrorResponse) {
+  public constructor(
+    message: string,
+    status: number,
+    details?: ApiErrorResponse,
+    retryAfterSeconds?: number
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.details = details;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 

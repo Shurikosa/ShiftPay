@@ -7,13 +7,15 @@ import type {
   JoinShiftRequest,
   JoinShiftResponse,
   ManagedShift,
+  ManagedShiftPageResponse,
   ShiftAttendance,
   ShiftCloseResponse,
   ShiftDiscardResponse,
   ShiftPauseResponse,
   ShiftStartResponse,
   ShiftSummary,
-  WorkerShiftHistoryItem
+  WorkerShiftHistoryItem,
+  WorkerShiftHistoryPageResponse
 } from "../types/shifts";
 import { apiRequest } from "./client";
 
@@ -34,10 +36,38 @@ export function getMyShiftHistory(token: string): Promise<WorkerShiftHistoryItem
   });
 }
 
+export function getMyShiftHistoryPage(
+  token: string,
+  cursor?: string
+): Promise<WorkerShiftHistoryPageResponse> {
+  const cursorQuery = cursor === undefined
+    ? ""
+    : `&cursor=${encodeURIComponent(cursor)}`;
+
+  return apiRequest<WorkerShiftHistoryPageResponse>(
+    `/api/v1/me/shifts/page?limit=20${cursorQuery}`,
+    { token }
+  );
+}
+
 export function getManagedShifts(token: string): Promise<ManagedShift[]> {
   return apiRequest<ManagedShift[]>("/api/v1/me/managed-shifts", {
     token
   });
+}
+
+export function getManagedShiftsPage(
+  token: string,
+  cursor?: string
+): Promise<ManagedShiftPageResponse> {
+  const cursorQuery = cursor === undefined
+    ? ""
+    : `&cursor=${encodeURIComponent(cursor)}`;
+
+  return apiRequest<ManagedShiftPageResponse>(
+    `/api/v1/me/managed-shifts/page?limit=20${cursorQuery}`,
+    { token }
+  );
 }
 
 export function createShift(

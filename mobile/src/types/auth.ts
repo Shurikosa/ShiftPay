@@ -45,8 +45,38 @@ export interface ApiErrorResponse {
   message: string;
   path?: string;
   code?: string;
+  attemptsRemaining?: number;
   actualDurationMinutes?: number;
   minimumDurationMinutes?: number;
+}
+
+export interface PendingEmailChange {
+  status: "PENDING";
+  newEmail: string;
+  expiresAt: string;
+  codeExpiresAt: string;
+  resendAvailableAt: string;
+  resendsRemaining: number;
+  attemptsRemaining: number;
+}
+
+export interface UpdateMyNameRequest {
+  firstName: string;
+  lastName: string;
+}
+
+export interface StartMyEmailChangeRequest {
+  currentPassword: string;
+  newEmail: string;
+}
+
+export interface ConfirmMyEmailChangeRequest {
+  code: string;
+}
+
+export interface UpdateMyPasswordRequest {
+  currentPassword: string;
+  newPassword: string;
 }
 
 export interface Session {

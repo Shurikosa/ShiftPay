@@ -61,6 +61,12 @@ export interface WorkerShiftHistoryItem {
   pauseState?: PauseState;
 }
 
+export interface WorkerShiftHistoryPageResponse {
+  items: WorkerShiftHistoryItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
 export interface ManagedShift {
   id: number;
   companyId: number;
@@ -80,6 +86,12 @@ export interface ManagedShift {
   foremanHourlyRate?: number;
   pauseState?: PauseState;
   createdBy: number;
+}
+
+export interface ManagedShiftPageResponse {
+  items: ManagedShift[];
+  nextCursor: string | null;
+  hasMore: boolean;
 }
 
 export interface CreateShiftRequest {

@@ -37,6 +37,8 @@ const expectedGlyphs = {
   create: "create-outline",
   back: "arrow-back-outline",
   forward: "arrow-forward-outline",
+  chevronDown: "chevron-down-outline",
+  chevronUp: "chevron-up-outline",
   refresh: "refresh-outline",
   settings: "settings-outline",
   logout: "log-out-outline",

@@ -24,6 +24,7 @@ import {
 import { theme } from "../../utils/theme";
 import { RestoreSessionScreen } from "../RestoreSessionScreen";
 import { useNavigation } from "@react-navigation/native";
+import { useAuth } from "../../context/AuthContext";
 
 jest.mock("../../api/auth", () => ({
   getCurrentUser: jest.fn(),
@@ -38,6 +39,10 @@ jest.mock("../../storage/sessionStorage", () => ({
 jest.mock("@react-navigation/native", () => ({
   useNavigation: jest.fn()
 }));
+jest.mock("../../context/AuthContext", () => ({ useAuth: jest.fn() }));
+
+const mockedUseAuth = jest.mocked(useAuth);
+const retrySessionRecovery = jest.fn();
 
 const initialWindowDimensions = Dimensions.get("window");
 const initialScreenDimensions = Dimensions.get("screen");
@@ -92,6 +97,12 @@ describe("RestoreSessionScreen", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockedUseAuth.mockReturnValue({
+      error: null,
+      retrySessionRecovery,
+      status: "restoring",
+      user: null
+    } as unknown as ReturnType<typeof useAuth>);
     setTestDimensions(411, 891, 1);
   });
 
@@ -262,5 +273,28 @@ describe("RestoreSessionScreen", () => {
         .findAllByType(Text)
         .some((node) => /retry|log in|cancel|back|%/iu.test(node.props.children))
     ).toBe(false);
+  });
+
+  it("shows a visible recovery error and retries protected-session validation", async () => {
+    mockedUseAuth.mockReturnValue({
+      error: "Could not verify your saved session. Check your connection and try again.",
+      retrySessionRecovery,
+      status: "recovering",
+      user: null
+    } as unknown as ReturnType<typeof useAuth>);
+
+    const rendered = await renderRestoreSession();
+    expect(rendered.root.findByType(Feedback).props).toMatchObject({
+      loading: false,
+      message: "Could not verify your saved session. Check your connection and try again.",
+      title: "Session check needs attention",
+      tone: "error"
+    });
+
+    await act(async () => {
+      rendered.root.findByProps({ testID: "restore-session-retry" }).props.onPress();
+      await Promise.resolve();
+    });
+    expect(retrySessionRecovery).toHaveBeenCalledTimes(1);
   });
 });

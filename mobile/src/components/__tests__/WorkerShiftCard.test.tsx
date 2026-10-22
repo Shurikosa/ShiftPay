@@ -2,8 +2,6 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import type { ComponentProps } from "react";
 import { StyleSheet, View, type TextStyle } from "react-native";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
-import { useWorkerShiftHistory } from "../../hooks/useWorkerShiftHistory";
-import { MyShiftHistoryScreen } from "../../screens/MyShiftHistoryScreen";
 import type { PayCalculation, SnapshotStatus } from "../../types/payCalculation";
 import type { WorkerShiftHistoryItem } from "../../types/shifts";
 import {
@@ -24,12 +22,6 @@ jest.mock("@expo/vector-icons/Ionicons", () => {
 
   return { __esModule: true, default: MockIonicons };
 });
-
-jest.mock("../../hooks/useWorkerShiftHistory", () => ({
-  useWorkerShiftHistory: jest.fn()
-}));
-
-const mockedUseWorkerShiftHistory = jest.mocked(useWorkerShiftHistory);
 
 function calculationFixture(snapshotStatus: SnapshotStatus): PayCalculation {
   return {
@@ -542,43 +534,6 @@ describe("WorkerShiftCard", () => {
     expect(output).not.toContain("Night premium");
     expect(output).not.toContain("Total base amount");
     expect(output).not.toContain("effectiveHourlyRate");
-  });
-
-  it("remains compatible with the MyShiftHistory consumer and detail payload", async () => {
-    const shift = shiftFixture();
-    const navigation = {
-      goBack: jest.fn(),
-      navigate: jest.fn()
-    };
-    mockedUseWorkerShiftHistory.mockReturnValue({
-      error: null,
-      loading: false,
-      refresh: jest.fn(),
-      shifts: [shift]
-    });
-    let view!: ReactTestRenderer;
-
-    await act(async () => {
-      view = create(
-        <MyShiftHistoryScreen
-          {...({
-            navigation,
-            route: { key: "history", name: "MyShiftHistory" }
-          } as unknown as ComponentProps<typeof MyShiftHistoryScreen>)}
-        />
-      );
-    });
-
-    const card = view.root.findByProps({
-      testID: `worker-shift-card-${shift.attendanceId}`
-    });
-    act(() => {
-      card.props.onPress();
-    });
-    expect(navigation.navigate).toHaveBeenCalledWith("WorkerShiftDetails", {
-      shift
-    });
-    expect(navigation.navigate).toHaveBeenCalledTimes(1);
   });
 
   it("uses only decorative metadata icons", async () => {
