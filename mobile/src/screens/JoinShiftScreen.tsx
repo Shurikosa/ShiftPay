@@ -98,7 +98,7 @@ export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
         setSuccessMessage(`Joined shift ${response.shiftId}. Waiting for foreman approval.`);
         setJoinCode("");
         refreshHistorySafely();
-        navigation.replace("WorkerDashboard");
+        navigation.popTo("WorkerTabs", { screen: "WorkerDashboard" });
       })
       .catch((caughtError) => {
         if (!mountedRef.current) {

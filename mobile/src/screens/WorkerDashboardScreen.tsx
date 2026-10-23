@@ -1,5 +1,8 @@
+import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
+import type { CompositeScreenProps } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { StyleSheet, Text, View } from "react-native";
+import { useEffect } from "react";
+import { RefreshControl, StyleSheet, Text, View } from "react-native";
 import { ActionTile } from "../components/ActionTile";
 import type { AppIconProps } from "../components/AppIcon";
 import { Button } from "../components/Button";
@@ -7,19 +10,19 @@ import { Card } from "../components/Card";
 import { EmptyState } from "../components/EmptyState";
 import { Feedback } from "../components/Feedback";
 import { Screen } from "../components/Screen";
-import { WorkerShiftCard } from "../components/WorkerShiftCard";
+import { WorkerShiftHistoryCard } from "../components/WorkerShiftHistoryCard";
 import { useAuth } from "../context/AuthContext";
 import { useLogoutAction } from "../hooks/useLogoutAction";
-import { useWorkerShiftHistory } from "../hooks/useWorkerShiftHistory";
-import type { WorkerStackParamList } from "../types/navigation";
+import { useWorkerDashboardShifts } from "../hooks/useWorkerDashboardShifts";
+import type { WorkerStackParamList, WorkerTabParamList } from "../types/navigation";
 import { theme } from "../utils/theme";
 
-type WorkerDashboardScreenProps = NativeStackScreenProps<
-  WorkerStackParamList,
-  "WorkerDashboard"
+type WorkerDashboardScreenProps = CompositeScreenProps<
+  BottomTabScreenProps<WorkerTabParamList, "WorkerDashboard">,
+  NativeStackScreenProps<WorkerStackParamList>
 >;
 
-const RECENT_SHIFT_LIMIT = 3;
+const MAX_DASHBOARD_SHIFTS = 5;
 
 function SemanticIcon(props: AppIconProps) {
   // Keep native icon loading on the rendered dashboard path, not module import.
@@ -40,22 +43,47 @@ function getWorkerName(user: ReturnType<typeof useAuth>["user"]): string {
 export function WorkerDashboardScreen({ navigation }: WorkerDashboardScreenProps) {
   const { user } = useAuth();
   const { loggingOut, logoutError, requestLogout } = useLogoutAction();
-  const { shifts, loading, error, refresh } = useWorkerShiftHistory();
-  const company = user?.company ?? null;
-  const recentShifts = shifts.slice(0, RECENT_SHIFT_LIMIT);
+  const isWorker = user?.role === "WORKER";
+  const company = isWorker ? user.company : null;
+  const canAccess = isWorker && company !== null;
+  const {
+    shifts,
+    initialLoading,
+    refreshing,
+    initialError,
+    refreshError,
+    refresh
+  } = useWorkerDashboardShifts(canAccess);
+  const recentShifts = shifts.slice(0, MAX_DASHBOARD_SHIFTS);
 
   const handleRetry = () => {
     void refresh().catch(() => undefined);
   };
 
+  useEffect(
+    () =>
+      navigation.addListener("focus", () => {
+        void refresh().catch(() => undefined);
+      }),
+    [navigation, refresh]
+  );
+
   const openJoinShift = () => {
-    if (company) {
+    if (canAccess) {
       navigation.navigate("JoinShift");
     }
   };
 
   return (
-    <Screen scroll>
+    <Screen
+      scroll
+      scrollProps={{
+        refreshControl: canAccess ? (
+          <RefreshControl onRefresh={handleRetry} refreshing={refreshing} />
+        ) : undefined,
+        testID: "worker-dashboard-scroll"
+      }}
+    >
       <View style={styles.page} testID="worker-dashboard-content">
         <View style={styles.header} testID="worker-dashboard-header">
           <Text allowFontScaling style={styles.brand}>
@@ -106,37 +134,34 @@ export function WorkerDashboardScreen({ navigation }: WorkerDashboardScreenProps
           />
         )}
 
-        <View style={styles.primaryAction}>
-          <Button
-            accessibilityHint="Opens the form for joining a shift by code."
-            disabled={!company}
-            label="Join shift"
-            leadingIcon="join"
-            onPress={openJoinShift}
-            testID="worker-join-shift"
-          />
-        </View>
-
         <View style={styles.tiles} testID="worker-dashboard-actions">
           <ActionTile
+            accessibilityHint="Opens the form for joining a shift by code."
+            disabled={!canAccess}
+            icon="join"
+            label="Join shift"
+            onPress={openJoinShift}
+            testID="worker-join-shift"
+            tone="primary"
+          />
+          <ActionTile
             accessibilityHint="Opens all shifts joined by this worker."
+            disabled={!canAccess}
             icon="calendar"
             label="My shift history"
             onPress={() => {
               navigation.navigate("MyShiftHistory");
             }}
-            supportingText="Review joined shifts and attendance."
             testID="worker-history-tile"
           />
           <ActionTile
             accessibilityHint="Opens this worker's payroll requests."
-            disabled={!company}
+            disabled={!canAccess}
             icon="payroll"
             label="Payroll"
             onPress={() => {
               navigation.navigate("WorkerPayroll");
             }}
-            supportingText="Review payable work and payout requests."
             testID="worker-payroll-tile"
           />
         </View>
@@ -146,7 +171,7 @@ export function WorkerDashboardScreen({ navigation }: WorkerDashboardScreenProps
             <Text accessibilityRole="header" allowFontScaling style={styles.sectionTitle}>
               Current and recent shifts
             </Text>
-            {shifts.length > RECENT_SHIFT_LIMIT ? (
+            {canAccess ? (
               <Button
                 accessibilityHint="Opens the complete worker shift history."
                 label="View all"
@@ -159,7 +184,7 @@ export function WorkerDashboardScreen({ navigation }: WorkerDashboardScreenProps
             ) : null}
           </View>
 
-          {loading ? (
+          {initialLoading ? (
             <Feedback
               loading
               message="Fetching your worker history."
@@ -167,7 +192,7 @@ export function WorkerDashboardScreen({ navigation }: WorkerDashboardScreenProps
               testID="worker-shifts-loading"
               title="Loading shifts"
             />
-          ) : error ? (
+          ) : initialError ? (
             <Feedback
               action={{
                 accessibilityHint: "Reloads your current and recent shifts.",
@@ -175,17 +200,17 @@ export function WorkerDashboardScreen({ navigation }: WorkerDashboardScreenProps
                 onPress: handleRetry,
                 testID: "worker-shifts-retry"
               }}
-              message={error}
+              message={initialError}
               mode="screen"
               testID="worker-shifts-error"
               title="Could not load shifts"
               tone="error"
             />
-          ) : recentShifts.length === 0 ? (
+          ) : shifts.length === 0 ? (
             <EmptyState
               action={{
                 accessibilityHint: "Opens the form for joining a shift by code.",
-                disabled: !company,
+                disabled: !canAccess,
                 label: "Join shift",
                 onPress: openJoinShift,
                 testID: "worker-empty-join-shift"
@@ -196,11 +221,25 @@ export function WorkerDashboardScreen({ navigation }: WorkerDashboardScreenProps
             />
           ) : (
             <View style={styles.list}>
+              {refreshError ? (
+                <Feedback
+                  action={{
+                    accessibilityHint: "Retries the latest worker dashboard refresh.",
+                    label: "Retry refresh",
+                    onPress: handleRetry,
+                    testID: "worker-shifts-refresh-retry"
+                  }}
+                  message={refreshError}
+                  testID="worker-shifts-refresh-error"
+                  title="Could not refresh shifts"
+                  tone="error"
+                />
+              ) : null}
               {recentShifts.map((shift) => (
-                <WorkerShiftCard
+                <WorkerShiftHistoryCard
                   key={shift.attendanceId}
                   shift={shift}
-                  onPress={() => {
+                  onFullView={() => {
                     navigation.navigate("WorkerShiftDetails", { shift });
                   }}
                 />
@@ -297,13 +336,11 @@ const styles = StyleSheet.create({
     color: theme.colors.ink.primary,
     flexShrink: 1
   },
-  primaryAction: {
-    flexShrink: 1,
-    maxWidth: "100%"
-  },
   tiles: {
+    alignItems: "stretch",
+    flexDirection: "row",
     flexShrink: 1,
-    gap: theme.space[3],
+    gap: theme.space[2],
     maxWidth: "100%"
   },
   section: {

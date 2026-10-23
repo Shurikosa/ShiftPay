@@ -3,11 +3,36 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { useAuth } from "../../context/AuthContext";
 import { AppNavigator } from "../AppNavigator";
 
+jest.mock("@expo/vector-icons/Ionicons", () => {
+  const React = jest.requireActual<typeof import("react")>("react");
+  const { Text } = jest.requireActual<typeof import("react-native")>("react-native");
+  return {
+    __esModule: true,
+    default: (props: Record<string, unknown>) => React.createElement(Text, props)
+  };
+});
+
 jest.mock("@react-navigation/native", () => ({
   NavigationContainer: ({ children }: { children: React.ReactNode }) => children
 }));
 jest.mock("@react-navigation/native-stack", () => ({
   createNativeStackNavigator: () => {
+    const React = jest.requireActual<typeof import("react")>("react");
+    const { Text } = jest.requireActual<typeof import("react-native")>("react-native");
+    return {
+      Group: ({ children }: { children: React.ReactNode }) => children,
+      Navigator: ({ children }: { children: React.ReactNode }) => children,
+      Screen: ({ component: Component, name }: { component: React.ComponentType; name: string }) => (
+        <>
+          <Text>{name}</Text>
+          {name === "WorkerTabs" || name === "ForemanTabs" ? <Component /> : null}
+        </>
+      )
+    };
+  }
+}));
+jest.mock("@react-navigation/bottom-tabs", () => ({
+  createBottomTabNavigator: () => {
     const { Text } = jest.requireActual<typeof import("react-native")>("react-native");
     return {
       Navigator: ({ children }: { children: React.ReactNode }) => children,
@@ -89,6 +114,7 @@ describe("AppNavigator role behavior", () => {
     expect(rendered).not.toContain("UnsupportedRoleGate");
     expect(rendered).not.toContain("WorkerDashboard");
     expect(rendered).not.toContain("ForemanDashboard");
+    expect(rendered).not.toContain("More");
   });
 
   it("keeps a temporarily unverified protected session behind the recovery gate", () => {
@@ -129,6 +155,10 @@ describe("AppNavigator role behavior", () => {
     expect(rendered).toContain("WorkerDashboard");
     expect(rendered).toContain("JoinShift");
     expect(rendered).toContain("MyShiftHistory");
+    expect(rendered).toContain("WorkerPayroll");
+    expect(rendered).toContain("WorkerShiftDetails");
+    expect(rendered).toContain("More");
+    expect(rendered).toContain("OwnSettings");
     expect(rendered).not.toContain("JoinCompanyGate");
     expect(rendered).not.toContain("RestoreSessionGate");
     expect(rendered).not.toContain("UnsupportedRoleGate");
@@ -145,6 +175,7 @@ describe("AppNavigator role behavior", () => {
     const rendered = output();
     expect(rendered).toContain("JoinCompany");
     expect(rendered).toContain("OwnSettings");
+    expect(rendered).not.toContain("More");
     expect(rendered).not.toContain("RestoreSessionGate");
     expect(rendered).not.toContain("UnsupportedRoleGate");
     expect(rendered).not.toContain("Login");
@@ -161,6 +192,10 @@ describe("AppNavigator role behavior", () => {
     expect(rendered).toContain("ForemanCompanySettings");
     expect(rendered).toContain("ForemanPayRules");
     expect(rendered).toContain("ForemanShifts");
+    expect(rendered).toContain("ForemanPayrollRequests");
+    expect(rendered).toContain("ForemanShiftDetails");
+    expect(rendered).toContain("More");
+    expect(rendered).toContain("OwnSettings");
     expect(rendered).not.toContain("MyShiftHistory");
     expect(rendered).not.toContain("JoinCompanyGate");
     expect(rendered).not.toContain("UnsupportedRoleGate");
@@ -175,6 +210,7 @@ describe("AppNavigator role behavior", () => {
     const rendered = output();
     expect(rendered).toContain("CreateCompany");
     expect(rendered).toContain("OwnSettings");
+    expect(rendered).not.toContain("More");
     expect(rendered).not.toContain("JoinCompanyGate");
     expect(rendered).not.toContain("UnsupportedRoleGate");
     expect(rendered).not.toContain("WorkerDashboard");
@@ -198,6 +234,7 @@ describe("AppNavigator role behavior", () => {
     expect(rendered).not.toContain("Register");
     expect(rendered).not.toContain("WorkerDashboard");
     expect(rendered).not.toContain("ForemanDashboard");
+    expect(rendered).not.toContain("More");
   });
 
   it.each(["WORKER", "ADMIN"] as const)("does not expose foreman-only routes to %s", (role) => {

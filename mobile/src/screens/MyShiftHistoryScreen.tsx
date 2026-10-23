@@ -1,3 +1,5 @@
+import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
+import type { CompositeScreenProps } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { RefreshControl, StyleSheet, Text, View } from "react-native";
 import { Button } from "../components/Button";
@@ -6,12 +8,12 @@ import { StateMessage } from "../components/StateMessage";
 import { WorkerShiftHistoryCard } from "../components/WorkerShiftHistoryCard";
 import { useAuth } from "../context/AuthContext";
 import { useWorkerShiftHistoryPages } from "../hooks/useWorkerShiftHistoryPages";
-import type { WorkerStackParamList } from "../types/navigation";
+import type { WorkerStackParamList, WorkerTabParamList } from "../types/navigation";
 import { theme } from "../utils/theme";
 
-type MyShiftHistoryScreenProps = NativeStackScreenProps<
-  WorkerStackParamList,
-  "MyShiftHistory"
+type MyShiftHistoryScreenProps = CompositeScreenProps<
+  BottomTabScreenProps<WorkerTabParamList, "MyShiftHistory">,
+  NativeStackScreenProps<WorkerStackParamList>
 >;
 
 export function MyShiftHistoryScreen({ navigation }: MyShiftHistoryScreenProps) {
@@ -162,8 +164,9 @@ export function MyShiftHistoryScreen({ navigation }: MyShiftHistoryScreenProps) 
         <Button
           label="Back to dashboard"
           onPress={() => {
-            navigation.goBack();
+            navigation.navigate("WorkerDashboard");
           }}
+          testID="worker-shifts-back-dashboard"
           variant="ghost"
         />
       </View>

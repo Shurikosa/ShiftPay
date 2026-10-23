@@ -1,4 +1,4 @@
-import { getMyShiftHistoryPage } from "../shifts";
+import { getMyDashboardShifts, getMyShiftHistoryPage } from "../shifts";
 import type { WorkerShiftHistoryPageResponse } from "../../types/shifts";
 
 jest.mock("../../config/env", () => ({
@@ -34,6 +34,24 @@ describe("worker shift page API", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8080/api/v1/me/shifts/page?limit=20",
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: "Bearer worker-token"
+        },
+        body: undefined
+      }
+    );
+  });
+
+  it("requests the worker dashboard page with exactly the dashboard limit", async () => {
+    fetchMock.mockResolvedValueOnce(response(page));
+
+    await expect(getMyDashboardShifts("worker-token")).resolves.toEqual(page);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v1/me/shifts/page?limit=5",
       {
         method: "GET",
         headers: {

@@ -96,7 +96,7 @@ const authenticatedRequest = jest.fn();
 const refresh = jest.fn();
 const goBack = jest.fn();
 const navigate = jest.fn();
-const replace = jest.fn();
+const popTo = jest.fn();
 let rendered: ReactTestRenderer | null = null;
 
 function deferred<TValue>(): Deferred<TValue> {
@@ -181,7 +181,7 @@ async function renderScreen(user: User | null = worker): Promise<void> {
     rendered = create(
       <JoinShiftScreen
         {...({
-          navigation: { goBack, navigate, replace },
+          navigation: { goBack, navigate, popTo },
           route: { key: "join-shift", name: "JoinShift" }
         } as unknown as ComponentProps<typeof JoinShiftScreen>)}
       />
@@ -402,7 +402,7 @@ describe("JoinShiftScreen", () => {
       findBackButton().props.onPress();
     });
     expect(goBack).toHaveBeenCalledTimes(1);
-    expect(replace).not.toHaveBeenCalled();
+    expect(popTo).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -513,7 +513,9 @@ describe("JoinShiftScreen", () => {
     await pressJoin();
     expect(authenticatedRequest).toHaveBeenCalledTimes(2);
     expect(mockedJoinShiftByCode).toHaveBeenCalledTimes(1);
-    expect(replace).toHaveBeenCalledWith("WorkerDashboard");
+    expect(popTo).toHaveBeenCalledWith("WorkerTabs", {
+      screen: "WorkerDashboard"
+    });
   });
 
   it("handles asynchronous rejection, releases the lock, and retries once", async () => {
@@ -530,7 +532,7 @@ describe("JoinShiftScreen", () => {
     await pressJoin();
     expect(mockedJoinShiftByCode).toHaveBeenCalledTimes(2);
     expect(refresh).toHaveBeenCalledTimes(1);
-    expect(replace).toHaveBeenCalledTimes(1);
+    expect(popTo).toHaveBeenCalledTimes(1);
   });
 
   it("locks duplicate button and Return submissions synchronously", async () => {
@@ -593,7 +595,7 @@ describe("JoinShiftScreen", () => {
     });
   });
 
-  it("clears the code, refreshes history, and replaces the route exactly once after success", async () => {
+  it("clears the code, refreshes history, and pops to the shell exactly once after success", async () => {
     await renderScreen();
     enterCode("success1");
     await pressJoin();
@@ -604,8 +606,10 @@ describe("JoinShiftScreen", () => {
       tone: "success"
     });
     expect(refresh).toHaveBeenCalledTimes(1);
-    expect(replace).toHaveBeenCalledTimes(1);
-    expect(replace).toHaveBeenCalledWith("WorkerDashboard");
+    expect(popTo).toHaveBeenCalledTimes(1);
+    expect(popTo).toHaveBeenCalledWith("WorkerTabs", {
+      screen: "WorkerDashboard"
+    });
     expect(goBack).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
   });
@@ -625,7 +629,7 @@ describe("JoinShiftScreen", () => {
       await pressJoin();
 
       expect(refresh).toHaveBeenCalledTimes(1);
-      expect(replace).toHaveBeenCalledTimes(1);
+      expect(popTo).toHaveBeenCalledTimes(1);
       expect(findFeedback("Shift joined").props.message).toContain("501");
       expect(rendered!.root.findAllByProps({ testID: "join-shift-error" })).toHaveLength(
         0
@@ -634,7 +638,7 @@ describe("JoinShiftScreen", () => {
   );
 
   it("starts refresh once before a navigation-triggered unmount", async () => {
-    replace.mockImplementationOnce(() => {
+    popTo.mockImplementationOnce(() => {
       rendered?.unmount();
       rendered = null;
     });
@@ -647,8 +651,10 @@ describe("JoinShiftScreen", () => {
     });
 
     expect(refresh).toHaveBeenCalledTimes(1);
-    expect(replace).toHaveBeenCalledTimes(1);
-    expect(replace).toHaveBeenCalledWith("WorkerDashboard");
+    expect(popTo).toHaveBeenCalledTimes(1);
+    expect(popTo).toHaveBeenCalledWith("WorkerTabs", {
+      screen: "WorkerDashboard"
+    });
   });
 
   it("does not map a delayed rejection after unmount", async () => {
@@ -678,7 +684,7 @@ describe("JoinShiftScreen", () => {
 
     expect(readMessage).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
-    expect(replace).not.toHaveBeenCalled();
+    expect(popTo).not.toHaveBeenCalled();
   });
 
   it("does not inspect or act on a delayed successful response after unmount", async () => {
@@ -710,7 +716,7 @@ describe("JoinShiftScreen", () => {
 
     expect(readShiftId).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
-    expect(replace).not.toHaveBeenCalled();
+    expect(popTo).not.toHaveBeenCalled();
   });
 
   it("clears stale field, backend, and success feedback when the code is edited", async () => {

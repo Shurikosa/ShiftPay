@@ -1,3 +1,5 @@
+import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
+import type { CompositeScreenProps } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { StyleSheet, Text, View } from "react-native";
 import { Button } from "../components/Button";
@@ -9,12 +11,12 @@ import { StateMessage } from "../components/StateMessage";
 import { useAuth } from "../context/AuthContext";
 import { useForemanManagedShifts } from "../hooks/useForemanManagedShifts";
 import { useLogoutAction } from "../hooks/useLogoutAction";
-import type { ForemanStackParamList } from "../types/navigation";
+import type { ForemanStackParamList, ForemanTabParamList } from "../types/navigation";
 import { colors, radii, spacing, typography } from "../utils/theme";
 
-type ForemanDashboardScreenProps = NativeStackScreenProps<
-  ForemanStackParamList,
-  "ForemanDashboard"
+type ForemanDashboardScreenProps = CompositeScreenProps<
+  BottomTabScreenProps<ForemanTabParamList, "ForemanDashboard">,
+  NativeStackScreenProps<ForemanStackParamList>
 >;
 
 export function ForemanDashboardScreen({ navigation }: ForemanDashboardScreenProps) {

@@ -31,6 +31,8 @@ const iconGlyphs = {
   chevronUp: "chevron-up-outline",
   refresh: "refresh-outline",
   settings: "settings-outline",
+  dashboard: "grid-outline",
+  more: "ellipsis-horizontal-circle-outline",
   logout: "log-out-outline",
   success: "checkmark-circle-outline",
   info: "information-circle-outline",

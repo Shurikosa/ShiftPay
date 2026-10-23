@@ -1,3 +1,5 @@
+import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
+import type { CompositeScreenProps } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -15,7 +17,7 @@ import { Screen } from "../components/Screen";
 import { StateMessage } from "../components/StateMessage";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAuth } from "../context/AuthContext";
-import type { WorkerStackParamList } from "../types/navigation";
+import type { WorkerStackParamList, WorkerTabParamList } from "../types/navigation";
 import type {
   PayableAttendance,
   PayoutRequest,
@@ -36,9 +38,9 @@ import {
 } from "../utils/status";
 import { colors, radii, spacing, typography } from "../utils/theme";
 
-type WorkerPayrollScreenProps = NativeStackScreenProps<
-  WorkerStackParamList,
-  "WorkerPayroll"
+type WorkerPayrollScreenProps = CompositeScreenProps<
+  BottomTabScreenProps<WorkerTabParamList, "WorkerPayroll">,
+  NativeStackScreenProps<WorkerStackParamList>
 >;
 
 type MutationName = "refresh" | "preview" | "create";
@@ -485,8 +487,9 @@ export function WorkerPayrollScreen({ navigation }: WorkerPayrollScreenProps) {
         <Button
           label="Back to dashboard"
           onPress={() => {
-            navigation.goBack();
+            navigation.navigate("WorkerDashboard");
           }}
+          testID="worker-payroll-back-dashboard"
           variant="ghost"
         />
       </View>

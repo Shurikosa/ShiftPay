@@ -831,4 +831,16 @@ describe("MyShiftHistoryScreen paged WORKER history", () => {
     });
     expect(renderedIds(renderer)).toEqual([6]);
   });
+
+  it("selects the worker Dashboard tab from the explicit Back to dashboard action", async () => {
+    mockedGetMyShiftHistoryPage.mockResolvedValueOnce(page([], null));
+    const renderer = await renderScreen();
+
+    act(() => {
+      findButton(renderer, "Back to dashboard").props.onPress();
+    });
+
+    expect(navigation.navigate).toHaveBeenCalledWith("WorkerDashboard");
+    expect(navigation.goBack).not.toHaveBeenCalled();
+  });
 });

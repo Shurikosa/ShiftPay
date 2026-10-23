@@ -15,7 +15,8 @@ const mockedRequests = jest.mocked(getMyPayoutRequests);
 const mockedPreview = jest.mocked(previewPayoutRequest);
 const mockedCreate = jest.mocked(createPayoutRequest);
 const mockedUseAuth = jest.mocked(useAuth);
-const props = { navigation: { goBack: jest.fn() }, route: { key: "payroll", name: "WorkerPayroll" } } as unknown as ComponentProps<typeof WorkerPayrollScreen>;
+const navigation = { goBack: jest.fn(), navigate: jest.fn() };
+const props = { navigation, route: { key: "payroll", name: "WorkerPayroll" } } as unknown as ComponentProps<typeof WorkerPayrollScreen>;
 
 function attendance(id: number, label: string | null): PayableAttendance {
   return { attendanceId: id, shiftId: id, companyId: 10, companyName: "Acme", currencyLabel: label, title: `Shift ${id}`, location: null, actualStartTime: null, actualEndTime: "2026-01-01T10:00:00Z", paymentStatus: "UNPAID", rawPayableMinutes: 120, payoutRoundedMinutes: 120, hourlyRate: 20, calculatedSalary: 40, totalBaseAmount: 40, totalPremiumAmount: 0, payoutAmount: 40 };
@@ -71,5 +72,16 @@ describe("WorkerPayrollScreen historical currency safeguards", () => {
     await act(async () => { control(view, "Preview").props.onPress(); await flush(); });
     expect(JSON.stringify(view.toJSON())).toContain("MIXED_CURRENCY_LABELS");
     expect(control(view, "Create payout request").props.disabled).toBe(true);
+  });
+
+  it("selects the worker Dashboard tab from the explicit Back to dashboard action", async () => {
+    const view = await render();
+
+    act(() => {
+      control(view, "Back to dashboard").props.onPress();
+    });
+
+    expect(navigation.navigate).toHaveBeenCalledWith("WorkerDashboard");
+    expect(navigation.goBack).not.toHaveBeenCalled();
   });
 });

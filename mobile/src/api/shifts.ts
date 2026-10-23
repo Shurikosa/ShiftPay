@@ -50,6 +50,15 @@ export function getMyShiftHistoryPage(
   );
 }
 
+export function getMyDashboardShifts(
+  token: string
+): Promise<WorkerShiftHistoryPageResponse> {
+  return apiRequest<WorkerShiftHistoryPageResponse>(
+    "/api/v1/me/shifts/page?limit=5",
+    { token }
+  );
+}
+
 export function getManagedShifts(token: string): Promise<ManagedShift[]> {
   return apiRequest<ManagedShift[]>("/api/v1/me/managed-shifts", {
     token

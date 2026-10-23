@@ -1,3 +1,5 @@
+import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
+import type { CompositeScreenProps } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { RefreshControl, StyleSheet, Text, View } from "react-native";
 import { Button } from "../components/Button";
@@ -6,12 +8,12 @@ import { Screen } from "../components/Screen";
 import { StateMessage } from "../components/StateMessage";
 import { useAuth } from "../context/AuthContext";
 import { useForemanManagedShiftPages } from "../hooks/useForemanManagedShiftPages";
-import type { ForemanStackParamList } from "../types/navigation";
+import type { ForemanStackParamList, ForemanTabParamList } from "../types/navigation";
 import { theme } from "../utils/theme";
 
-type ForemanShiftsScreenProps = NativeStackScreenProps<
-  ForemanStackParamList,
-  "ForemanShifts"
+type ForemanShiftsScreenProps = CompositeScreenProps<
+  BottomTabScreenProps<ForemanTabParamList, "ForemanShifts">,
+  NativeStackScreenProps<ForemanStackParamList>
 >;
 
 export function ForemanShiftsScreen({ navigation }: ForemanShiftsScreenProps) {
@@ -156,8 +158,9 @@ export function ForemanShiftsScreen({ navigation }: ForemanShiftsScreenProps) {
         <Button
           label="Back to dashboard"
           onPress={() => {
-            navigation.goBack();
+            navigation.navigate("ForemanDashboard");
           }}
+          testID="foreman-shifts-back-dashboard"
           variant="ghost"
         />
       </View>

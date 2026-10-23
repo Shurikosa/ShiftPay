@@ -80,10 +80,7 @@ describe("ActionTile", () => {
     ).toBe(Text);
 
     const icons = view.root.findAllByType(Ionicons);
-    expect(icons.map((icon) => icon.props.name)).toEqual([
-      "calendar-outline",
-      "arrow-forward-outline"
-    ]);
+    expect(icons.map((icon) => icon.props.name)).toEqual(["calendar-outline"]);
     for (const icon of icons) {
       expect(icon.props).toMatchObject({
         accessible: false,
@@ -107,8 +104,8 @@ describe("ActionTile", () => {
     ) as ViewStyle;
 
     expect(pressed).toMatchObject({
-      minHeight: theme.target.min,
-      minWidth: theme.target.min,
+      minHeight: 104,
+      minWidth: 0,
       opacity: 0.9,
       transform: [{ translateY: theme.border.default }]
     });
@@ -152,13 +149,43 @@ describe("ActionTile", () => {
     }
   });
 
-  it.each([
-    ["blank label", "   ", "Supporting copy"],
-    ["blank supporting text", "Payroll", "\n\t"]
-  ])("fails closed for %s", async (_case, label, supportingText) => {
-    const view = await renderTile({ label, supportingText });
+  it("fails closed for a blank label", async () => {
+    const view = await renderTile({ label: "   " });
     expect(view.toJSON()).toBeNull();
     expect(findButtons(view)).toHaveLength(0);
+  });
+
+  it("supports a compact label-only tile", async () => {
+    const view = await renderTile({ label: "Payroll", supportingText: "\n\t" });
+    const button = findButtons(view)[0]!;
+
+    expect(button.props.accessibilityLabel).toBe("Payroll");
+    expect(view.root.findByProps({ children: "Payroll" })).toBeDefined();
+  });
+
+  it("uses the canonical green surface and inverse icon for the primary tile", async () => {
+    const view = await renderTile({
+      icon: "join",
+      label: "Join shift",
+      supportingText: undefined,
+      tone: "primary"
+    });
+    const button = findButtons(view)[0]!;
+    const surface = button.find(
+      (node) =>
+        Array.isArray(node.props.style) &&
+        StyleSheet.flatten(node.props.style)?.backgroundColor ===
+          theme.colors.brand.primary
+    );
+    const style = StyleSheet.flatten(surface.props.style) as ViewStyle;
+
+    expect(style).toMatchObject({
+      backgroundColor: theme.colors.brand.primary,
+      borderColor: theme.colors.brand.primary
+    });
+    expect(view.root.findByType(Ionicons).props.color).toBe(
+      theme.colors.surface.default
+    );
   });
 
   it("keeps raw style and accessibility-name overrides out of its public contract", () => {

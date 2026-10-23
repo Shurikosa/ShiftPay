@@ -1,7 +1,6 @@
-import { StyleSheet, Text, View, type PressableProps } from "react-native";
+import { Pressable, StyleSheet, Text, View, type PressableProps } from "react-native";
 import { theme } from "../utils/theme";
 import type { AppIconName, AppIconProps } from "./AppIcon";
-import { Card } from "./Card";
 
 type ActionTileProps = {
   accessibilityHint?: string;
@@ -9,8 +8,9 @@ type ActionTileProps = {
   icon: AppIconName;
   label: string;
   onPress: NonNullable<PressableProps["onPress"]>;
-  supportingText: string;
+  supportingText?: string;
   testID?: string;
+  tone?: "default" | "primary";
 };
 
 function normalizeCopy(value: unknown): string | null {
@@ -33,67 +33,124 @@ export function ActionTile({
   label,
   onPress,
   supportingText,
-  testID
+  testID,
+  tone = "default"
 }: ActionTileProps) {
   const visibleLabel = normalizeCopy(label);
   const visibleSupportingText = normalizeCopy(supportingText);
 
-  if (!visibleLabel || !visibleSupportingText) {
+  if (!visibleLabel) {
     return null;
   }
 
-  const accessibleName = `${visibleLabel}. ${visibleSupportingText}`;
+  const accessibleName = visibleSupportingText
+    ? `${visibleLabel}. ${visibleSupportingText}`
+    : visibleLabel;
+  const isDisabled = disabled === true;
+  const isPrimary = tone === "primary";
 
   return (
-    <Card
+    <Pressable
+      accessible
+      accessibilityElementsHidden={false}
       accessibilityHint={accessibilityHint}
       accessibilityLabel={accessibleName}
-      disabled={disabled}
-      onPress={onPress}
-      subtle
+      accessibilityRole="button"
+      accessibilityState={{ disabled: isDisabled }}
+      aria-disabled={isDisabled}
+      aria-hidden={false}
+      aria-label={accessibleName}
+      disabled={isDisabled}
+      importantForAccessibility="yes"
+      onPress={isDisabled ? undefined : onPress}
+      role="button"
+      style={({ pressed }) => [
+        styles.target,
+        pressed && !isDisabled && styles.pressed,
+        isDisabled && styles.disabled
+      ]}
       testID={testID}
     >
       <View
         accessibilityElementsHidden
         accessible={false}
+        aria-hidden
         importantForAccessibility="no-hide-descendants"
-        style={styles.content}
+        pointerEvents="none"
+        style={[
+          styles.content,
+          isPrimary ? styles.primarySurface : styles.defaultSurface,
+          isDisabled && styles.disabledSurface
+        ]}
       >
-        <View style={styles.icon}>
-          <SemanticIcon name={icon} size="tile" tone="brand" />
+        <View style={[styles.icon, isPrimary ? styles.primaryIcon : styles.defaultIcon]}>
+          <SemanticIcon
+            name={icon}
+            size="tile"
+            tone={isPrimary ? "inverse" : "brand"}
+          />
         </View>
         <View style={styles.copy}>
-          <Text accessible={false} allowFontScaling style={styles.label}>
+          <Text
+            accessible={false}
+            allowFontScaling
+            style={[styles.label, isPrimary && styles.primaryLabel]}
+          >
             {visibleLabel}
           </Text>
-          <Text accessible={false} allowFontScaling style={styles.supporting}>
-            {visibleSupportingText}
-          </Text>
+          {visibleSupportingText ? (
+            <Text
+              accessible={false}
+              allowFontScaling
+              style={[styles.supporting, isPrimary && styles.primarySupporting]}
+            >
+              {visibleSupportingText}
+            </Text>
+          ) : null}
         </View>
-        <SemanticIcon name="forward" tone="muted" />
       </View>
-    </Card>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
+  target: {
+    flex: 1,
+    minHeight: 104,
+    minWidth: 0
+  },
   content: {
-    alignItems: "center",
-    flexDirection: "row",
+    borderRadius: theme.radius.md,
+    borderWidth: theme.border.default,
+    flexGrow: 1,
     flexShrink: 1,
     gap: theme.space[3],
-    maxWidth: "100%"
+    justifyContent: "space-between",
+    maxWidth: "100%",
+    padding: theme.space[3]
+  },
+  defaultSurface: {
+    backgroundColor: theme.colors.surface.subtle,
+    borderColor: theme.colors.border
+  },
+  primarySurface: {
+    backgroundColor: theme.colors.brand.primary,
+    borderColor: theme.colors.brand.primary
   },
   icon: {
     alignItems: "center",
     alignSelf: "flex-start",
-    backgroundColor: theme.colors.brand.tint,
     borderRadius: theme.radius.md,
-    justifyContent: "center",
+    justifyContent: "center"
+  },
+  defaultIcon: {
+    backgroundColor: theme.colors.brand.tint,
     padding: theme.space[2]
   },
+  primaryIcon: {
+    padding: 0
+  },
   copy: {
-    flex: 1,
     flexShrink: 1,
     gap: theme.space[1],
     minWidth: 0
@@ -103,9 +160,26 @@ const styles = StyleSheet.create({
     color: theme.colors.ink.primary,
     flexShrink: 1
   },
+  primaryLabel: {
+    color: theme.colors.surface.default
+  },
   supporting: {
     ...theme.typography.supporting,
     color: theme.colors.ink.secondary,
     flexShrink: 1
+  },
+  primarySupporting: {
+    color: theme.colors.surface.default
+  },
+  pressed: {
+    opacity: 0.9,
+    transform: [{ translateY: theme.border.default }]
+  },
+  disabled: {
+    opacity: 0.6
+  },
+  disabledSurface: {
+    borderColor: theme.colors.ink.muted,
+    borderStyle: "dashed"
   }
 });

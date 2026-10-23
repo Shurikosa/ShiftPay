@@ -485,4 +485,16 @@ describe("ForemanShiftsScreen", () => {
     });
     expect(renderedIds(renderer)).toEqual([3]);
   });
+
+  it("selects the foreman Dashboard tab from the explicit Back to dashboard action", async () => {
+    mockedGetManagedShiftsPage.mockResolvedValueOnce(page([], null));
+    const renderer = await renderScreen();
+
+    act(() => {
+      findButton(renderer, "Back to dashboard").props.onPress();
+    });
+
+    expect(navigation.navigate).toHaveBeenCalledWith("ForemanDashboard");
+    expect(navigation.goBack).not.toHaveBeenCalled();
+  });
 });

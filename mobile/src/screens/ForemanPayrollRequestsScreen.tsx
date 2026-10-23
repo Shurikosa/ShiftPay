@@ -1,3 +1,5 @@
+import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
+import type { CompositeScreenProps } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useRef, useState } from "react";
@@ -11,15 +13,15 @@ import { PayoutRequestCard } from "../components/PayoutRequestCard";
 import { Screen } from "../components/Screen";
 import { StateMessage } from "../components/StateMessage";
 import { useAuth } from "../context/AuthContext";
-import type { ForemanStackParamList } from "../types/navigation";
+import type { ForemanStackParamList, ForemanTabParamList } from "../types/navigation";
 import type { PayoutRequest, PayoutRequestStatus } from "../types/payroll";
 import { getErrorMessage } from "../api/errors";
 import { formatStatusLabel } from "../utils/status";
 import { colors, spacing, typography } from "../utils/theme";
 
-type ForemanPayrollRequestsScreenProps = NativeStackScreenProps<
-  ForemanStackParamList,
-  "ForemanPayrollRequests"
+type ForemanPayrollRequestsScreenProps = CompositeScreenProps<
+  BottomTabScreenProps<ForemanTabParamList, "ForemanPayrollRequests">,
+  NativeStackScreenProps<ForemanStackParamList>
 >;
 
 type MutationState =
@@ -244,8 +246,9 @@ export function ForemanPayrollRequestsScreen({
         <Button
           label="Back to dashboard"
           onPress={() => {
-            navigation.goBack();
+            navigation.navigate("ForemanDashboard");
           }}
+          testID="foreman-payroll-back-dashboard"
           variant="ghost"
         />
       </View>

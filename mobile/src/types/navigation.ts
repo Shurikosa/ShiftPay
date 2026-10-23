@@ -1,3 +1,4 @@
+import type { NavigatorScreenParams } from "@react-navigation/native";
 import type { MobileRegistrationRole } from "./auth";
 import type { ManagedShift, WorkerShiftHistoryItem } from "./shifts";
 
@@ -8,26 +9,36 @@ export type AuthStackParamList = {
   } | undefined;
 };
 
-export type WorkerStackParamList = {
+export type WorkerTabParamList = {
   WorkerDashboard: undefined;
-  JoinShift: undefined;
   MyShiftHistory: undefined;
   WorkerPayroll: undefined;
+  More: undefined;
+};
+
+export type WorkerStackParamList = {
+  WorkerTabs: NavigatorScreenParams<WorkerTabParamList> | undefined;
+  JoinShift: undefined;
   WorkerShiftDetails: {
     shift: WorkerShiftHistoryItem;
   };
   OwnSettings: undefined;
 };
 
-export type ForemanStackParamList = {
+export type ForemanTabParamList = {
   ForemanDashboard: undefined;
   ForemanShifts: undefined;
+  ForemanPayrollRequests: undefined;
+  More: undefined;
+};
+
+export type ForemanStackParamList = {
+  ForemanTabs: NavigatorScreenParams<ForemanTabParamList> | undefined;
   ForemanCompanySettings: {
     notice?: string;
   } | undefined;
   ForemanPayRules: undefined;
   CreateShift: undefined;
-  ForemanPayrollRequests: undefined;
   ForemanShiftDetails: {
     shiftId: number;
     initialShift?: ManagedShift;
