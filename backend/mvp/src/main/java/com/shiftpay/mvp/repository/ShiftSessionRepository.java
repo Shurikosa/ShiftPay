@@ -66,13 +66,14 @@ public interface ShiftSessionRepository extends JpaRepository<ShiftSession, Long
 			join fetch shiftSession.company
 			join fetch shiftSession.createdBy
 			where shiftSession.createdBy.id = :createdById
-			  and (:cursorCreatedAt is null
+			  and (:cursorPresent = false
 			       or shiftSession.createdAt < :cursorCreatedAt
 			       or (shiftSession.createdAt = :cursorCreatedAt and shiftSession.id < :cursorId))
 			order by shiftSession.createdAt desc, shiftSession.id desc
 			""")
 	List<ShiftSession> findManagedShiftsPageByCreatedById(
 			@Param("createdById") Long createdById,
+			@Param("cursorPresent") boolean cursorPresent,
 			@Param("cursorCreatedAt") Instant cursorCreatedAt,
 			@Param("cursorId") Long cursorId,
 			Pageable pageable

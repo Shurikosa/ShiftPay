@@ -250,7 +250,7 @@ public class ShiftSessionService {
 		Instant createdAt = decoded == null ? null : decoded.timestamp();
 		Long shiftId = decoded == null ? null : decoded.id();
 		List<ShiftSession> rows = shiftSessionRepository.findManagedShiftsPageByCreatedById(
-				principal.id(), createdAt, shiftId, PageRequest.of(0, limit + 1));
+				principal.id(), decoded != null, createdAt, shiftId, PageRequest.of(0, limit + 1));
 		boolean hasMore = rows.size() > limit;
 		List<ShiftSession> visibleRows = hasMore ? rows.subList(0, limit) : rows;
 		List<ShiftResponse> items = mapManagedShifts(visibleRows, principal);

@@ -3,6 +3,7 @@ package com.shiftpay.mvp.config;
 import com.shiftpay.mvp.security.AuthenticationErrorWriter;
 import com.shiftpay.mvp.security.JwtAuthenticationEntryPoint;
 import com.shiftpay.mvp.security.JwtAuthenticationFilter;
+import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -13,6 +14,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 
 /**
  * Defines HTTP security rules for the stateless JWT-protected backend API.
@@ -40,6 +42,9 @@ public class SecurityConfig {
 			JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint,
 			AuthenticationErrorWriter authenticationErrorWriter
 	) throws Exception {
+		RequestMatcher errorEndpointDispatch = request ->
+				request.getDispatcherType() == DispatcherType.ERROR
+						&& (request.getContextPath() + "/error").equals(request.getRequestURI());
 		return http
 				.csrf(AbstractHttpConfigurer::disable)
 				.httpBasic(AbstractHttpConfigurer::disable)
@@ -50,6 +55,7 @@ public class SecurityConfig {
 						.accessDeniedHandler((request, response, exception) ->
 								authenticationErrorWriter.writeForbidden(request, response, "Forbidden")))
 				.authorizeHttpRequests((requests) -> requests
+						.requestMatchers(errorEndpointDispatch).permitAll()
 						.requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll()
 						.requestMatchers(HttpMethod.GET, "/v3/api-docs").permitAll()
 						.requestMatchers(HttpMethod.GET, "/v3/api-docs/**").permitAll()

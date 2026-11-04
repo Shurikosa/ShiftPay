@@ -4,15 +4,24 @@ import com.shiftpay.mvp.dto.ConfirmMyEmailChangeRequest;
 import com.shiftpay.mvp.dto.StartMyEmailChangeRequest;
 import com.shiftpay.mvp.entity.CredentialSecurityEvent;
 import com.shiftpay.mvp.entity.CredentialSecurityEventType;
+import com.shiftpay.mvp.entity.AttendanceStatus;
+import com.shiftpay.mvp.entity.Company;
 import com.shiftpay.mvp.entity.PendingEmailChange;
 import com.shiftpay.mvp.entity.Role;
+import com.shiftpay.mvp.entity.ShiftAttendance;
+import com.shiftpay.mvp.entity.ShiftSession;
+import com.shiftpay.mvp.entity.ShiftStatus;
 import com.shiftpay.mvp.entity.User;
 import com.shiftpay.mvp.exception.ApiErrorException;
 import com.shiftpay.mvp.repository.CredentialSecurityEventRepository;
+import com.shiftpay.mvp.repository.CompanyRepository;
 import com.shiftpay.mvp.repository.EmailIdentityLockRepository;
 import com.shiftpay.mvp.repository.PendingEmailChangeRepository;
+import com.shiftpay.mvp.repository.ShiftAttendanceRepository;
+import com.shiftpay.mvp.repository.ShiftSessionRepository;
 import com.shiftpay.mvp.repository.UserRepository;
 import com.shiftpay.mvp.security.AuthenticatedUserPrincipal;
+import com.shiftpay.mvp.security.JwtService;
 import com.shiftpay.mvp.service.EmailChangeDelivery;
 import com.shiftpay.mvp.service.EmailChangeService;
 import com.shiftpay.mvp.service.EmailIdentityLockInitializer;
@@ -20,17 +29,23 @@ import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.http.HttpHeaders;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
@@ -38,9 +53,18 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.math.BigDecimal;
+import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -55,11 +79,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @Testcontainers
 @SpringBootTest
+@AutoConfigureMockMvc
 @Import(PostgreSqlIntegrationTests.DeliveryConfiguration.class)
 class PostgreSqlIntegrationTests {
+	private static final OffsetDateTime HISTORY_JOINED_AT = OffsetDateTime.of(
+			2026, 10, 1, 10, 0, 0, 0, ZoneOffset.UTC);
 
 	@Container
 	static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine")
@@ -78,7 +107,12 @@ class PostgreSqlIntegrationTests {
 	}
 
 	@Autowired JdbcTemplate jdbcTemplate;
+	@Autowired MockMvc mockMvc;
+	@Autowired CompanyRepository companyRepository;
+	@Autowired JwtService jwtService;
 	@Autowired UserRepository userRepository;
+	@Autowired ShiftAttendanceRepository shiftAttendanceRepository;
+	@Autowired ShiftSessionRepository shiftSessionRepository;
 	@Autowired PendingEmailChangeRepository pendingRepository;
 	@Autowired CredentialSecurityEventRepository eventRepository;
 	@Autowired EmailIdentityLockRepository identityLockRepository;
@@ -94,6 +128,163 @@ class PostgreSqlIntegrationTests {
 		delivery.accept.set(true);
 		delivery.acceptedDeliveries.set(0);
 		delivery.deliveredCodes.clear();
+	}
+
+	@Test
+	void firstHistoryPagesBindNullCursorOnPostgreSql() {
+		User worker = createUser("first-page-repro@example.com");
+		assertThat(shiftAttendanceRepository.findMyHistoryPageByWorkerId(
+				worker.getId(), false, null, null, PageRequest.of(0, 6))).isEmpty();
+		assertThat(shiftSessionRepository.findManagedShiftsPageByCreatedById(
+				worker.getId(), false, null, null, PageRequest.of(0, 6))).isEmpty();
+	}
+
+	@ParameterizedTest
+	@ValueSource(ints = {5, 20})
+	void personalAndManagedEndpointsTraversePostgreSqlPagesWithoutGaps(int limit) throws Exception {
+		Company company = createCompany("Page Co", "PAGECO");
+		Company otherCompany = createCompany("Other Co", "OTHERCO");
+		User worker = createUser("page.worker@example.com", Role.WORKER, company);
+		User foreman = createUser("page.foreman@example.com", Role.FOREMAN, company);
+		User anotherWorker = createUser("another.worker@example.com", Role.WORKER, company);
+		User anotherForeman = createUser("another.foreman@example.com", Role.FOREMAN, company);
+		User foreignWorker = createUser("foreign.worker@example.com", Role.WORKER, otherCompany);
+		User foreignForeman = createUser("foreign.foreman@example.com", Role.FOREMAN, otherCompany);
+
+		List<Long> shiftIds = new ArrayList<>();
+		List<Long> attendanceIds = new ArrayList<>();
+		for (int index = 1; index <= 23; index++) {
+			ShiftSession shift = createHistoryShift(index, company, foreman);
+			shiftIds.add(shift.getId());
+			attendanceIds.add(createHistoryAttendance(shift, worker, HISTORY_JOINED_AT).getId());
+		}
+		ShiftSession sameCompanyOtherOwner = createHistoryShift(24, company, anotherForeman);
+		createHistoryAttendance(sameCompanyOtherOwner, anotherWorker, HISTORY_JOINED_AT);
+		ShiftSession foreignShift = createHistoryShift(25, otherCompany, foreignForeman);
+		createHistoryAttendance(foreignShift, foreignWorker, HISTORY_JOINED_AT);
+		jdbcTemplate.update("update shift_sessions set created_at = ?",
+				Timestamp.from(HISTORY_JOINED_AT.toInstant()));
+		Collections.reverse(shiftIds);
+		Collections.reverse(attendanceIds);
+
+		String workerToken = jwtService.generateAccessToken(worker);
+		String foremanToken = jwtService.generateAccessToken(foreman);
+		JsonNode firstPersonal = getHistoryPage("/api/v1/me/shifts/page", limit, null, workerToken);
+		JsonNode firstManaged = getHistoryPage("/api/v1/me/managed-shifts/page", limit, null, foremanToken);
+		assertThat(ids(firstPersonal, "attendanceId")).isEqualTo(attendanceIds.subList(0, limit));
+		assertThat(ids(firstManaged, "id")).isEqualTo(shiftIds.subList(0, limit));
+		assertThat(firstPersonal.path("hasMore").asBoolean()).isTrue();
+		assertThat(firstManaged.path("hasMore").asBoolean()).isTrue();
+
+		// An insertion after the first page must not displace or reappear in older pages.
+		ShiftSession newer = createHistoryShift(26, company, foreman);
+		ShiftAttendance newerAttendance = createHistoryAttendance(newer, worker, HISTORY_JOINED_AT.plusDays(1));
+		assertThat(newer.getId()).isNotIn(shiftIds);
+		assertThat(newerAttendance.getId()).isNotIn(attendanceIds);
+
+		assertTraversal("/api/v1/me/shifts/page", limit, workerToken,
+				firstPersonal, "attendanceId", attendanceIds);
+		assertTraversal("/api/v1/me/managed-shifts/page", limit, foremanToken,
+				firstManaged, "id", shiftIds);
+
+		assertThat(ids(getHistoryPage("/api/v1/me/shifts/page", 5, null,
+				jwtService.generateAccessToken(anotherWorker)), "attendanceId")).hasSize(1);
+		assertThat(ids(getHistoryPage("/api/v1/me/managed-shifts/page", 5, null,
+				jwtService.generateAccessToken(anotherForeman)), "id"))
+				.containsExactly(sameCompanyOtherOwner.getId());
+		assertThat(ids(getHistoryPage("/api/v1/me/managed-shifts/page", 5, null,
+				jwtService.generateAccessToken(foreignForeman)), "id"))
+				.containsExactly(foreignShift.getId());
+		mockMvc.perform(get("/api/v1/me/managed-shifts/page")
+					.param("limit", Integer.toString(limit))
+					.header(HttpHeaders.AUTHORIZATION, "Bearer " + workerToken))
+				.andExpect(status().isForbidden());
+		mockMvc.perform(get("/api/v1/me/shifts/page").param("limit", Integer.toString(limit)))
+				.andExpect(status().isUnauthorized());
+	}
+
+	private void assertTraversal(
+			String path, int limit, String token, JsonNode firstPage,
+			String idField, List<Long> expectedIds
+	) throws Exception {
+		List<Long> visited = new ArrayList<>(ids(firstPage, idField));
+		JsonNode page = firstPage;
+		while (page.path("hasMore").asBoolean()) {
+			String cursor = page.path("nextCursor").asString();
+			assertThat(cursor).isNotBlank();
+			page = getHistoryPage(path, limit, cursor, token);
+			assertThat(ids(page, idField)).hasSizeLessThanOrEqualTo(limit);
+			visited.addAll(ids(page, idField));
+		}
+		assertThat(page.path("nextCursor").isNull()).isTrue();
+		assertThat(page.path("hasMore").asBoolean()).isFalse();
+		assertThat(new HashSet<>(visited)).hasSize(visited.size());
+		assertThat(visited).isEqualTo(expectedIds);
+	}
+
+	private JsonNode getHistoryPage(String path, int limit, String cursor, String token) throws Exception {
+		var request = get(path).param("limit", Integer.toString(limit))
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + token);
+		if (cursor != null) {
+			request.param("cursor", cursor);
+		}
+		var result = mockMvc.perform(request).andExpect(status().isOk()).andReturn();
+		return JsonMapper.shared().readTree(result.getResponse().getContentAsString());
+	}
+
+	private List<Long> ids(JsonNode page, String field) {
+		List<Long> result = new ArrayList<>();
+		for (JsonNode item : page.path("items")) {
+			result.add(item.path(field).asLong());
+		}
+		return result;
+	}
+
+	private Company createCompany(String name, String joinCode) {
+		Company company = new Company();
+		company.setName(name);
+		company.setJoinCode(joinCode);
+		company.setTimeZone("Europe/Berlin");
+		company.setCurrencyLabel("EUR");
+		company.setDefaultWorkerHourlyRate(new BigDecimal("20.00"));
+		company.setDefaultForemanHourlyRate(new BigDecimal("30.00"));
+		return companyRepository.saveAndFlush(company);
+	}
+
+	private User createUser(String email, Role role, Company company) {
+		User user = new User();
+		user.setEmail(email);
+		user.setPasswordHash(passwordEncoder.encode("password123"));
+		user.setFirstName("Postgres");
+		user.setLastName("Page");
+		user.setRole(role);
+		user.setCompany(company);
+		return userRepository.saveAndFlush(user);
+	}
+
+	private ShiftSession createHistoryShift(int index, Company company, User foreman) {
+		ShiftSession shift = new ShiftSession();
+		shift.setCompany(company);
+		shift.setCreatedBy(foreman);
+		shift.setTitle("Page shift " + index);
+		shift.setJoinCode("PAGE" + index);
+		shift.setStatus(ShiftStatus.OPEN);
+		shift.setDefaultBreakMinutes(0);
+		shift.setDefaultHourlyRate(new BigDecimal("20.00"));
+		shift.setForemanHourlyRate(new BigDecimal("30.00"));
+		shift.setCurrencyLabel("EUR");
+		return shiftSessionRepository.saveAndFlush(shift);
+	}
+
+	private ShiftAttendance createHistoryAttendance(ShiftSession shift, User worker, OffsetDateTime joinedAt) {
+		ShiftAttendance attendance = new ShiftAttendance();
+		attendance.setShiftSession(shift);
+		attendance.setWorker(worker);
+		attendance.setStatus(AttendanceStatus.JOINED);
+		attendance.setHourlyRate(new BigDecimal("20.00"));
+		attendance.setBreakMinutes(0);
+		attendance.setJoinedAt(joinedAt);
+		return shiftAttendanceRepository.saveAndFlush(attendance);
 	}
 
 	@Test
