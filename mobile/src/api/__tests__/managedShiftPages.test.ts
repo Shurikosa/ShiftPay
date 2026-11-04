@@ -1,4 +1,4 @@
-import { getManagedShiftsPage } from "../shifts";
+import { getManagedDashboardShifts, getManagedShiftsPage } from "../shifts";
 import type { ManagedShiftPageResponse } from "../../types/shifts";
 
 jest.mock("../../config/env", () => ({
@@ -34,6 +34,24 @@ describe("managed shift page API", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8080/api/v1/me/managed-shifts/page?limit=20",
+      {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+          Authorization: "Bearer foreman-token"
+        },
+        body: undefined
+      }
+    );
+  });
+
+  it("requests the foreman dashboard page with exactly the dashboard limit", async () => {
+    fetchMock.mockResolvedValueOnce(response(page));
+
+    await expect(getManagedDashboardShifts("foreman-token")).resolves.toEqual(page);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:8080/api/v1/me/managed-shifts/page?limit=5",
       {
         method: "GET",
         headers: {

@@ -79,6 +79,15 @@ export function getManagedShiftsPage(
   );
 }
 
+export function getManagedDashboardShifts(
+  token: string
+): Promise<ManagedShiftPageResponse> {
+  return apiRequest<ManagedShiftPageResponse>(
+    "/api/v1/me/managed-shifts/page?limit=5",
+    { token }
+  );
+}
+
 export function createShift(
   token: string,
   payload: CreateShiftRequest

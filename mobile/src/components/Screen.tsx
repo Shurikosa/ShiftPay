@@ -45,6 +45,10 @@ type ScreenInsetStyle = Pick<
   | "paddingVertical"
 >;
 
+type MutableScreenInsetStyle = {
+  -readonly [TKey in keyof ScreenInsetStyle]: ScreenInsetStyle[TKey];
+};
+
 type ScreenProps = {
   children: React.ReactNode;
   scroll?: boolean;
@@ -62,7 +66,7 @@ function normalizeInsetStyle(style: StyleProp<ScreenInsetStyle>): ScreenInsetSty
     return undefined;
   }
 
-  const normalized: ScreenInsetStyle = {};
+  const normalized: MutableScreenInsetStyle = {};
   const insetKeys: (keyof ScreenInsetStyle)[] = [
     "padding",
     "paddingBottom",

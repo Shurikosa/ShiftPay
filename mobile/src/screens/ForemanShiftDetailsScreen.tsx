@@ -1,7 +1,8 @@
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useFocusEffect } from "@react-navigation/native";
-import { useCallback, useRef, useState } from "react";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, StyleSheet, Text, View } from "react-native";
+import { ApiError, getErrorMessage } from "../api/errors";
 import {
   approveAttendance,
   cancelShift,
@@ -15,37 +16,41 @@ import {
   startMyPause,
   startShift
 } from "../api/shifts";
-import { ApiError, getErrorMessage } from "../api/errors";
 import { Button } from "../components/Button";
+import { Card } from "../components/Card";
 import { DetailRow } from "../components/DetailRow";
+import { Feedback } from "../components/Feedback";
 import { PayCalculationBreakdown } from "../components/PayCalculationBreakdown";
 import { Screen } from "../components/Screen";
-import { StateMessage } from "../components/StateMessage";
+import { ScreenHeader } from "../components/ScreenHeader";
+import { SectionHeader } from "../components/SectionHeader";
 import { StatusBadge } from "../components/StatusBadge";
 import { useAuth } from "../context/AuthContext";
 import { useForemanManagedShifts } from "../hooks/useForemanManagedShifts";
+import type { User } from "../types/auth";
 import type { ForemanStackParamList } from "../types/navigation";
-import type { ManagedShift, ShiftAttendance } from "../types/shifts";
+import type {
+  ManagedShift,
+  ShiftAttendance,
+  ShiftStatus
+} from "../types/shifts";
 import {
   formatDateTime,
   formatMoneyWithCurrencyLabel,
-  formatMinutes,
-  formatOptionalLocation,
-  formatRate
+  formatMinutes
 } from "../utils/format";
 import {
   formatPauseMinutes,
   getPauseActionErrorMessage,
-  isPaused,
   missingPauseStateMessage
 } from "../utils/pauseDisplay";
 import {
   formatStatusLabel,
-  getAttendanceStatusTone,
-  getPaymentStatusTone,
-  getShiftStatusTone
+  getAttendanceStatusPresentation,
+  getPaymentStatusPresentation,
+  getShiftStatusPresentation
 } from "../utils/status";
-import { colors, radii, spacing, typography } from "../utils/theme";
+import { theme } from "../utils/theme";
 
 type ForemanShiftDetailsScreenProps = NativeStackScreenProps<
   ForemanStackParamList,
@@ -61,6 +66,17 @@ type MutationName =
   | "pause-self"
   | "pause-all";
 
+type MutationState = {
+  type: MutationName;
+  attendanceId?: number;
+};
+
+type MutationOptions = {
+  allowDuringShortShiftDecision?: boolean;
+  closeShortShiftDecisionAfterSuccess?: boolean;
+  handleError?: (error: unknown) => boolean;
+};
+
 const shortShiftDecisionCode = "SHORT_SHIFT_REQUIRES_DECISION";
 
 function isShortShiftDecisionError(error: unknown): error is ApiError {
@@ -71,17 +87,44 @@ function isShortShiftDecisionError(error: unknown): error is ApiError {
   );
 }
 
-function getShiftActionErrorMessage(error: unknown): string {
-  if (error instanceof ApiError) {
-    if (error.status === 409) {
-      return "Shift can only be cancelled before it starts.";
-    }
+function ownsShift(user: User | null, shift: ManagedShift | null | undefined): boolean {
+  return Boolean(
+    user?.role === "FOREMAN" &&
+      user.company &&
+      shift &&
+      shift.createdBy === user.id &&
+      shift.companyId === user.company.id
+  );
+}
 
-    if (error.status === 403) {
-      return "You are not authorized to cancel this shift.";
-    }
+function lifecycleMessage(status: ShiftStatus): string {
+  switch (status) {
+    case "OPEN":
+      return "Workers can join. Start or cancel this shift when ready.";
+    case "ACTIVE":
+      return "The shift is active. Attendance, pauses and close actions are available.";
+    case "CLOSED":
+      return "The shift is closed. Returned final attendance results are available below.";
+    case "CANCELLED":
+      return "This shift was cancelled before completion and has no summary action.";
+    case "DISCARDED":
+      return "This short shift was discarded and is not payable or summarizable.";
+    case "CREATED":
+      return "The current lifecycle state is not available for mobile actions.";
   }
+}
 
+function shortDecisionMessage(error: ApiError): string {
+  const duration = formatMinutes(error.details?.actualDurationMinutes ?? null);
+  const minimum = formatMinutes(error.details?.minimumDurationMinutes ?? null);
+  return `Backend measured ${duration}; the configured minimum is ${minimum}. Save the shift for payroll, discard it, or keep it active.`;
+}
+
+function getCancelErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 409) return "Shift can only be cancelled before it starts.";
+    if (error.status === 403) return "You are not authorized to cancel this shift.";
+  }
   return getErrorMessage(error);
 }
 
@@ -91,785 +134,1115 @@ export function ForemanShiftDetailsScreen({
 }: ForemanShiftDetailsScreenProps) {
   const { shiftId, initialShift } = route.params;
   const { authenticatedRequest, user } = useAuth();
-  const { refresh: refreshManagedShifts } = useForemanManagedShifts({ loadOnFocus: false });
-  const [shift, setShift] = useState<ManagedShift | null>(initialShift ?? null);
+  const { refresh: refreshManagedShifts } = useForemanManagedShifts({
+    loadOnFocus: false
+  });
+  const baseAccess = user?.role === "FOREMAN" && user.company !== null;
+  const safeInitialShift = ownsShift(user, initialShift) ? initialShift ?? null : null;
+  const [shift, setShift] = useState<ManagedShift | null>(safeInitialShift);
   const [attendance, setAttendance] = useState<ShiftAttendance[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [shiftLoading, setShiftLoading] = useState(baseAccess);
+  const [attendanceLoading, setAttendanceLoading] = useState(baseAccess);
+  const [shiftError, setShiftError] = useState<string | null>(null);
+  const [attendanceError, setAttendanceError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [mutation, setMutation] = useState<{
-    type: MutationName;
-    attendanceId?: number;
-  } | null>(null);
+  const [ownershipDenied, setOwnershipDenied] = useState(false);
+  const [mutation, setMutation] = useState<MutationState | null>(null);
   const [shortShiftDecisionOpen, setShortShiftDecisionOpen] = useState(false);
+  const [shortShiftDecisionMessage, setShortShiftDecisionMessage] = useState("");
+  const [awaitingAuthoritativeRefresh, setAwaitingAuthoritativeRefresh] =
+    useState(baseAccess);
+  const mountedRef = useRef(true);
+  const focusedRef = useRef(false);
+  const shiftRef = useRef<ManagedShift | null>(safeInitialShift);
+  const attendanceRef = useRef<ShiftAttendance[]>([]);
+  const userRef = useRef(user);
+  const loadSequenceRef = useRef(0);
+  const mutationSequenceRef = useRef(0);
   const mutationInFlightRef = useRef(false);
   const shortShiftDecisionOpenRef = useRef(false);
-  const detailsLoadSequenceRef = useRef(0);
-  const isDetailsScreenFocusedRef = useRef(false);
+  const awaitingAuthoritativeRefreshRef = useRef(baseAccess);
 
-  const setShortShiftDecisionGuard = (isOpen: boolean) => {
-    shortShiftDecisionOpenRef.current = isOpen;
-    setShortShiftDecisionOpen(isOpen);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      focusedRef.current = false;
+      loadSequenceRef.current += 1;
+      mutationSequenceRef.current += 1;
+      mutationInFlightRef.current = false;
+      shortShiftDecisionOpenRef.current = false;
+      awaitingAuthoritativeRefreshRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    shiftRef.current = shift;
+    attendanceRef.current = attendance;
+    userRef.current = user;
+  }, [attendance, shift, user]);
+
+  const setShortShiftDecision = (open: boolean, message = "") => {
+    shortShiftDecisionOpenRef.current = open;
+    setShortShiftDecisionOpen(open);
+    setShortShiftDecisionMessage(message);
   };
 
-  const beginMutation = (
-    nextMutation: {
-      type: MutationName;
-      attendanceId?: number;
-    },
-    options: { allowDuringShortShiftDecision?: boolean } = {}
-  ): boolean => {
-    if (
-      mutationInFlightRef.current ||
-      (shortShiftDecisionOpenRef.current && !options.allowDuringShortShiftDecision)
-    ) {
-      return false;
-    }
-
-    mutationInFlightRef.current = true;
-    setMutation(nextMutation);
-    return true;
+  const setAuthoritativeRefreshRequired = (required: boolean) => {
+    awaitingAuthoritativeRefreshRef.current = required;
+    setAwaitingAuthoritativeRefresh(required);
   };
 
-  const finishMutation = () => {
-    mutationInFlightRef.current = false;
-    setMutation(null);
-  };
+  const loadDetails = useCallback(
+    async (authoritativeRefreshRequired = false): Promise<boolean> => {
+      if (!focusedRef.current || !baseAccess) return false;
 
-  const loadDetails = useCallback(async () => {
-    if (!isDetailsScreenFocusedRef.current) {
-      return;
-    }
+      const sequence = ++loadSequenceRef.current;
+      const isCurrent = () =>
+        mountedRef.current &&
+        focusedRef.current &&
+        loadSequenceRef.current === sequence;
 
-    const loadSequence = ++detailsLoadSequenceRef.current;
-    const isCurrentLoad = () =>
-      isDetailsScreenFocusedRef.current &&
-      detailsLoadSequenceRef.current === loadSequence;
+      if (authoritativeRefreshRequired) {
+        awaitingAuthoritativeRefreshRef.current = true;
+        setAwaitingAuthoritativeRefresh(true);
+      }
+      setShiftLoading(true);
+      setAttendanceLoading(true);
+      setShiftError(null);
+      setAttendanceError(null);
 
-    setLoading(true);
-    setError(null);
+      let nextShift: ManagedShift;
+      try {
+        nextShift = await authenticatedRequest((token) =>
+          getShiftById(token, shiftId)
+        );
+      } catch (caughtError) {
+        if (isCurrent()) {
+          setShiftError(getErrorMessage(caughtError));
+          setShiftLoading(false);
+          setAttendanceLoading(false);
+        }
+        return false;
+      }
 
-    try {
-      const [nextShift, nextAttendance] = await authenticatedRequest(async (token) =>
-        Promise.all([
-          getShiftById(token, shiftId),
+      if (!isCurrent()) return false;
+
+      if (!ownsShift(userRef.current, nextShift)) {
+        shiftRef.current = null;
+        attendanceRef.current = [];
+        setShift(null);
+        setAttendance([]);
+        setOwnershipDenied(true);
+        setShiftLoading(false);
+        setAttendanceLoading(false);
+        setAuthoritativeRefreshRequired(false);
+        return false;
+      }
+
+      shiftRef.current = nextShift;
+      setShift(nextShift);
+      setOwnershipDenied(false);
+      setShiftLoading(false);
+
+      try {
+        const nextAttendance = await authenticatedRequest((token) =>
           getShiftAttendance(token, shiftId)
-        ])
-      );
+        );
+        if (!isCurrent()) return false;
 
-      if (isCurrentLoad()) {
-        setShift(nextShift);
+        attendanceRef.current = nextAttendance;
         setAttendance(nextAttendance);
+        setAttendanceError(null);
+        setAuthoritativeRefreshRequired(false);
+        return true;
+      } catch (caughtError) {
+        if (isCurrent()) {
+          setAttendanceError(getErrorMessage(caughtError));
+        }
+        return false;
+      } finally {
+        if (isCurrent()) setAttendanceLoading(false);
       }
-    } catch (caughtError) {
-      if (isCurrentLoad()) {
-        setError(getErrorMessage(caughtError));
-      }
-    } finally {
-      if (isCurrentLoad()) {
-        setLoading(false);
-      }
-    }
-  }, [authenticatedRequest, shiftId]);
+    },
+    [authenticatedRequest, baseAccess, shiftId]
+  );
 
   useFocusEffect(
     useCallback(() => {
-      isDetailsScreenFocusedRef.current = true;
-      void loadDetails();
+      focusedRef.current = true;
+      mutationInFlightRef.current = false;
+      shortShiftDecisionOpenRef.current = false;
+      setMutation(null);
+      setShortShiftDecisionOpen(false);
+      setShortShiftDecisionMessage("");
+      setActionError(null);
+      setSuccessMessage(null);
+      setAuthoritativeRefreshRequired(true);
+      if (baseAccess) void loadDetails(true);
+
       return () => {
-        isDetailsScreenFocusedRef.current = false;
-        detailsLoadSequenceRef.current += 1;
+        focusedRef.current = false;
+        loadSequenceRef.current += 1;
+        mutationSequenceRef.current += 1;
+        mutationInFlightRef.current = false;
+        shortShiftDecisionOpenRef.current = false;
       };
-    }, [loadDetails])
+    }, [baseAccess, loadDetails])
   );
 
-  const refreshAfterMutation = async () => {
-    await loadDetails();
+  const currentOwnedShift = (): ManagedShift | null => {
+    const current = shiftRef.current;
+    return ownsShift(userRef.current, current) ? current : null;
+  };
+
+  const canRunForStatuses = (statuses: readonly ShiftStatus[]): boolean => {
+    const current = currentOwnedShift();
+    return Boolean(
+      mountedRef.current &&
+        focusedRef.current &&
+        current &&
+        statuses.includes(current.status) &&
+        !awaitingAuthoritativeRefreshRef.current
+    );
+  };
+
+  const beginMutation = (
+    nextMutation: MutationState,
+    options: MutationOptions
+  ): number | null => {
+    if (
+      mutationInFlightRef.current ||
+      awaitingAuthoritativeRefreshRef.current ||
+      (shortShiftDecisionOpenRef.current &&
+        !options.allowDuringShortShiftDecision)
+    ) {
+      return null;
+    }
+
+    mutationInFlightRef.current = true;
+    const sequence = ++mutationSequenceRef.current;
+    setMutation(nextMutation);
+    setActionError(null);
+    setSuccessMessage(null);
+    return sequence;
+  };
+
+  const refreshAfterMutation = async (): Promise<void> => {
+    await loadDetails(true);
     void refreshManagedShifts().catch(() => undefined);
   };
 
-  const runClose = (saveShortShift = false, allowDuringShortShiftDecision = false) => {
-    if (
-      !beginMutation(
-        { type: "close" },
-        { allowDuringShortShiftDecision }
-      )
-    ) {
-      return;
-    }
+  const runMutation = (
+    nextMutation: MutationState,
+    request: (token: string) => Promise<unknown>,
+    success: string,
+    options: MutationOptions = {}
+  ) => {
+    const sequence = beginMutation(nextMutation, options);
+    if (sequence === null) return;
 
-    setError(null);
-    setSuccessMessage(null);
+    const isCurrent = () =>
+      mountedRef.current &&
+      focusedRef.current &&
+      mutationSequenceRef.current === sequence;
 
-    void authenticatedRequest((token) =>
-      closeShift(
-        token,
-        shiftId,
-        saveShortShift ? { saveShortShift: true } : undefined
-      )
-    )
-      .then(() => {
-        setSuccessMessage("Shift closed. Summary is available.");
-        return refreshAfterMutation();
+    void Promise.resolve()
+      .then(() => authenticatedRequest(request))
+      .then(async () => {
+        if (!isCurrent()) return;
+        if (options.closeShortShiftDecisionAfterSuccess) {
+          setShortShiftDecision(false);
+        }
+        setSuccessMessage(success);
+        setAuthoritativeRefreshRequired(true);
+        await refreshAfterMutation();
       })
       .catch((caughtError) => {
-        if (!saveShortShift && isShortShiftDecisionError(caughtError)) {
-          const actualDuration = formatMinutes(
-            caughtError.details?.actualDurationMinutes ?? null
-          );
-          const minimumDuration = formatMinutes(
-            caughtError.details?.minimumDurationMinutes ?? null
-          );
-
-          setShortShiftDecisionGuard(true);
-          Alert.alert(
-            "Short shift",
-            `Backend measured this shift at ${actualDuration}. Minimum is ${minimumDuration}. Save it for payroll or discard it?`,
-            [
-              {
-                text: "Keep active",
-                style: "cancel",
-                onPress: handleKeepShortShiftActive
-              },
-              {
-                text: "Discard",
-                style: "destructive",
-                onPress: handleDiscardShortShift
-              },
-              {
-                text: "Save shift",
-                onPress: handleSaveShortShift
-              }
-            ],
-            { cancelable: false }
-          );
-          return;
+        if (!isCurrent()) return;
+        if (!options.handleError?.(caughtError)) {
+          setActionError(getErrorMessage(caughtError));
         }
-
-        setError(getErrorMessage(caughtError));
       })
       .finally(() => {
-        if (allowDuringShortShiftDecision) {
-          setShortShiftDecisionGuard(false);
-        }
-        finishMutation();
+        if (!isCurrent()) return;
+        mutationInFlightRef.current = false;
+        setMutation(null);
       });
   };
 
   const handleApprove = (attendanceId: number) => {
-    if (!beginMutation({ type: "approve", attendanceId })) {
-      return;
-    }
+    if (!canRunForStatuses(["OPEN", "ACTIVE"])) return;
+    const currentAttendance = attendanceRef.current.find(
+      (item) => item.attendanceId === attendanceId
+    );
+    if (currentAttendance?.status !== "JOINED") return;
 
-    setError(null);
-    setSuccessMessage(null);
-
-    void authenticatedRequest((token) =>
-      approveAttendance(token, shiftId, attendanceId)
-    )
-      .then(() => {
-        setSuccessMessage("Worker attendance approved.");
-        return refreshAfterMutation();
-      })
-      .catch((caughtError) => {
-        setError(getErrorMessage(caughtError));
-      })
-      .finally(() => {
-        finishMutation();
-      });
+    runMutation(
+      { type: "approve", attendanceId },
+      (token) => approveAttendance(token, shiftId, attendanceId),
+      "Worker attendance approved."
+    );
   };
 
   const handleStart = () => {
-    if (!beginMutation({ type: "start" })) {
-      return;
-    }
-
-    setError(null);
-    setSuccessMessage(null);
-
-    void authenticatedRequest((token) => startShift(token, shiftId))
-      .then(() => {
-        setSuccessMessage("Shift started.");
-        return refreshAfterMutation();
-      })
-      .catch((caughtError) => {
-        setError(getErrorMessage(caughtError));
-      })
-      .finally(() => {
-        finishMutation();
-      });
-  };
-
-  const handleClose = () => {
-    runClose();
-  };
-
-  const handleKeepShortShiftActive = () => {
-    if (!shortShiftDecisionOpenRef.current) {
-      return;
-    }
-
-    setShortShiftDecisionGuard(false);
-    void refreshAfterMutation().catch(() => undefined);
-  };
-
-  const handleSaveShortShift = () => {
-    if (!shortShiftDecisionOpenRef.current) {
-      return;
-    }
-
-    runClose(true, true);
-  };
-
-  const handleDiscard = (allowDuringShortShiftDecision = false) => {
-    if (
-      !beginMutation(
-        { type: "discard" },
-        { allowDuringShortShiftDecision }
-      )
-    ) {
-      return;
-    }
-
-    setError(null);
-    setSuccessMessage(null);
-
-    void authenticatedRequest((token) => discardShift(token, shiftId))
-      .then(() => {
-        setSuccessMessage("Short shift discarded.");
-        return refreshAfterMutation();
-      })
-      .catch((caughtError) => {
-        setError(getErrorMessage(caughtError));
-      })
-      .finally(() => {
-        if (allowDuringShortShiftDecision) {
-          setShortShiftDecisionGuard(false);
-        }
-        finishMutation();
-      });
-  };
-
-  const handleDiscardShortShift = () => {
-    if (!shortShiftDecisionOpenRef.current) {
-      return;
-    }
-
-    handleDiscard(true);
+    if (!canRunForStatuses(["OPEN"])) return;
+    runMutation(
+      { type: "start" },
+      (token) => startShift(token, shiftId),
+      "Shift started."
+    );
   };
 
   const handleCancel = () => {
-    if (!beginMutation({ type: "cancel" })) {
-      return;
-    }
-
-    setError(null);
-    setSuccessMessage(null);
-
-    void authenticatedRequest((token) => cancelShift(token, shiftId))
-      .then((cancelledShift) => {
-        setShift(cancelledShift);
-        setSuccessMessage("Shift cancelled.");
-        return refreshAfterMutation();
-      })
-      .catch((caughtError) => {
-        setError(getShiftActionErrorMessage(caughtError));
-      })
-      .finally(() => {
-        finishMutation();
-      });
-  };
-
-  const handleToggleSelfPause = () => {
-    if (shortShiftDecisionOpenRef.current) {
-      return;
-    }
-
-    if (!shift) {
-      return;
-    }
-
-    if (!shift.pauseState) {
-      setSuccessMessage(null);
-      setError(missingPauseStateMessage);
-      return;
-    }
-
-    if (!beginMutation({ type: "pause-self" })) {
-      return;
-    }
-
-    const wasPaused = shift.pauseState.personallyPaused;
-    const nextAction = wasPaused ? endMyPause : startMyPause;
-
-    setError(null);
-    setSuccessMessage(null);
-
-    void authenticatedRequest((token) => nextAction(token, shiftId))
-      .then(() => {
-        setSuccessMessage(wasPaused ? "Your pause ended." : "Your pause started.");
-        return refreshAfterMutation();
-      })
-      .catch((caughtError) => {
-        setError(getPauseActionErrorMessage(caughtError));
-      })
-      .finally(() => {
-        finishMutation();
-      });
-  };
-
-  const handleToggleAllPause = () => {
-    if (shortShiftDecisionOpenRef.current) {
-      return;
-    }
-
-    if (!shift) {
-      return;
-    }
-
-    if (!shift.pauseState) {
-      setSuccessMessage(null);
-      setError(missingPauseStateMessage);
-      return;
-    }
-
-    if (!beginMutation({ type: "pause-all" })) {
-      return;
-    }
-
-    const wasPaused = shift.pauseState.allPaused;
-    const nextAction = wasPaused ? endAllPause : startAllPause;
-
-    setError(null);
-    setSuccessMessage(null);
-
-    void authenticatedRequest((token) => nextAction(token, shiftId))
-      .then(() => {
-        setSuccessMessage(
-          wasPaused ? "Pause for everyone ended." : "Pause for everyone started."
-        );
-        return refreshAfterMutation();
-      })
-      .catch((caughtError) => {
-        setError(getPauseActionErrorMessage(caughtError));
-      })
-      .finally(() => {
-        finishMutation();
-      });
+    if (!canRunForStatuses(["OPEN"])) return;
+    runMutation(
+      { type: "cancel" },
+      (token) => cancelShift(token, shiftId),
+      "Shift cancelled.",
+      {
+        handleError: (caughtError) => {
+          setActionError(getCancelErrorMessage(caughtError));
+          return true;
+        }
+      }
+    );
   };
 
   const handleConfirmCancel = () => {
-    if (mutationInFlightRef.current || shortShiftDecisionOpenRef.current) {
-      return;
-    }
-
+    if (!canRunForStatuses(["OPEN"]) || mutationInFlightRef.current) return;
     Alert.alert(
       "Cancel shift?",
       "This can only be done before the shift starts. Workers will no longer be able to join.",
       [
-        {
-          text: "Keep shift",
-          style: "cancel"
-        },
-        {
-          text: "Cancel shift",
-          style: "destructive",
-          onPress: handleCancel
-        }
+        { text: "Keep shift", style: "cancel" },
+        { text: "Cancel shift", style: "destructive", onPress: handleCancel }
       ]
     );
   };
 
+  const handleToggleSelfPause = () => {
+    if (!canRunForStatuses(["ACTIVE"])) return;
+    const current = currentOwnedShift();
+    if (!current?.pauseState) {
+      setSuccessMessage(null);
+      setActionError(missingPauseStateMessage);
+      return;
+    }
+    const wasPaused = current.pauseState.personallyPaused;
+    runMutation(
+      { type: "pause-self" },
+      (token) =>
+        wasPaused ? endMyPause(token, shiftId) : startMyPause(token, shiftId),
+      wasPaused ? "Your pause ended." : "Your pause started.",
+      {
+        handleError: (caughtError) => {
+          setActionError(getPauseActionErrorMessage(caughtError));
+          return true;
+        }
+      }
+    );
+  };
+
+  const handleToggleAllPause = () => {
+    if (!canRunForStatuses(["ACTIVE"])) return;
+    const current = currentOwnedShift();
+    if (!current?.pauseState) {
+      setSuccessMessage(null);
+      setActionError(missingPauseStateMessage);
+      return;
+    }
+    const wasPaused = current.pauseState.allPaused;
+    runMutation(
+      { type: "pause-all" },
+      (token) =>
+        wasPaused ? endAllPause(token, shiftId) : startAllPause(token, shiftId),
+      wasPaused ? "Pause for everyone ended." : "Pause for everyone started.",
+      {
+        handleError: (caughtError) => {
+          setActionError(getPauseActionErrorMessage(caughtError));
+          return true;
+        }
+      }
+    );
+  };
+
+  const handleClose = (saveShortShift = false) => {
+    if (saveShortShift && !shortShiftDecisionOpenRef.current) return;
+    if (!canRunForStatuses(["ACTIVE"])) return;
+    runMutation(
+      { type: "close" },
+      (token) =>
+        closeShift(
+          token,
+          shiftId,
+          saveShortShift ? { saveShortShift: true } : undefined
+        ),
+      "Shift closed. Summary is available.",
+      {
+        allowDuringShortShiftDecision: saveShortShift,
+        closeShortShiftDecisionAfterSuccess: saveShortShift,
+        handleError: (caughtError) => {
+          if (!saveShortShift && isShortShiftDecisionError(caughtError)) {
+            setShortShiftDecision(true, shortDecisionMessage(caughtError));
+            return true;
+          }
+          return false;
+        }
+      }
+    );
+  };
+
+  const handleDiscardShortShift = () => {
+    if (!canRunForStatuses(["ACTIVE"]) || !shortShiftDecisionOpenRef.current) {
+      return;
+    }
+    runMutation(
+      { type: "discard" },
+      (token) => discardShift(token, shiftId),
+      "Short shift discarded.",
+      {
+        allowDuringShortShiftDecision: true,
+        closeShortShiftDecisionAfterSuccess: true
+      }
+    );
+  };
+
+  const handleKeepShortShiftActive = () => {
+    if (!shortShiftDecisionOpenRef.current || mutationInFlightRef.current) return;
+    setShortShiftDecision(false);
+    void loadDetails(true);
+  };
+
   const handleOpenSummary = () => {
+    const current = currentOwnedShift();
     if (
+      !current ||
+      current.status !== "CLOSED" ||
       mutationInFlightRef.current ||
-      shortShiftDecisionOpenRef.current ||
-      !shift
+      awaitingAuthoritativeRefreshRef.current
     ) {
       return;
     }
-
     navigation.navigate("ShiftSummary", {
       shiftId,
-      shiftTitle: shift.title
+      shiftTitle: current.title
     });
   };
 
-  const handleRefresh = () => {
-    if (mutationInFlightRef.current || shortShiftDecisionOpenRef.current) {
-      return;
-    }
-
-    void loadDetails();
+  const handleRetry = () => {
+    if (mutationInFlightRef.current || shortShiftDecisionOpenRef.current) return;
+    void loadDetails(awaitingAuthoritativeRefreshRef.current);
   };
 
-  const isMutating = mutation !== null;
-  const isActionBlocked = isMutating || shortShiftDecisionOpen;
-  const isDiscarded = shift?.status === "DISCARDED";
-  const canCancel = user?.role === "FOREMAN" && shift?.status === "OPEN";
-  const canStart = shift?.status === "OPEN";
-  const canClose = shift?.status === "ACTIVE";
-  const isActiveForemanShift = user?.role === "FOREMAN" && shift?.status === "ACTIVE";
-  const canPause = isActiveForemanShift && Boolean(shift?.pauseState);
-  const needsPauseStateRefresh = isActiveForemanShift && !shift?.pauseState;
-  const canShowSummary = shift?.status === "CLOSED";
-  const canApproveAttendance = shift?.status === "OPEN" || shift?.status === "ACTIVE";
-  const hasJoinedAttendance = attendance.some((item) => item.status === "JOINED");
+  if (!baseAccess) {
+    return (
+      <Screen>
+        <View style={styles.page} testID="foreman-shift-access-gate">
+          <ScreenHeader
+            backAction={{ label: "Back", onPress: navigation.goBack }}
+            eyebrow="Foreman shift"
+            title="Shift details"
+          />
+          <Feedback
+            message="Only a foreman with a company can manage shift details."
+            mode="screen"
+            title="Foreman company access required"
+            tone="error"
+          />
+        </View>
+      </Screen>
+    );
+  }
+
+  const statusPresentation = shift
+    ? getShiftStatusPresentation(shift.status)
+    : undefined;
+  const owned = ownsShift(user, shift);
+  const actionBlocked =
+    mutation !== null ||
+    shortShiftDecisionOpen ||
+    awaitingAuthoritativeRefresh ||
+    shiftLoading ||
+    attendanceLoading;
+  const canStart = owned && shift?.status === "OPEN";
+  const canCancel = owned && shift?.status === "OPEN";
+  const canPause = owned && shift?.status === "ACTIVE" && shift.pauseState !== undefined;
+  const canClose = owned && shift?.status === "ACTIVE";
+  const canShowSummary = owned && shift?.status === "CLOSED";
+  const canApproveAttendance =
+    owned && (shift?.status === "OPEN" || shift?.status === "ACTIVE");
 
   return (
-    <Screen>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.kicker}>Foreman shift</Text>
-          <Text style={styles.title}>{shift?.title ?? "Shift details"}</Text>
-          {shift ? (
-            <Text style={styles.subtitle}>{formatOptionalLocation(shift.location)}</Text>
-          ) : null}
-        </View>
+    <Screen
+      scroll
+      scrollProps={{
+        accessibilityLabel: "Foreman shift details",
+        testID: "foreman-shift-details-scroll"
+      }}
+    >
+      <View style={styles.page} testID="foreman-shift-details-content">
+        <ScreenHeader
+          backAction={{
+            disabled: mutation !== null,
+            label: "Back",
+            onPress: navigation.goBack
+          }}
+          eyebrow="Foreman shift"
+          subtitle={shift ? shift.companyName : "Manage one of your company shifts."}
+          title={shift?.title ?? "Shift details"}
+        />
 
         {successMessage ? (
-          <StateMessage title="Updated" message={successMessage} tone="success" />
+          <Feedback
+            message={successMessage}
+            testID="foreman-shift-success"
+            title="Updated"
+            tone="success"
+          />
         ) : null}
-        {error ? <StateMessage title="Shift action failed" message={error} tone="error" /> : null}
+        {actionError ? (
+          <Feedback
+            message={actionError}
+            testID="foreman-shift-action-error"
+            title="Shift action failed"
+            tone="error"
+          />
+        ) : null}
 
-        {loading && !shift ? (
-          <StateMessage loading title="Loading shift" message="Fetching shift details." />
-        ) : shift ? (
+        {ownershipDenied ? (
+          <Feedback
+            message="This shift does not belong to your foreman account and company."
+            mode="screen"
+            testID="foreman-shift-owner-gate"
+            title="Shift access denied"
+            tone="error"
+          />
+        ) : shiftLoading && !shift ? (
+          <Feedback
+            loading
+            message="Fetching the shift before showing private details and actions."
+            mode="screen"
+            testID="foreman-shift-loading"
+            title="Loading shift"
+          />
+        ) : shiftError && !shift ? (
+          <Feedback
+            action={{
+              label: "Retry",
+              onPress: handleRetry,
+              testID: "foreman-shift-retry"
+            }}
+            message={shiftError}
+            mode="screen"
+            testID="foreman-shift-error"
+            title="Could not load shift"
+            tone="error"
+          />
+        ) : shift && owned ? (
           <>
-            <View style={styles.badges}>
-              <StatusBadge label={shift.status} tone={getShiftStatusTone(shift.status)} />
-              {isPaused(shift.pauseState) && !isDiscarded ? (
-                <StatusBadge label="PAUSED" tone="warning" />
-              ) : null}
-            </View>
-
-            {isDiscarded ? (
-              <StateMessage
-                title="Discarded shift"
-                message="This short shift was not saved for payroll and cannot be summarized."
+            {shiftError ? (
+              <Feedback
+                action={{ label: "Retry refresh", onPress: handleRetry }}
+                message={shiftError}
+                testID="foreman-shift-refresh-error"
+                title="Could not refresh shift"
+                tone="error"
               />
             ) : null}
 
-            <View style={styles.panel}>
-              <DetailRow label="Company" value={shift.companyName} />
-              <DetailRow label="Join code" value={shift.joinCode} />
-              <DetailRow label="Actual start" value={formatDateTime(shift.actualStartTime)} />
-              <DetailRow label="Actual end" value={formatDateTime(shift.actualEndTime)} />
-              {shift.discardedAt ? (
-                <DetailRow label="Discarded" value={formatDateTime(shift.discardedAt)} />
-              ) : null}
-              {shift.discardReason ? (
-                <DetailRow label="Discard reason" value={formatStatusLabel(shift.discardReason)} />
-              ) : null}
-              <DetailRow label="Default break" value={`${shift.defaultBreakMinutes} min`} />
-              <DetailRow label="Worker hourly rate" value={`${formatRate(shift.defaultHourlyRate)} ${shift.currencyLabel ?? "currency unavailable"}`} />
-              {shift.foremanHourlyRate !== undefined ? (
+            <Card testID="foreman-shift-lifecycle-card">
+              <View style={styles.cardContent}>
+                <SectionHeader
+                  supportingText={lifecycleMessage(shift.status)}
+                  title="Lifecycle"
+                />
+                <View style={styles.badges}>
+                  {statusPresentation ? (
+                    <StatusBadge
+                      accessibilityLabel="Shift status"
+                      label={statusPresentation.label}
+                      tone={statusPresentation.tone}
+                    />
+                  ) : null}
+                  {shift.pauseState?.personallyPaused ? (
+                    <StatusBadge label="Personal pause active" tone="warning" />
+                  ) : null}
+                  {shift.pauseState?.allPaused ? (
+                    <StatusBadge label="Crew pause active" tone="warning" />
+                  ) : null}
+                </View>
+                {shift.actualStartTime ? (
+                  <DetailRow
+                    label="Actual start"
+                    value={formatDateTime(shift.actualStartTime)}
+                  />
+                ) : null}
+                {shift.actualEndTime ? (
+                  <DetailRow
+                    label="Actual end"
+                    value={formatDateTime(shift.actualEndTime)}
+                  />
+                ) : null}
+                {shift.discardedAt ? (
+                  <DetailRow
+                    label="Discarded"
+                    value={formatDateTime(shift.discardedAt)}
+                  />
+                ) : null}
+                {shift.discardReason ? (
+                  <DetailRow
+                    label="Discard reason"
+                    value={formatStatusLabel(shift.discardReason)}
+                  />
+                ) : null}
+              </View>
+            </Card>
+
+            <Card testID="foreman-shift-info-card">
+              <View style={styles.cardContent}>
+                <SectionHeader
+                  supportingText="Identifiers and location returned for this shift."
+                  title="Shift information"
+                />
+                <DetailRow label="Company" value={shift.companyName} />
+                <DetailRow label="Join code" value={shift.joinCode} />
+                {shift.location?.trim() ? (
+                  <DetailRow label="Location" value={shift.location} />
+                ) : null}
+              </View>
+            </Card>
+
+            <Card testID="foreman-shift-rates-card">
+              <View style={styles.cardContent}>
+                <SectionHeader
+                  supportingText="Shift snapshots returned by the backend. No pay is calculated on this screen."
+                  title="Rates and default break"
+                />
                 <DetailRow
-                  label="Foreman hourly rate"
-                  value={`${formatRate(shift.foremanHourlyRate)} ${shift.currencyLabel ?? "currency unavailable"}`}
+                  label="Worker hourly rate"
+                  value={formatMoneyWithCurrencyLabel(
+                    shift.defaultHourlyRate,
+                    shift.currencyLabel
+                  )}
                 />
-              ) : null}
-            </View>
+                {shift.foremanHourlyRate !== undefined ? (
+                  <DetailRow
+                    label="Foreman hourly rate"
+                    value={formatMoneyWithCurrencyLabel(
+                      shift.foremanHourlyRate,
+                      shift.currencyLabel
+                    )}
+                  />
+                ) : null}
+                <DetailRow
+                  label="Default break"
+                  value={`${shift.defaultBreakMinutes} min`}
+                />
+              </View>
+            </Card>
 
-            <View style={styles.actions}>
-              {canStart ? (
-                <Button
-                  disabled={isActionBlocked}
-                  label="Start shift"
-                  loading={mutation?.type === "start"}
-                  onPress={handleStart}
+            <Card testID="foreman-shift-pause-card">
+              <View style={styles.cardContent}>
+                <SectionHeader
+                  supportingText="Returned crew and personal pause state for the owner foreman."
+                  title="Pause status"
                 />
-              ) : null}
-              {canCancel ? (
-                <Button
-                  disabled={isActionBlocked}
-                  label="Cancel shift"
-                  loading={mutation?.type === "cancel"}
-                  onPress={handleConfirmCancel}
-                  variant="secondary"
+                {shift.pauseState ? (
+                  <>
+                    <DetailRow
+                      label="Personal pause"
+                      value={
+                        shift.pauseState.personallyPaused ? "Active" : "Not active"
+                      }
+                    />
+                    {shift.pauseState.personalPauseStartedAt ? (
+                      <DetailRow
+                        label="Personal pause started"
+                        value={formatDateTime(
+                          shift.pauseState.personalPauseStartedAt
+                        )}
+                      />
+                    ) : null}
+                    <DetailRow
+                      label="Crew pause"
+                      value={shift.pauseState.allPaused ? "Active" : "Not active"}
+                    />
+                    {shift.pauseState.allPauseStartedAt ? (
+                      <DetailRow
+                        label="Crew pause started"
+                        value={formatDateTime(shift.pauseState.allPauseStartedAt)}
+                      />
+                    ) : null}
+                    {shift.pauseState.effectivePauseMinutes !== null ? (
+                      <DetailRow
+                        label="Foreman effective pause"
+                        value={formatPauseMinutes(
+                          shift.pauseState.effectivePauseMinutes
+                        )}
+                      />
+                    ) : null}
+                  </>
+                ) : (
+                  <Feedback
+                    message={missingPauseStateMessage}
+                    testID="foreman-shift-pause-unavailable"
+                    title="Pause state unavailable"
+                  />
+                )}
+              </View>
+            </Card>
+
+            <Card testID="foreman-shift-actions-card">
+              <View style={styles.cardContent}>
+                <SectionHeader
+                  supportingText="Only actions valid for the current backend lifecycle are shown."
+                  title="Shift actions"
                 />
-              ) : null}
-              {canPause ? (
-                <>
+                <View style={styles.actions}>
+                  {canStart ? (
+                    <Button
+                      disabled={actionBlocked}
+                      label="Start shift"
+                      leadingIcon="play"
+                      loading={mutation?.type === "start"}
+                      onPress={handleStart}
+                      testID="foreman-shift-start"
+                    />
+                  ) : null}
+                  {canPause ? (
+                    <>
+                      <Button
+                        disabled={actionBlocked}
+                        label={
+                          shift.pauseState?.personallyPaused
+                            ? "Resume myself"
+                            : "Pause myself"
+                        }
+                        leadingIcon={
+                          shift.pauseState?.personallyPaused ? "play" : "pause"
+                        }
+                        loading={mutation?.type === "pause-self"}
+                        onPress={handleToggleSelfPause}
+                        testID="foreman-shift-self-pause"
+                        variant="secondary"
+                      />
+                      <Button
+                        disabled={actionBlocked}
+                        label={
+                          shift.pauseState?.allPaused
+                            ? "Resume everyone"
+                            : "Pause everyone"
+                        }
+                        leadingIcon={
+                          shift.pauseState?.allPaused ? "play" : "pause"
+                        }
+                        loading={mutation?.type === "pause-all"}
+                        onPress={handleToggleAllPause}
+                        testID="foreman-shift-all-pause"
+                        variant="secondary"
+                      />
+                    </>
+                  ) : null}
+                  {canClose ? (
+                    <Button
+                      disabled={actionBlocked}
+                      label="Close shift"
+                      leadingIcon="stop"
+                      loading={mutation?.type === "close"}
+                      onPress={() => handleClose(false)}
+                      testID="foreman-shift-close"
+                    />
+                  ) : null}
+                  {canShowSummary ? (
+                    <Button
+                      disabled={actionBlocked}
+                      label="Open summary"
+                      leadingIcon="document"
+                      onPress={handleOpenSummary}
+                      testID="foreman-shift-summary"
+                      variant="secondary"
+                    />
+                  ) : null}
                   <Button
-                    disabled={isActionBlocked}
-                    label={
-                      shift.pauseState?.personallyPaused
-                        ? "Resume myself"
-                        : "Pause myself"
-                    }
-                    loading={mutation?.type === "pause-self"}
-                    onPress={handleToggleSelfPause}
+                    disabled={actionBlocked}
+                    label="Refresh"
+                    leadingIcon="refresh"
+                    loading={shiftLoading || attendanceLoading}
+                    onPress={handleRetry}
+                    testID="foreman-shift-refresh"
+                    variant="secondary"
+                  />
+                </View>
+              </View>
+            </Card>
+
+            {shortShiftDecisionOpen ? (
+              <Card subtle testID="foreman-short-shift-decision">
+                <View style={styles.cardContent}>
+                  <SectionHeader
+                    supportingText={shortShiftDecisionMessage}
+                    title="Short shift decision"
+                  />
+                  <Button
+                    disabled={mutation !== null}
+                    label="Save shift"
+                    loading={mutation?.type === "close"}
+                    onPress={() => handleClose(true)}
+                    testID="foreman-short-shift-save"
+                  />
+                  <Button
+                    disabled={mutation !== null}
+                    label="Keep active"
+                    onPress={handleKeepShortShiftActive}
+                    testID="foreman-short-shift-keep"
                     variant="secondary"
                   />
                   <Button
-                    disabled={isActionBlocked}
-                    label={
-                      shift.pauseState?.allPaused
-                        ? "Resume everyone"
-                        : "Pause everyone"
-                    }
-                    loading={mutation?.type === "pause-all"}
-                    onPress={handleToggleAllPause}
-                    variant="secondary"
+                    disabled={mutation !== null}
+                    label="Discard short shift"
+                    loading={mutation?.type === "discard"}
+                    onPress={handleDiscardShortShift}
+                    testID="foreman-short-shift-discard"
+                    variant="destructive"
                   />
-                </>
-              ) : null}
-              {needsPauseStateRefresh ? (
-                <StateMessage
-                  title="Pause state unavailable"
-                  message={missingPauseStateMessage}
-                />
-              ) : null}
-              {canClose ? (
-                <Button
-                  disabled={isActionBlocked}
-                  label="Close shift"
-                  loading={mutation?.type === "close"}
-                  onPress={handleClose}
-                />
-              ) : null}
-              {canShowSummary ? (
-                <Button
-                  disabled={isActionBlocked}
-                  label="Open summary"
-                  onPress={handleOpenSummary}
-                  variant="secondary"
-                />
-              ) : null}
-              <Button
-                disabled={isActionBlocked}
-                label="Refresh"
-                onPress={handleRefresh}
-                variant="secondary"
+                </View>
+              </Card>
+            ) : null}
+
+            {canCancel ? (
+              <Card subtle testID="foreman-shift-destructive-card">
+                <View style={styles.cardContent}>
+                  <SectionHeader
+                    supportingText="Cancellation is only available before this shift starts."
+                    title="Destructive action"
+                  />
+                  <Button
+                    disabled={actionBlocked}
+                    label="Cancel shift"
+                    loading={mutation?.type === "cancel"}
+                    onPress={handleConfirmCancel}
+                    testID="foreman-shift-cancel"
+                    variant="destructive"
+                  />
+                </View>
+              </Card>
+            ) : null}
+
+            <View style={styles.section} testID="foreman-shift-attendance-section">
+              <SectionHeader
+                supportingText="Worker attendance, returned pause state and finalized pay data."
+                title="Attendance"
               />
-            </View>
 
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Attendance</Text>
-
-              {loading ? (
-                <StateMessage loading title="Loading attendance" message="Refreshing workers." />
+              {attendanceLoading && attendance.length === 0 ? (
+                <Feedback
+                  loading
+                  message="Fetching workers for this shift."
+                  mode="screen"
+                  testID="foreman-attendance-loading"
+                  title="Loading attendance"
+                />
+              ) : attendanceError && attendance.length === 0 ? (
+                <Feedback
+                  action={{
+                    label: "Retry",
+                    onPress: handleRetry,
+                    testID: "foreman-attendance-retry"
+                  }}
+                  message={attendanceError}
+                  mode="screen"
+                  testID="foreman-attendance-error"
+                  title="Could not load attendance"
+                  tone="error"
+                />
               ) : attendance.length === 0 ? (
-                <StateMessage
-                  title="No workers joined"
+                <Feedback
                   message={
                     canApproveAttendance
-                      ? "Share the join code with workers while the shift is open or active."
-                      : "No attendance records were created for this shift."
+                      ? "No workers have joined this shift yet."
+                      : "No attendance records were returned for this shift."
                   }
+                  mode="screen"
+                  testID="foreman-attendance-empty"
+                  title="No attendance"
                 />
               ) : (
                 <View style={styles.list}>
+                  {attendanceError ? (
+                    <Feedback
+                      action={{ label: "Retry refresh", onPress: handleRetry }}
+                      message={attendanceError}
+                      testID="foreman-attendance-refresh-error"
+                      title="Could not refresh attendance"
+                      tone="error"
+                    />
+                  ) : null}
                   {attendance.map((item) => {
+                    const attendanceStatus = getAttendanceStatusPresentation(
+                      item.status
+                    );
+                    const paymentStatus = item.paymentStatus
+                      ? getPaymentStatusPresentation(item.paymentStatus)
+                      : undefined;
                     const canApprove =
                       canApproveAttendance && item.status === "JOINED";
-                    const canShowFinalPayBreakdown =
+                    const finalPay =
                       shift.status === "CLOSED" &&
                       item.status === "APPROVED" &&
                       item.calculatedSalary !== null;
 
                     return (
-                      <View key={item.attendanceId} style={styles.attendanceCard}>
-                        <View style={styles.attendanceHeader}>
-                          <View style={styles.workerNameBlock}>
-                            <Text style={styles.workerName}>
-                              {item.firstName} {item.lastName}
-                            </Text>
-                            <Text style={styles.workerMeta}>Worker #{item.workerId}</Text>
-                          </View>
-                          <View style={styles.attendanceBadges}>
-                            <StatusBadge
-                              label={item.status}
-                              tone={getAttendanceStatusTone(item.status)}
-                            />
-                            {item.paymentStatus && !isDiscarded ? (
+                      <Card
+                        key={item.attendanceId}
+                        testID={`foreman-attendance-${item.attendanceId}`}
+                      >
+                        <View style={styles.cardContent}>
+                          <View style={styles.attendanceHeader}>
+                            <View style={styles.workerCopy}>
+                              <Text allowFontScaling style={styles.workerName}>
+                                {item.firstName} {item.lastName}
+                              </Text>
+                              <Text allowFontScaling style={styles.workerMeta}>
+                                Worker #{item.workerId}
+                              </Text>
+                            </View>
+                            <View style={styles.attendanceBadges}>
                               <StatusBadge
-                                label={formatStatusLabel(item.paymentStatus)}
-                                tone={getPaymentStatusTone(item.paymentStatus)}
+                                accessibilityLabel="Attendance status"
+                                label={attendanceStatus.label}
+                                tone={attendanceStatus.tone}
                               />
-                            ) : null}
-                            {isPaused(item.pauseState) && !isDiscarded ? (
-                              <StatusBadge label="PAUSED" tone="warning" />
-                            ) : null}
-                          </View>
-                        </View>
-
-                        <View style={styles.compactRows}>
-                          <DetailRow label="Joined" value={formatDateTime(item.joinedAt)} />
-                          <DetailRow label="Approved" value={formatDateTime(item.approvedAt)} />
-                          <DetailRow label="Hourly rate" value={`${formatRate(item.hourlyRate)} ${item.currencyLabel ?? "currency unavailable"}`} />
-                          <DetailRow label="Break" value={`${item.breakMinutes} min`} />
-                          {isDiscarded ? (
-                            <DetailRow label="Payroll" value="Not payable" />
-                          ) : (
-                            <>
-                              {item.payableStartTime !== undefined ? (
-                                <DetailRow
-                                  label="Payable start"
-                                  value={formatDateTime(item.payableStartTime)}
+                              {paymentStatus && shift.status !== "DISCARDED" ? (
+                                <StatusBadge
+                                  accessibilityLabel="Payment status"
+                                  label={paymentStatus.label}
+                                  tone={paymentStatus.tone}
                                 />
                               ) : null}
+                              {item.pauseState?.personallyPaused ? (
+                                <StatusBadge
+                                  label="Personal pause active"
+                                  tone="warning"
+                                />
+                              ) : null}
+                              {item.pauseState?.allPaused ? (
+                                <StatusBadge
+                                  label="Crew pause active"
+                                  tone="warning"
+                                />
+                              ) : null}
+                            </View>
+                          </View>
+
+                          <View style={styles.rows}>
+                            <DetailRow
+                              label="Joined"
+                              value={formatDateTime(item.joinedAt)}
+                            />
+                            {item.approvedAt ? (
+                              <DetailRow
+                                label="Approved"
+                                value={formatDateTime(item.approvedAt)}
+                              />
+                            ) : null}
+                            <DetailRow
+                              label="Hourly rate"
+                              value={formatMoneyWithCurrencyLabel(
+                                item.hourlyRate,
+                                item.currencyLabel
+                              )}
+                            />
+                            <DetailRow
+                              label="Break"
+                              value={`${item.breakMinutes} min`}
+                            />
+                            {item.payableStartTime ? (
+                              <DetailRow
+                                label="Payable start"
+                                value={formatDateTime(item.payableStartTime)}
+                              />
+                            ) : null}
+                            {item.pauseMinutes !== null &&
+                            item.pauseMinutes !== undefined ? (
                               <DetailRow
                                 label="Pause time"
                                 value={formatPauseMinutes(item.pauseMinutes)}
                               />
+                            ) : null}
+                            {item.workedMinutes !== null ? (
                               <DetailRow
                                 label="Worked time"
                                 value={formatMinutes(item.workedMinutes)}
                               />
+                            ) : null}
+                            {item.calculatedSalary !== null ? (
                               <DetailRow
                                 label="Calculated salary"
-                                value={formatMoneyWithCurrencyLabel(item.calculatedSalary, item.currencyLabel)}
+                                value={formatMoneyWithCurrencyLabel(
+                                  item.calculatedSalary,
+                                  item.currencyLabel
+                                )}
                               />
-                              {item.paymentStatus ? (
-                                <DetailRow
-                                  label="Payment status"
-                                  value={formatStatusLabel(item.paymentStatus)}
-                                />
-                              ) : null}
-                              {item.paidAt ? (
-                                <DetailRow label="Paid" value={formatDateTime(item.paidAt)} />
-                              ) : null}
-                            </>
-                          )}
+                            ) : null}
+                            {item.paidAt ? (
+                              <DetailRow
+                                label="Paid"
+                                value={formatDateTime(item.paidAt)}
+                              />
+                            ) : null}
+                            {item.pauseState?.personalPauseStartedAt ? (
+                              <DetailRow
+                                label="Worker personal pause started"
+                                value={formatDateTime(
+                                  item.pauseState.personalPauseStartedAt
+                                )}
+                              />
+                            ) : null}
+                            {item.pauseState?.allPauseStartedAt ? (
+                              <DetailRow
+                                label="Worker crew pause started"
+                                value={formatDateTime(
+                                  item.pauseState.allPauseStartedAt
+                                )}
+                              />
+                            ) : null}
+                            {item.pauseState?.effectivePauseMinutes !== null &&
+                            item.pauseState?.effectivePauseMinutes !== undefined ? (
+                              <DetailRow
+                                label="Current effective pause"
+                                value={formatPauseMinutes(
+                                  item.pauseState.effectivePauseMinutes
+                                )}
+                              />
+                            ) : null}
+                          </View>
+
+                          {shift.status === "DISCARDED" ? (
+                            <Feedback
+                              message="The backend returned this attendance as non-payable for a discarded shift."
+                              title="Not payable"
+                            />
+                          ) : null}
+
+                          {finalPay ? (
+                            item.payCalculation?.snapshotStatus === "COMPLETE" ? (
+                              <PayCalculationBreakdown
+                                calculation={item.payCalculation}
+                                currencyLabel={item.currencyLabel}
+                              />
+                            ) : item.payCalculation?.snapshotStatus ===
+                              "UNAVAILABLE" ? (
+                              <Feedback
+                                message="The backend returned an unavailable calculation snapshot. No breakdown is inferred or recalculated."
+                                testID={`foreman-attendance-breakdown-unavailable-${item.attendanceId}`}
+                                title="Pay breakdown unavailable"
+                              />
+                            ) : (
+                              <Feedback
+                                message="No calculation snapshot was returned. The stored calculated salary remains authoritative."
+                                testID={`foreman-attendance-breakdown-absent-${item.attendanceId}`}
+                                title="Historical breakdown unavailable"
+                              />
+                            )
+                          ) : null}
+
+                          {canApprove ? (
+                            <Button
+                              accessibilityLabel={`Approve attendance for ${item.firstName} ${item.lastName}`}
+                              disabled={actionBlocked}
+                              label="Approve attendance"
+                              loading={
+                                mutation?.type === "approve" &&
+                                mutation.attendanceId === item.attendanceId
+                              }
+                              onPress={() => handleApprove(item.attendanceId)}
+                              testID={`foreman-attendance-approve-${item.attendanceId}`}
+                              variant="secondary"
+                            />
+                          ) : null}
                         </View>
-
-                        {canShowFinalPayBreakdown ? (
-                          item.payCalculation ? (
-                            <PayCalculationBreakdown
-                              calculation={item.payCalculation}
-                              currencyLabel={item.currencyLabel}
-                            />
-                          ) : (
-                            <StateMessage
-                              title="Historical breakdown unavailable"
-                              message="This closed attendance has no calculation snapshot. The stored calculated salary remains the authoritative final amount."
-                            />
-                          )
-                        ) : null}
-
-                        {canApprove ? (
-                          <Button
-                            disabled={isActionBlocked}
-                            label="Approve"
-                            loading={
-                              mutation?.type === "approve" &&
-                              mutation.attendanceId === item.attendanceId
-                            }
-                            onPress={() => {
-                              handleApprove(item.attendanceId);
-                            }}
-                            variant="secondary"
-                          />
-                        ) : null}
-                      </View>
+                      </Card>
                     );
                   })}
                 </View>
               )}
-
-              {!loading && canApproveAttendance && attendance.length > 0 && !hasJoinedAttendance ? (
-                <StateMessage
-                  title="No pending approvals"
-                  message="All joined workers have already been processed."
-                />
-              ) : null}
             </View>
           </>
         ) : (
-          <StateMessage title="No shift details" message="Could not load this shift." />
+          <Feedback
+            action={{ label: "Retry", onPress: handleRetry }}
+            message="No authoritative shift details are available."
+            mode="screen"
+            title="No shift details"
+          />
         )}
-
-        <Button
-          label="Back to dashboard"
-          onPress={() => {
-            navigation.goBack();
-          }}
-          variant="ghost"
-        />
       </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  page: {
     flex: 1,
-    gap: spacing.xl
+    gap: theme.gap.section
   },
-  header: {
-    gap: spacing.sm
-  },
-  kicker: {
-    ...typography.label,
-    color: colors.primary
-  },
-  title: {
-    ...typography.screenTitle,
-    color: colors.text
-  },
-  subtitle: {
-    ...typography.body,
-    color: colors.textSecondary
+  cardContent: {
+    width: "100%",
+    gap: theme.space[3]
   },
   badges: {
+    width: "100%",
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: spacing.sm
-  },
-  panel: {
-    borderRadius: radii.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.white,
-    paddingHorizontal: spacing.md
+    gap: theme.space[2]
   },
   actions: {
-    gap: spacing.md
+    width: "100%",
+    gap: theme.space[2]
   },
   section: {
-    gap: spacing.md
-  },
-  sectionTitle: {
-    ...typography.sectionTitle,
-    color: colors.text
+    width: "100%",
+    gap: theme.space[3]
   },
   list: {
-    gap: spacing.md
-  },
-  attendanceCard: {
-    gap: spacing.md,
-    borderRadius: radii.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.white,
-    padding: spacing.md
+    width: "100%",
+    gap: theme.space[3]
   },
   attendanceHeader: {
+    width: "100%",
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "flex-start",
-    gap: spacing.md
+    gap: theme.space[3]
   },
-  attendanceBadges: {
-    alignItems: "flex-end",
-    gap: spacing.xs
-  },
-  workerNameBlock: {
-    flex: 1,
-    gap: spacing.xs
+  workerCopy: {
+    minWidth: theme.target.min,
+    flexGrow: 1,
+    flexShrink: 1,
+    gap: theme.space[1]
   },
   workerName: {
-    ...typography.label,
-    color: colors.text
+    ...theme.typography.cardTitle,
+    color: theme.colors.ink.primary,
+    flexShrink: 1
   },
   workerMeta: {
-    ...typography.caption,
-    color: colors.textSecondary
+    ...theme.typography.caption,
+    color: theme.colors.ink.secondary,
+    flexShrink: 1
   },
-  compactRows: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: spacing.sm
+  attendanceBadges: {
+    maxWidth: "100%",
+    flexShrink: 1,
+    alignItems: "flex-start",
+    gap: theme.space[1]
+  },
+  rows: {
+    width: "100%",
+    borderTopWidth: theme.border.default,
+    borderTopColor: theme.colors.border,
+    paddingTop: theme.space[2]
   }
 });

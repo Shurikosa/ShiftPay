@@ -1,253 +1,671 @@
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import type { CompositeScreenProps } from "@react-navigation/native";
-import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useFocusEffect } from "@react-navigation/native";
-import { useCallback, useRef, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
-import {
-  approveManagedPayoutRequest,
-  getManagedPayoutRequests
-} from "../api/payroll";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { RefreshControl, StyleSheet, View } from "react-native";
+import { ApiError, getErrorMessage } from "../api/errors";
+import { approveManagedPayoutRequest, getManagedPayoutRequests } from "../api/payroll";
 import { Button } from "../components/Button";
+import { EmptyState } from "../components/EmptyState";
+import { Feedback } from "../components/Feedback";
 import { PayoutRequestCard } from "../components/PayoutRequestCard";
 import { Screen } from "../components/Screen";
-import { StateMessage } from "../components/StateMessage";
+import { ScreenHeader } from "../components/ScreenHeader";
+import { SectionHeader } from "../components/SectionHeader";
+import { SegmentedControl } from "../components/SegmentedControl";
 import { useAuth } from "../context/AuthContext";
 import type { ForemanStackParamList, ForemanTabParamList } from "../types/navigation";
 import type { PayoutRequest, PayoutRequestStatus } from "../types/payroll";
-import { getErrorMessage } from "../api/errors";
-import { formatStatusLabel } from "../utils/status";
-import { colors, spacing, typography } from "../utils/theme";
+import { theme } from "../utils/theme";
 
 type ForemanPayrollRequestsScreenProps = CompositeScreenProps<
   BottomTabScreenProps<ForemanTabParamList, "ForemanPayrollRequests">,
   NativeStackScreenProps<ForemanStackParamList>
 >;
 
+type ForemanPayrollRequestsContentProps = ForemanPayrollRequestsScreenProps & {
+  auth: ReturnType<typeof useAuth>;
+};
+
 type MutationState =
-  | {
-      type: "refresh";
-    }
-  | {
-      type: "approve";
-      requestId: number;
-    };
+  | { type: "refresh" }
+  | { type: "approve"; requestId: number };
+
+type ActiveLoad = {
+  generation: number;
+  status: PayoutRequestStatus;
+  promise: Promise<boolean>;
+};
+
+type MutationOwner = {
+  mutation: MutationState;
+  token: number;
+};
+
+type ApproveBlockReason = "inFlight" | "confirmed" | "conflict";
+
+type ApproveBlockOwner = {
+  reason: ApproveBlockReason;
+  scope: string;
+  token: number;
+};
+
+const statusOptions = [
+  {
+    accessibilityHint: "Shows payout requests that can still be approved.",
+    label: "Pending",
+    testID: "foreman-payroll-segment-pending",
+    value: "PENDING"
+  },
+  {
+    accessibilityHint: "Shows payout requests already approved by the backend.",
+    label: "Approved",
+    testID: "foreman-payroll-segment-approved",
+    value: "APPROVED"
+  }
+] as const;
 
 function formatApproveError(error: unknown): string {
-  const message = getErrorMessage(error);
-
-  if (message.toLowerCase().includes("pending")) {
-    return `${message}. Refresh the request list to see the latest state.`;
+  if (error instanceof ApiError && error.status === 409) {
+    return "This request could not be approved because its backend state changed. The managed list has been refreshed.";
   }
 
+  const message = getErrorMessage(error);
   if (message.toLowerCase().includes("forbidden")) {
     return "You are not authorized to approve this payout request.";
-  }
-
-  if (message.toLowerCase().includes("payment requested")) {
-    return `${message}. Refresh the request list before approving again.`;
   }
 
   return message;
 }
 
-export function ForemanPayrollRequestsScreen({
+function getStatusLabel(status: PayoutRequestStatus): string {
+  return status === "PENDING" ? "Pending" : "Approved";
+}
+
+export function ForemanPayrollRequestsScreen(props: ForemanPayrollRequestsScreenProps) {
+  const auth = useAuth();
+  const scopeKey = [
+    auth.user?.id ?? "anonymous",
+    auth.user?.company?.id ?? "no-company",
+    auth.user?.role ?? "no-role"
+  ].join(":");
+
+  return (
+    <ForemanPayrollRequestsContent
+      {...props}
+      auth={auth}
+      key={`foreman-payroll:${scopeKey}`}
+    />
+  );
+}
+
+function ForemanPayrollRequestsContent({
+  auth,
   navigation
-}: ForemanPayrollRequestsScreenProps) {
-  const { authenticatedRequest, user } = useAuth();
+}: ForemanPayrollRequestsContentProps) {
+  const { authenticatedRequest, user } = auth;
+  const canAccess = user?.role === "FOREMAN" && user.company !== null;
+  const company = canAccess ? user.company : null;
+  const accessScope = canAccess && company ? `${user.id}:${company.id}` : null;
+
   const [requests, setRequests] = useState<PayoutRequest[]>([]);
+  const [publishedStatus, setPublishedStatus] = useState<PayoutRequestStatus | null>(null);
+  const [publishedScope, setPublishedScope] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<PayoutRequestStatus>("PENDING");
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(canAccess);
+  const [refreshing, setRefreshing] = useState(false);
   const [mutation, setMutation] = useState<MutationState | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [initialError, setInitialError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [approveError, setApproveError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const mutationInFlightRef = useRef(false);
+  const [blockedRequestIds, setBlockedRequestIds] = useState<ReadonlySet<number>>(
+    () => new Set()
+  );
 
-  const companyName = user?.company?.name ?? "Company not assigned";
+  const mountedRef = useRef(true);
+  const focusedRef = useRef(false);
+  const canAccessRef = useRef(canAccess);
+  const statusFilterRef = useRef<PayoutRequestStatus>("PENDING");
+  const requestsRef = useRef<PayoutRequest[]>([]);
+  const publishedStatusRef = useRef<PayoutRequestStatus | null>(null);
+  const publishedScopeRef = useRef<string | null>(null);
+  const accessScopeRef = useRef(accessScope);
+  const previousAccessScopeRef = useRef(accessScope);
+  const blockedRequestOwnersRef = useRef(new Map<number, ApproveBlockOwner>());
+  const revalidationRequestOwnersRef = useRef(new Map<number, number>());
+  const loadGenerationRef = useRef(0);
+  const actionGenerationRef = useRef(0);
+  const mutationTokenRef = useRef(0);
+  const activeLoadRef = useRef<ActiveLoad | null>(null);
+  const mutationOwnerRef = useRef<MutationOwner | null>(null);
 
-  const loadRequests = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  useLayoutEffect(() => {
+    accessScopeRef.current = accessScope;
+  }, [accessScope]);
 
-    try {
-      const nextRequests = await authenticatedRequest((token) =>
-        getManagedPayoutRequests(token, statusFilter)
-      );
-      setRequests(nextRequests);
-    } catch (caughtError) {
-      setError(getErrorMessage(caughtError));
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      focusedRef.current = false;
+      loadGenerationRef.current += 1;
+      actionGenerationRef.current += 1;
+      activeLoadRef.current = null;
+      mutationOwnerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const scopeChanged = previousAccessScopeRef.current !== accessScope;
+    previousAccessScopeRef.current = accessScope;
+    canAccessRef.current = canAccess;
+    if (!canAccess || scopeChanged) {
+      loadGenerationRef.current += 1;
+      actionGenerationRef.current += 1;
+      activeLoadRef.current = null;
+      mutationOwnerRef.current = null;
+      requestsRef.current = [];
+      publishedStatusRef.current = null;
+      publishedScopeRef.current = null;
+      blockedRequestOwnersRef.current.clear();
+      revalidationRequestOwnersRef.current.clear();
+      setRequests([]);
+      setPublishedStatus(null);
+      setPublishedScope(null);
+      setMutation(null);
+      setBlockedRequestIds(new Set());
+      setInitialError(null);
+      setRefreshError(null);
+      setApproveError(null);
+      setSuccessMessage(null);
+      setInitialLoading(canAccess);
+      setRefreshing(false);
     }
-  }, [authenticatedRequest, statusFilter]);
+  }, [accessScope, canAccess]);
+
+  const publishDisabledRequestIds = useCallback(() => {
+    if (mountedRef.current) {
+      setBlockedRequestIds(
+        new Set([
+          ...blockedRequestOwnersRef.current.keys(),
+          ...revalidationRequestOwnersRef.current.keys()
+        ])
+      );
+    }
+  }, []);
+
+  const reconcileApproveGuards = useCallback(
+    (targetStatus: PayoutRequestStatus, nextRequests: readonly PayoutRequest[]) => {
+      if (targetStatus !== "PENDING" && targetStatus !== "APPROVED") return;
+
+      let changed = false;
+      for (const [requestId, owner] of blockedRequestOwnersRef.current) {
+        if (owner.scope !== accessScopeRef.current) continue;
+        if (owner.reason === "confirmed") {
+          blockedRequestOwnersRef.current.delete(requestId);
+          changed = true;
+        } else if (
+          owner.reason === "conflict" &&
+          targetStatus === "PENDING" &&
+          !nextRequests.some((request) => request.id === requestId)
+        ) {
+          blockedRequestOwnersRef.current.delete(requestId);
+          changed = true;
+        }
+      }
+
+      if (targetStatus === "PENDING") {
+        for (const requestId of revalidationRequestOwnersRef.current.keys()) {
+          revalidationRequestOwnersRef.current.delete(requestId);
+          changed = true;
+        }
+      }
+
+      if (changed) publishDisabledRequestIds();
+    },
+    [publishDisabledRequestIds]
+  );
+
+  const loadRequests = useCallback((
+    targetStatus: PayoutRequestStatus,
+    options: { force?: boolean } = {}
+  ): Promise<boolean> => {
+    const requestScope = accessScopeRef.current;
+    if (!focusedRef.current || !canAccessRef.current || requestScope === null) {
+      return Promise.resolve(false);
+    }
+
+    const activeLoad = activeLoadRef.current;
+    if (
+      options.force !== true &&
+      activeLoad &&
+      activeLoad.status === targetStatus &&
+      activeLoad.generation === loadGenerationRef.current
+    ) {
+      return activeLoad.promise;
+    }
+
+    const generation = loadGenerationRef.current + 1;
+    loadGenerationRef.current = generation;
+    const hasUsableData =
+      publishedStatusRef.current === targetStatus &&
+      publishedScopeRef.current === requestScope;
+
+    if (hasUsableData) {
+      setRefreshing(true);
+      setRefreshError(null);
+    } else {
+      setInitialLoading(true);
+      setInitialError(null);
+    }
+
+    const isCurrent = () =>
+      mountedRef.current &&
+      focusedRef.current &&
+      canAccessRef.current &&
+      accessScopeRef.current === requestScope &&
+      generation === loadGenerationRef.current &&
+      statusFilterRef.current === targetStatus;
+
+    const promise = authenticatedRequest((token) =>
+      getManagedPayoutRequests(token, targetStatus)
+    )
+      .then((nextRequests) => {
+        if (!isCurrent()) return false;
+
+        requestsRef.current = nextRequests;
+        publishedStatusRef.current = targetStatus;
+        publishedScopeRef.current = requestScope;
+        setRequests(nextRequests);
+        setPublishedStatus(targetStatus);
+        setPublishedScope(requestScope);
+        setInitialError(null);
+        setRefreshError(null);
+        reconcileApproveGuards(targetStatus, nextRequests);
+        return true;
+      })
+      .catch((caughtError: unknown) => {
+        if (!isCurrent()) return false;
+
+        const message = getErrorMessage(caughtError);
+        if (hasUsableData) {
+          setRefreshError(message);
+        } else {
+          setInitialError(message);
+        }
+        return false;
+      })
+      .finally(() => {
+        if (isCurrent()) {
+          setInitialLoading(false);
+          setRefreshing(false);
+        }
+        if (activeLoadRef.current?.generation === generation) {
+          activeLoadRef.current = null;
+        }
+      });
+
+    activeLoadRef.current = { generation, promise, status: targetStatus };
+    return promise;
+  }, [authenticatedRequest, reconcileApproveGuards]);
 
   useFocusEffect(
     useCallback(() => {
-      void loadRequests();
-      return undefined;
-    }, [loadRequests])
+      focusedRef.current = true;
+      setMutation(mutationOwnerRef.current?.mutation ?? null);
+      publishDisabledRequestIds();
+      if (canAccess && accessScope !== null) {
+        void loadRequests(statusFilterRef.current);
+      }
+
+      return () => {
+        focusedRef.current = false;
+        loadGenerationRef.current += 1;
+        actionGenerationRef.current += 1;
+        activeLoadRef.current = null;
+      };
+    }, [accessScope, canAccess, loadRequests, publishDisabledRequestIds])
   );
 
-  const beginMutation = (nextMutation: MutationState): boolean => {
-    if (mutationInFlightRef.current) {
-      return false;
-    }
+  const beginMutation = (nextMutation: MutationState): number | null => {
+    if (mutationOwnerRef.current) return null;
 
-    mutationInFlightRef.current = true;
+    const token = mutationTokenRef.current + 1;
+    mutationTokenRef.current = token;
+    mutationOwnerRef.current = { mutation: nextMutation, token };
     setMutation(nextMutation);
-    return true;
+    return token;
   };
 
-  const finishMutation = () => {
-    mutationInFlightRef.current = false;
-    setMutation(null);
+  const finishMutation = (token: number) => {
+    if (mutationOwnerRef.current?.token !== token) return;
+
+    mutationOwnerRef.current = null;
+    if (mountedRef.current && focusedRef.current) setMutation(null);
   };
 
   const handleRefresh = () => {
-    if (!beginMutation({ type: "refresh" })) {
-      return;
-    }
+    if (!canAccessRef.current) return;
+    const token = beginMutation({ type: "refresh" });
+    if (token === null) return;
 
+    setApproveError(null);
     setSuccessMessage(null);
-
-    void loadRequests().finally(() => {
-      finishMutation();
-    });
+    void loadRequests(statusFilterRef.current).finally(() => finishMutation(token));
   };
 
   const handleApprove = (requestId: number) => {
-    if (!beginMutation({ type: "approve", requestId })) {
+    const currentRequest = requestsRef.current.find((request) => request.id === requestId);
+    if (
+      !mountedRef.current ||
+      !focusedRef.current ||
+      !canAccessRef.current ||
+      statusFilterRef.current !== "PENDING" ||
+      publishedStatusRef.current !== "PENDING" ||
+      currentRequest?.status !== "PENDING" ||
+      blockedRequestOwnersRef.current.has(requestId) ||
+      revalidationRequestOwnersRef.current.has(requestId) ||
+      activeLoadRef.current !== null
+    ) {
       return;
     }
 
-    setError(null);
+    const token = beginMutation({ type: "approve", requestId });
+    if (token === null || accessScopeRef.current === null) return;
+
+    const operationScope = accessScopeRef.current;
+    blockedRequestOwnersRef.current.set(requestId, {
+      reason: "inFlight",
+      scope: operationScope,
+      token
+    });
+    publishDisabledRequestIds();
+    const generation = actionGenerationRef.current + 1;
+    actionGenerationRef.current = generation;
+    setApproveError(null);
+    setRefreshError(null);
     setSuccessMessage(null);
 
-    void authenticatedRequest(async (token) => {
-      const approvedRequest = await approveManagedPayoutRequest(token, requestId);
-      const approvedRequests = await getManagedPayoutRequests(token, "APPROVED");
+    void authenticatedRequest((token) => approveManagedPayoutRequest(token, requestId))
+      .then(async () => {
+        const blockOwner = blockedRequestOwnersRef.current.get(requestId);
+        const ownsBlock =
+          blockOwner?.token === token && blockOwner.scope === operationScope;
+        if (ownsBlock) {
+          blockedRequestOwnersRef.current.set(requestId, {
+            ...blockOwner,
+            reason: "confirmed"
+          });
+        }
 
-      return {
-        approvedRequest,
-        approvedRequests
-      };
-    })
-      .then(({ approvedRequest, approvedRequests }) => {
+        if (
+          !mountedRef.current ||
+          !canAccessRef.current ||
+          accessScopeRef.current !== operationScope
+        ) {
+          return;
+        }
+
+        if (!focusedRef.current || generation !== actionGenerationRef.current) {
+          if (focusedRef.current && ownsBlock) {
+            await loadRequests(statusFilterRef.current, { force: true });
+          }
+          return;
+        }
+
+        statusFilterRef.current = "APPROVED";
         setStatusFilter("APPROVED");
-        setRequests(approvedRequests);
         setSuccessMessage("Payout request approved.");
-        if (!approvedRequests.some((request) => request.id === approvedRequest.id)) {
-          setRequests([approvedRequest, ...approvedRequests]);
+        await loadRequests("APPROVED");
+      })
+      .catch(async (caughtError: unknown) => {
+        const blockOwner = blockedRequestOwnersRef.current.get(requestId);
+        const ownsBlock =
+          blockOwner?.token === token && blockOwner.scope === operationScope;
+        const isConflict = caughtError instanceof ApiError && caughtError.status === 409;
+        const isCurrentFocus =
+          mountedRef.current &&
+          focusedRef.current &&
+          canAccessRef.current &&
+          accessScopeRef.current === operationScope &&
+          generation === actionGenerationRef.current;
+
+        if (ownsBlock) {
+          if (isConflict) {
+            blockedRequestOwnersRef.current.set(requestId, {
+              ...blockOwner,
+              reason: "conflict"
+            });
+          } else {
+            blockedRequestOwnersRef.current.delete(requestId);
+            if (
+              mountedRef.current &&
+              canAccessRef.current &&
+              accessScopeRef.current === operationScope &&
+              !isCurrentFocus
+            ) {
+              revalidationRequestOwnersRef.current.set(requestId, token);
+            }
+          }
+        }
+
+        if (
+          !mountedRef.current ||
+          !canAccessRef.current ||
+          accessScopeRef.current !== operationScope
+        ) {
+          return;
+        }
+
+        if (focusedRef.current) publishDisabledRequestIds();
+        if (!isCurrentFocus) {
+          if (focusedRef.current && ownsBlock) {
+            await loadRequests("PENDING", { force: true });
+          }
+          return;
+        }
+
+        setApproveError(formatApproveError(caughtError));
+        if (isConflict) {
+          await loadRequests("PENDING");
         }
       })
-      .catch((caughtError) => {
-        setError(formatApproveError(caughtError));
-      })
-      .finally(() => {
-        finishMutation();
-      });
+      .finally(() => finishMutation(token));
   };
 
   const handleSetStatusFilter = (nextStatusFilter: PayoutRequestStatus) => {
-    if (nextStatusFilter === statusFilter || mutationInFlightRef.current) {
+    if (
+      nextStatusFilter === statusFilterRef.current ||
+      mutationOwnerRef.current !== null ||
+      !canAccessRef.current
+    ) {
       return;
     }
 
+    statusFilterRef.current = nextStatusFilter;
     setStatusFilter(nextStatusFilter);
+    setApproveError(null);
     setSuccessMessage(null);
+    setInitialError(null);
+    setRefreshError(null);
+    void loadRequests(nextStatusFilter);
   };
 
+  if (!canAccess || !company) {
+    return (
+      <Screen>
+        <View style={styles.page} testID="foreman-payroll-access-gate">
+          <ScreenHeader
+            eyebrow="Foreman payroll"
+            title="Payroll requests"
+          />
+          <Feedback
+            message="Only a foreman with a company can review managed payout requests."
+            mode="screen"
+            title="Foreman company access required"
+            tone="error"
+          />
+          <Button
+            label="Back to dashboard"
+            onPress={() => navigation.navigate("ForemanDashboard")}
+            testID="foreman-payroll-back-dashboard"
+            variant="ghost"
+          />
+        </View>
+      </Screen>
+    );
+  }
+
   const isMutating = mutation !== null;
+  const visibleRequests =
+    publishedStatus === statusFilter && publishedScope === accessScope ? requests : [];
+  const hasUsableData =
+    publishedStatus === statusFilter && publishedScope === accessScope;
 
   return (
-    <Screen>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.kicker}>Foreman payroll</Text>
-          <Text style={styles.title}>Payroll requests</Text>
-          <Text style={styles.subtitle}>{companyName}</Text>
-        </View>
+    <Screen
+      scroll
+      scrollProps={{
+        accessibilityLabel: "Managed payroll requests",
+        refreshControl: (
+          <RefreshControl
+            enabled={!isMutating}
+            onRefresh={handleRefresh}
+            refreshing={refreshing || mutation?.type === "refresh"}
+          />
+        ),
+        testID: "foreman-payroll-scroll"
+      }}
+    >
+      <View style={styles.page} testID="foreman-payroll-content">
+        <ScreenHeader
+          eyebrow="Foreman payroll"
+          subtitle={`${company.name} · Review backend payout requests without changing their calculated totals.`}
+          title="Payroll requests"
+        />
+
+        <SegmentedControl<PayoutRequestStatus>
+          accessibilityHint="Choose pending or approved managed payout requests."
+          accessibilityLabel="Payroll request status"
+          disabled={isMutating}
+          onChange={handleSetStatusFilter}
+          options={statusOptions}
+          testID="foreman-payroll-status-segments"
+          value={statusFilter}
+        />
 
         {successMessage ? (
-          <StateMessage title="Updated" message={successMessage} tone="success" />
+          <Feedback
+            message={successMessage}
+            testID="foreman-payroll-success"
+            title="Request updated"
+            tone="success"
+          />
         ) : null}
-        {error ? <StateMessage title="Payroll action failed" message={error} tone="error" /> : null}
-
-        <View style={styles.filterRow}>
-          <Button
-            disabled={statusFilter === "PENDING" || isMutating}
-            label="Pending"
-            onPress={() => {
-              handleSetStatusFilter("PENDING");
-            }}
-            variant={statusFilter === "PENDING" ? "primary" : "secondary"}
-            style={styles.filterButton}
+        {approveError ? (
+          <Feedback
+            message={approveError}
+            testID="foreman-payroll-approve-error"
+            title="Could not approve request"
+            tone="error"
           />
-          <Button
-            disabled={statusFilter === "APPROVED" || isMutating}
-            label="Approved"
-            onPress={() => {
-              handleSetStatusFilter("APPROVED");
+        ) : null}
+        {refreshError ? (
+          <Feedback
+            action={{
+              disabled: isMutating,
+              label: "Retry refresh",
+              onPress: handleRefresh,
+              testID: "foreman-payroll-refresh-retry"
             }}
-            variant={statusFilter === "APPROVED" ? "primary" : "secondary"}
-            style={styles.filterButton}
+            message={refreshError}
+            testID="foreman-payroll-refresh-error"
+            title="Could not refresh requests"
+            tone="error"
           />
-        </View>
+        ) : null}
 
         <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>
-              {formatStatusLabel(statusFilter)} requests
-            </Text>
-            <Button
-              disabled={isMutating || loading}
-              label="Refresh"
-              loading={mutation?.type === "refresh"}
-              onPress={handleRefresh}
-              variant="ghost"
-            />
-          </View>
+          <SectionHeader
+            action={{
+              disabled: isMutating || initialLoading,
+              icon: "refresh",
+              label: "Refresh",
+              onPress: handleRefresh
+            }}
+            supportingText={
+              statusFilter === "PENDING"
+                ? "Approve only requests that the backend still reports as pending."
+                : "Approved requests remain read-only in this list."
+            }
+            title={`${getStatusLabel(statusFilter)} requests`}
+          />
 
-          {loading ? (
-            <StateMessage loading title="Loading requests" message="Fetching payout requests." />
-          ) : requests.length === 0 ? (
-            <StateMessage
-              title={`No ${formatStatusLabel(statusFilter).toLowerCase()} requests`}
+          {initialLoading && !hasUsableData ? (
+            <Feedback
+              loading
+              message={`Fetching ${getStatusLabel(statusFilter).toLowerCase()} managed payout requests.`}
+              mode="screen"
+              testID="foreman-payroll-loading"
+              title="Loading requests"
+            />
+          ) : initialError && !hasUsableData ? (
+            <Feedback
+              action={{
+                disabled: isMutating,
+                label: "Retry",
+                onPress: handleRefresh,
+                testID: "foreman-payroll-initial-retry"
+              }}
+              message={initialError}
+              mode="screen"
+              testID="foreman-payroll-initial-error"
+              title="Could not load requests"
+              tone="error"
+            />
+          ) : visibleRequests.length === 0 ? (
+            <EmptyState
               message="Worker payout requests for your managed shifts will appear here."
+              testID={`foreman-payroll-empty-${statusFilter.toLowerCase()}`}
+              title={`No ${getStatusLabel(statusFilter).toLowerCase()} requests`}
             />
           ) : (
-            <View style={styles.list}>
-              {requests.map((request) => (
-                <PayoutRequestCard
-                  action={
-                    request.status === "PENDING" ? (
-                      <Button
-                        disabled={isMutating}
-                        label="Approve"
-                        loading={
-                          mutation?.type === "approve" &&
-                          mutation.requestId === request.id
-                        }
-                        onPress={() => {
-                          handleApprove(request.id);
-                        }}
-                      />
-                    ) : null
-                  }
-                  key={request.id}
-                  request={request}
-                  showWorker
-                />
-              ))}
+            <View style={styles.list} testID="foreman-payroll-list">
+              {visibleRequests.map((request) => {
+                const approveBlocked = blockedRequestIds.has(request.id);
+                return (
+                  <PayoutRequestCard
+                    action={
+                      request.status === "PENDING" ? (
+                        <Button
+                          accessibilityHint={`Approves payout request ${request.id} using backend totals.`}
+                          accessibilityLabel={`Approve payout request ${request.id}`}
+                          disabled={isMutating || approveBlocked}
+                          label="Approve"
+                          loading={
+                            mutation?.type === "approve" && mutation.requestId === request.id
+                          }
+                          onPress={() => handleApprove(request.id)}
+                          testID={`foreman-payroll-approve-${request.id}`}
+                        />
+                      ) : null
+                    }
+                    key={request.id}
+                    request={request}
+                    showWorker
+                    timeZone={company.timeZone}
+                  />
+                );
+              })}
             </View>
           )}
         </View>
 
         <Button
           label="Back to dashboard"
-          onPress={() => {
-            navigation.navigate("ForemanDashboard");
-          }}
+          onPress={() => navigation.navigate("ForemanDashboard")}
           testID="foreman-payroll-back-dashboard"
           variant="ghost"
         />
@@ -257,46 +675,14 @@ export function ForemanPayrollRequestsScreen({
 }
 
 const styles = StyleSheet.create({
-  container: {
+  page: {
     flex: 1,
-    gap: spacing.xl
-  },
-  header: {
-    gap: spacing.sm
-  },
-  kicker: {
-    ...typography.label,
-    color: colors.primary
-  },
-  title: {
-    ...typography.screenTitle,
-    color: colors.text
-  },
-  subtitle: {
-    ...typography.body,
-    color: colors.textSecondary
-  },
-  filterRow: {
-    flexDirection: "row",
-    gap: spacing.md
-  },
-  filterButton: {
-    flex: 1
+    gap: theme.gap.section
   },
   section: {
-    gap: spacing.md
-  },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: spacing.md
-  },
-  sectionTitle: {
-    ...typography.sectionTitle,
-    color: colors.text
+    gap: theme.space[4]
   },
   list: {
-    gap: spacing.md
+    gap: theme.space[4]
   }
 });

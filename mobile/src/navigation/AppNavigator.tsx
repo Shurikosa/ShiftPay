@@ -13,6 +13,7 @@ import { AppIcon, type AppIconName } from "../components/AppIcon";
 import { useAuth } from "../context/AuthContext";
 import { ForemanManagedShiftsProvider } from "../context/ForemanManagedShiftsContext";
 import { WorkerShiftHistoryProvider } from "../context/WorkerShiftHistoryContext";
+import { WorkerShiftHistoryPagesProvider } from "../context/WorkerShiftHistoryPagesContext";
 import { CreateCompanyScreen } from "../screens/CreateCompanyScreen";
 import { CreateShiftScreen } from "../screens/CreateShiftScreen";
 import { ForemanDashboardScreen } from "../screens/ForemanDashboardScreen";
@@ -208,12 +209,22 @@ function ForemanTabNavigator() {
 function WorkerNavigator({ navigationKey }: { navigationKey: string }) {
   return (
     <WorkerShiftHistoryProvider>
-      <WorkerStack.Navigator screenOptions={{ headerShown: false }}>
+      <WorkerStack.Navigator
+        layout={({ children }) => (
+          <WorkerShiftHistoryPagesProvider key={navigationKey}>
+            {children}
+          </WorkerShiftHistoryPagesProvider>
+        )}
+        screenOptions={{ headerShown: false }}
+      >
         <WorkerStack.Group navigationKey={navigationKey}>
           <WorkerStack.Screen component={WorkerTabNavigator} name="WorkerTabs" />
           <WorkerStack.Screen component={JoinShiftScreen} name="JoinShift" />
           <WorkerStack.Screen
             component={WorkerShiftDetailsScreen}
+            getId={({ params }) =>
+              `${params.shift.shiftId}:${params.shift.attendanceId}`
+            }
             name="WorkerShiftDetails"
           />
           <WorkerStack.Screen component={OwnSettingsScreen} name="OwnSettings" />

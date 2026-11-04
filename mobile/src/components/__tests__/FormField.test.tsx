@@ -6,6 +6,7 @@ import {
   Text,
   TextInput,
   View,
+  type TextInputInstance,
   type ViewStyle
 } from "react-native";
 import { theme } from "../../utils/theme";
@@ -49,7 +50,7 @@ function findTrailingAction(view: ReactTestRenderer, label: string) {
 }
 
 function expectNoFixedOrClippingStyle(style: unknown): void {
-  const flattened = StyleSheet.flatten(style) as ViewStyle | undefined;
+  const flattened = StyleSheet.flatten(style as ViewStyle) as ViewStyle | undefined;
   expect(flattened).not.toHaveProperty("height");
   expect(flattened).not.toHaveProperty("maxHeight");
   expect(flattened?.overflow).not.toBe("hidden");
@@ -139,7 +140,7 @@ describe("FormField", () => {
   });
 
   it("forwards refs and safe keyboard/content TextInput props", async () => {
-    const inputRef = createRef<TextInput>();
+    const inputRef = createRef<TextInputInstance>();
     const nativeInput = { blur: jest.fn(), focus: jest.fn() };
     let view!: ReactTestRenderer;
     await act(async () => {

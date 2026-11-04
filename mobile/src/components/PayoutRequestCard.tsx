@@ -7,11 +7,11 @@ import {
   formatWholeMoneyWithCurrencyLabel
 } from "../utils/format";
 import {
-  formatStatusLabel,
-  getPaymentStatusTone,
-  getPayoutRequestStatusTone
+  getPaymentStatusPresentation,
+  getPayoutRequestStatusPresentation
 } from "../utils/status";
-import { colors, radii, spacing, typography } from "../utils/theme";
+import { theme } from "../utils/theme";
+import { Card } from "./Card";
 import { DetailRow } from "./DetailRow";
 import { StatusBadge } from "./StatusBadge";
 
@@ -19,152 +19,182 @@ type PayoutRequestCardProps = {
   request: PayoutRequest;
   action?: ReactNode;
   showWorker?: boolean;
+  timeZone?: string | null;
 };
 
 export function PayoutRequestCard({
   request,
   action,
-  showWorker = false
+  showWorker = false,
+  timeZone
 }: PayoutRequestCardProps) {
+  const requestStatus = getPayoutRequestStatusPresentation(request.status);
+
   return (
-    <View style={styles.card}>
-      <View style={styles.header}>
-        <View style={styles.titleBlock}>
-          <Text style={styles.title}>Request #{request.id}</Text>
-          {showWorker ? (
-            <Text style={styles.subtitle}>
-              {request.workerFirstName} {request.workerLastName}
-            </Text>
-          ) : (
-            <Text style={styles.subtitle}>{request.companyName}</Text>
-          )}
-        </View>
-        <StatusBadge
-          label={formatStatusLabel(request.status)}
-          tone={getPayoutRequestStatusTone(request.status)}
-        />
-      </View>
-
-      <View style={styles.panel}>
-        <DetailRow label="Requested" value={formatDateTime(request.requestedAt)} />
-        <DetailRow label="Approved" value={formatDateTime(request.approvedAt)} />
-        <DetailRow label="Paid" value={formatDateTime(request.paidAt)} />
-        <DetailRow
-          label="Raw payable time"
-          value={formatMinutes(request.rawPayableMinutes)}
-        />
-        <DetailRow
-          label="Final payout amount"
-          value={formatWholeMoneyWithCurrencyLabel(request.payoutAmount, request.currencyLabel)}
-        />
-      </View>
-
-      <View style={styles.items}>
-        <Text style={styles.itemsTitle}>Selected work</Text>
-        {request.items.map((item) => (
-          <View key={`${request.id}-${item.attendanceId}`} style={styles.item}>
-            <View style={styles.itemHeader}>
-              <View style={styles.itemTitleBlock}>
-                <Text numberOfLines={2} style={styles.itemTitle}>
-                  {item.title}
-                </Text>
-                <Text style={styles.itemSubtitle}>
-                  {formatDateTime(item.actualEndTime)}
-                </Text>
-              </View>
-              <StatusBadge
-                label={formatStatusLabel(item.paymentStatus)}
-                tone={getPaymentStatusTone(item.paymentStatus)}
-              />
-            </View>
-            <View style={styles.compactRows}>
-              <DetailRow
-                label="Raw time"
-                value={formatMinutes(item.rawPayableMinutes)}
-              />
-              <DetailRow
-                label="Final payout"
-                value={formatWholeMoneyWithCurrencyLabel(item.payoutAmount, request.currencyLabel)}
-              />
-            </View>
+    <Card testID={`payout-request-${request.id}`}>
+      <View style={styles.cardContent}>
+        <View style={styles.header}>
+          <View style={styles.titleBlock}>
+            <Text style={styles.title}>Request #{request.id}</Text>
+            {showWorker ? (
+              <Text style={styles.subtitle}>
+                {request.workerFirstName} {request.workerLastName}
+              </Text>
+            ) : (
+              <Text style={styles.subtitle}>{request.companyName}</Text>
+            )}
           </View>
-        ))}
-      </View>
+          <StatusBadge
+            label={requestStatus.label}
+            tone={requestStatus.tone}
+          />
+        </View>
 
-      {action ? <View style={styles.action}>{action}</View> : null}
-    </View>
+        <View style={styles.panel}>
+          <DetailRow
+            label="Requested"
+            value={formatDateTime(request.requestedAt, timeZone)}
+          />
+          {request.approvedAt ? (
+            <DetailRow
+              label="Approved"
+              value={formatDateTime(request.approvedAt, timeZone)}
+            />
+          ) : null}
+          {request.paidAt ? (
+            <DetailRow
+              label="Paid"
+              value={formatDateTime(request.paidAt, timeZone)}
+            />
+          ) : null}
+          <DetailRow
+            label="Raw payable time"
+            value={formatMinutes(request.rawPayableMinutes)}
+          />
+          <DetailRow
+            label="Final payout amount"
+            value={formatWholeMoneyWithCurrencyLabel(
+              request.payoutAmount,
+              request.currencyLabel
+            )}
+          />
+        </View>
+
+        <View style={styles.items}>
+          <Text style={styles.itemsTitle}>Selected work</Text>
+          {request.items.map((item) => {
+            const paymentStatus = getPaymentStatusPresentation(item.paymentStatus);
+
+            return (
+              <View key={`${request.id}-${item.attendanceId}`} style={styles.item}>
+                <View style={styles.itemHeader}>
+                  <View style={styles.itemTitleBlock}>
+                    <Text style={styles.itemTitle}>{item.title}</Text>
+                    {item.actualEndTime ? (
+                      <Text style={styles.itemSubtitle}>
+                        {formatDateTime(item.actualEndTime, timeZone)}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <StatusBadge
+                    label={paymentStatus.label}
+                    tone={paymentStatus.tone}
+                  />
+                </View>
+                <View style={styles.compactRows}>
+                  <DetailRow
+                    label="Raw time"
+                    value={formatMinutes(item.rawPayableMinutes)}
+                  />
+                  <DetailRow
+                    label="Final payout"
+                    value={formatWholeMoneyWithCurrencyLabel(
+                      item.payoutAmount,
+                      request.currencyLabel
+                    )}
+                  />
+                </View>
+              </View>
+            );
+          })}
+        </View>
+
+        {action ? <View style={styles.action}>{action}</View> : null}
+      </View>
+    </Card>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    gap: spacing.md,
-    borderRadius: radii.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.white,
-    padding: spacing.md
+  cardContent: {
+    gap: theme.space[3]
   },
   header: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: spacing.md
+    flexWrap: "wrap",
+    gap: theme.space[3]
   },
   titleBlock: {
     flex: 1,
-    gap: spacing.xs
+    gap: theme.space[1]
   },
   title: {
-    ...typography.label,
-    color: colors.text
+    ...theme.typography.label,
+    color: theme.colors.ink.primary,
+    flexShrink: 1
   },
   subtitle: {
-    ...typography.caption,
-    color: colors.textSecondary
+    ...theme.typography.caption,
+    color: theme.colors.ink.secondary,
+    flexShrink: 1
   },
   panel: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: spacing.sm
+    borderTopWidth: theme.border.default,
+    borderTopColor: theme.colors.border,
+    paddingTop: theme.space[2]
   },
   items: {
-    gap: spacing.sm
+    gap: theme.space[2]
   },
   itemsTitle: {
-    ...typography.label,
-    color: colors.text
+    ...theme.typography.label,
+    color: theme.colors.ink.primary
   },
   item: {
-    gap: spacing.sm,
-    borderRadius: radii.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    padding: spacing.md
+    gap: theme.space[2],
+    borderRadius: theme.radius.md,
+    borderWidth: theme.border.default,
+    borderColor: theme.colors.border,
+    backgroundColor: theme.colors.surface.subtle,
+    padding: theme.space[3]
   },
   itemHeader: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: spacing.md
+    flexWrap: "wrap",
+    gap: theme.space[3]
   },
   itemTitleBlock: {
     flex: 1,
-    gap: spacing.xs
+    gap: theme.space[1]
   },
   itemTitle: {
-    ...typography.label,
-    color: colors.text
+    ...theme.typography.label,
+    color: theme.colors.ink.primary,
+    flexShrink: 1
   },
   itemSubtitle: {
-    ...typography.caption,
-    color: colors.textSecondary
+    ...theme.typography.caption,
+    color: theme.colors.ink.secondary,
+    flexShrink: 1
   },
   compactRows: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: spacing.sm
+    borderTopWidth: theme.border.default,
+    borderTopColor: theme.colors.border,
+    paddingTop: theme.space[2]
   },
   action: {
-    paddingTop: spacing.xs
+    paddingTop: theme.space[1]
   }
 });

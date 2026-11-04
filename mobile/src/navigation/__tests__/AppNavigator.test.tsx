@@ -47,6 +47,13 @@ jest.mock("../../context/ForemanManagedShiftsContext", () => ({
 jest.mock("../../context/WorkerShiftHistoryContext", () => ({
   WorkerShiftHistoryProvider: ({ children }: { children: React.ReactNode }) => children
 }));
+jest.mock("../../context/WorkerShiftHistoryPagesContext", () => ({
+  WorkerShiftHistoryPagesProvider: ({
+    children
+  }: {
+    children: React.ReactNode;
+  }) => children
+}));
 jest.mock("../../screens/CreateCompanyScreen", () => {
   const React = jest.requireActual<typeof import("react")>("react");
   const { Text } = jest.requireActual<typeof import("react-native")>("react-native");

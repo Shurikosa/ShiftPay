@@ -1,13 +1,14 @@
 import type { BottomTabScreenProps } from "@react-navigation/bottom-tabs";
 import type { CompositeScreenProps } from "@react-navigation/native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useEffect } from "react";
 import { RefreshControl, StyleSheet, Text, View } from "react-native";
 import { Button } from "../components/Button";
 import { Screen } from "../components/Screen";
 import { StateMessage } from "../components/StateMessage";
 import { WorkerShiftHistoryCard } from "../components/WorkerShiftHistoryCard";
 import { useAuth } from "../context/AuthContext";
-import { useWorkerShiftHistoryPages } from "../hooks/useWorkerShiftHistoryPages";
+import { useWorkerShiftHistoryPagesContext } from "../context/WorkerShiftHistoryPagesContext";
 import type { WorkerStackParamList, WorkerTabParamList } from "../types/navigation";
 import { theme } from "../utils/theme";
 
@@ -31,7 +32,13 @@ export function MyShiftHistoryScreen({ navigation }: MyShiftHistoryScreenProps) 
     refresh,
     loadMore,
     retryContinuation
-  } = useWorkerShiftHistoryPages(canAccess);
+  } = useWorkerShiftHistoryPagesContext();
+
+  useEffect(() => {
+    if (canAccess) {
+      void refresh().catch(() => undefined);
+    }
+  }, [canAccess, refresh]);
 
   const requestRefresh = () => {
     void refresh().catch(() => undefined);

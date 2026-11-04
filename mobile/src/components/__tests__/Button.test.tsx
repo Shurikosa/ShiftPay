@@ -37,7 +37,7 @@ jest.mock("@expo/vector-icons/Ionicons", () => {
 });
 
 function expectNoFixedOrClippingStyle(style: unknown): void {
-  const flattened = StyleSheet.flatten(style) as ViewStyle | undefined;
+  const flattened = StyleSheet.flatten(style as ViewStyle) as ViewStyle | undefined;
   expect(flattened).not.toHaveProperty("height");
   expect(flattened).not.toHaveProperty("maxHeight");
   expect(flattened?.overflow).not.toBe("hidden");

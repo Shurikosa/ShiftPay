@@ -6,6 +6,7 @@ import {
   TextInput,
   View,
   type PressableProps,
+  type TextInputInstance,
   type TextInputProps
 } from "react-native";
 import { theme } from "../utils/theme";
@@ -176,7 +177,7 @@ function SemanticIcon(props: AppIconProps) {
   return <AppIcon {...props} />;
 }
 
-export const FormField = forwardRef<TextInput, FormFieldProps>(function FormField(
+export const FormField = forwardRef<TextInputInstance, FormFieldProps>(function FormField(
   {
     accessibilityHint,
     accessibilityLabel,

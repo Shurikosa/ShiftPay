@@ -154,6 +154,7 @@ const authenticatedRequest = jest.fn(
   (request: (token: string) => Promise<unknown>) => request("test-token")
 );
 const refreshHistory = jest.fn();
+const refreshPagedHistory = jest.fn();
 let mountedView: ReactTestRenderer | null = null;
 
 const emptyPages = {
@@ -165,6 +166,7 @@ const emptyPages = {
   loadMore: jest.fn().mockResolvedValue(undefined),
   nextCursor: null,
   refresh: jest.fn().mockResolvedValue(undefined),
+  refreshAfterMutation: jest.fn().mockResolvedValue(undefined),
   refreshError: null,
   refreshing: false,
   retryContinuation: jest.fn().mockResolvedValue(undefined),
@@ -329,13 +331,17 @@ describe("AppNavigator real shared bottom shell", () => {
       (request: (token: string) => Promise<unknown>) => request("test-token")
     );
     refreshHistory.mockResolvedValue(undefined);
+    refreshPagedHistory.mockResolvedValue(undefined);
     mockedUseWorkerHistory.mockReturnValue({
       error: null,
       loading: false,
       refresh: refreshHistory,
       shifts: []
     });
-    mockedUseWorkerPages.mockReturnValue(emptyPages);
+    mockedUseWorkerPages.mockReturnValue({
+      ...emptyPages,
+      refreshAfterMutation: refreshPagedHistory
+    });
     mockedUseForemanPages.mockReturnValue(emptyPages);
     mockedGetPayableAttendances.mockResolvedValue([]);
     mockedGetMyPayoutRequests.mockResolvedValue([]);
@@ -487,12 +493,30 @@ describe("AppNavigator real shared bottom shell", () => {
     });
     await press(findButton(view, "Join shift"));
 
-    expect(refreshHistory).toHaveBeenCalledTimes(1);
+    expect(refreshPagedHistory).toHaveBeenCalledTimes(1);
+    expect(refreshHistory).not.toHaveBeenCalled();
     expect(rootRouteNames(navigationRef)).toEqual([
       "WorkerTabs"
     ]);
     expect(navigationRef.getCurrentRoute()?.name).toBe("WorkerDashboard");
     expect(navigationRef.canGoBack()).toBe(false);
+  });
+
+  it("returns the JoinShift header action to the existing Dashboard shell", async () => {
+    mockedUseAuth.mockReturnValue(authState("WORKER", 1));
+    const { navigationRef, view } = await renderApp();
+    await dispatchNavigate(navigationRef, "WorkerTabs", {
+      screen: "MyShiftHistory"
+    });
+    await dispatchNavigate(navigationRef, "JoinShift");
+
+    expect(rootRouteNames(navigationRef)).toEqual(["WorkerTabs", "JoinShift"]);
+    expect(navigationRef.getCurrentRoute()?.name).toBe("JoinShift");
+
+    await press(findButtonByTestID(view, "join-shift-back"));
+
+    expect(rootRouteNames(navigationRef)).toEqual(["WorkerTabs"]);
+    expect(navigationRef.getCurrentRoute()?.name).toBe("WorkerDashboard");
   });
 
   it("uses popTo fallback to create exactly one shell when restored directly at JoinShift", async () => {
@@ -507,6 +531,8 @@ describe("AppNavigator real shared bottom shell", () => {
     });
     await press(findButton(view, "Join shift"));
 
+    expect(refreshPagedHistory).toHaveBeenCalledTimes(1);
+    expect(refreshHistory).not.toHaveBeenCalled();
     expect(rootRouteNames(navigationRef)).toEqual([
       "WorkerTabs"
     ]);

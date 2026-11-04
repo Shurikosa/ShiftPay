@@ -3,13 +3,14 @@ import { useEffect, useRef, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { ApiError, getErrorMessage } from "../api/errors";
 import { joinShiftByCode } from "../api/shifts";
+import { AppIcon } from "../components/AppIcon";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
 import { Feedback } from "../components/Feedback";
 import { FormField } from "../components/FormField";
 import { Screen } from "../components/Screen";
 import { useAuth } from "../context/AuthContext";
-import { useWorkerShiftHistory } from "../hooks/useWorkerShiftHistory";
+import { useWorkerShiftHistoryPagesContext } from "../context/WorkerShiftHistoryPagesContext";
 import type { WorkerStackParamList } from "../types/navigation";
 import { theme } from "../utils/theme";
 import { isBlank } from "../utils/validation";
@@ -30,7 +31,7 @@ function getJoinShiftErrorMessage(error: unknown): string {
 
 export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
   const { authenticatedRequest, user } = useAuth();
-  const { refresh } = useWorkerShiftHistory({ loadOnFocus: false });
+  const { refreshAfterMutation } = useWorkerShiftHistoryPagesContext();
   const [joinCode, setJoinCode] = useState("");
   const [joinCodeError, setJoinCodeError] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
@@ -56,10 +57,14 @@ export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
 
   const refreshHistorySafely = () => {
     try {
-      void Promise.resolve(refresh()).catch(() => undefined);
+      void Promise.resolve(refreshAfterMutation()).catch(() => undefined);
     } catch {
-      // Joining succeeded; a later focus refresh can recover the history view.
+      // Joining succeeded; a later history refresh can recover the list.
     }
+  };
+
+  const handleBackToDashboard = () => {
+    navigation.popTo("WorkerTabs", { screen: "WorkerDashboard" });
   };
 
   const handleSubmit = () => {
@@ -67,7 +72,7 @@ export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
       return;
     }
 
-    if (!user?.company) {
+    if (user?.role !== "WORKER" || !user.company) {
       setError("Join your company before joining shifts.");
       return;
     }
@@ -115,9 +120,20 @@ export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
       });
   };
 
-  if (!user?.company) {
+  const isWorker = user?.role === "WORKER";
+  const company = isWorker ? user.company : null;
+
+  if (!company) {
+    const missingCompany = isWorker;
+
     return (
-      <Screen scroll>
+      <Screen
+        scroll
+        scrollProps={{
+          keyboardDismissMode: "on-drag",
+          testID: "join-shift-scroll"
+        }}
+      >
         <View style={styles.page} testID="join-shift-content">
           <View style={styles.header} testID="join-shift-header">
             <Button
@@ -125,27 +141,35 @@ export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
               disabled={submitting}
               label="Back to dashboard"
               leadingIcon="back"
-              onPress={() => navigation.goBack()}
+              onPress={handleBackToDashboard}
               style={styles.backAction}
               testID="join-shift-back"
               variant="ghost"
             />
-            <Text allowFontScaling style={styles.eyebrow}>
-              Worker
-            </Text>
-            <Text accessibilityRole="header" allowFontScaling style={styles.title}>
-              Join shift
-            </Text>
-            <Text allowFontScaling style={styles.subtitle}>
-              A company is required before shifts can be joined.
-            </Text>
+            <View style={styles.headerCopy}>
+              <Text allowFontScaling style={styles.eyebrow}>
+                Worker
+              </Text>
+              <Text accessibilityRole="header" allowFontScaling style={styles.title}>
+                Join shift
+              </Text>
+              <Text allowFontScaling style={styles.subtitle}>
+                {missingCompany
+                  ? "A company is required before shifts can be joined."
+                  : "Only a worker with a company can join a shift."}
+              </Text>
+            </View>
           </View>
 
           <Feedback
-            message="Join your company first, then enter the shift join code from your foreman."
+            message={
+              missingCompany
+                ? "Join your company first, then enter the shift join code from your foreman."
+                : "This action is available only in the worker company flow."
+            }
             mode="screen"
             testID="join-shift-company-required"
-            title="Company required"
+            title={missingCompany ? "Company required" : "Worker access required"}
             tone="error"
           />
         </View>
@@ -154,7 +178,13 @@ export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
   }
 
   return (
-    <Screen scroll>
+    <Screen
+      scroll
+      scrollProps={{
+        keyboardDismissMode: "on-drag",
+        testID: "join-shift-scroll"
+      }}
+    >
       <View style={styles.page} testID="join-shift-content">
         <View style={styles.header} testID="join-shift-header">
           <Button
@@ -162,29 +192,40 @@ export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
             disabled={submitting}
             label="Back to dashboard"
             leadingIcon="back"
-            onPress={() => navigation.goBack()}
+            onPress={handleBackToDashboard}
             style={styles.backAction}
             testID="join-shift-back"
             variant="ghost"
           />
-          <Text allowFontScaling style={styles.eyebrow}>
-            Worker
-          </Text>
-          <Text accessibilityRole="header" allowFontScaling style={styles.title}>
-            Join shift
-          </Text>
-          <Text allowFontScaling style={styles.subtitle}>
-            Enter the code shared by your foreman for an open or active shift.
-          </Text>
-          <View style={styles.companyContext} testID="join-shift-company-context">
-            <Text allowFontScaling style={styles.companyName}>
-              {user.company.name}
+          <View style={styles.headerCopy}>
+            <Text allowFontScaling style={styles.eyebrow}>
+              Worker
+            </Text>
+            <Text accessibilityRole="header" allowFontScaling style={styles.title}>
+              Join shift
+            </Text>
+            <Text allowFontScaling style={styles.subtitle}>
+              Enter the code shared by your foreman to join your next shift.
             </Text>
           </View>
         </View>
 
         <Card testID="join-shift-card">
           <View style={styles.form} testID="join-shift-form">
+            <View style={styles.cardIntro} testID="join-shift-card-intro">
+              <View style={styles.cardIcon}>
+                <AppIcon name="code" size="tile" tone="brand" />
+              </View>
+              <View style={styles.cardCopy}>
+                <Text allowFontScaling style={styles.cardTitle}>
+                  Enter shift code
+                </Text>
+                <Text allowFontScaling style={styles.cardDescription}>
+                  Codes are formatted in uppercase. Spaces around the code are removed.
+                </Text>
+              </View>
+            </View>
+
             <FormField
               accessibilityHint="Enter the shift code shared by your foreman."
               allowFontScaling
@@ -202,6 +243,18 @@ export function JoinShiftScreen({ navigation }: JoinShiftScreenProps) {
               testID="join-shift-code-input"
               value={joinCode}
             />
+
+            <View style={styles.eligibility} testID="join-shift-eligibility">
+              <AppIcon name="info" tone="info" />
+              <View style={styles.eligibilityCopy}>
+                <Text allowFontScaling style={styles.eligibilityTitle}>
+                  Open or active shifts
+                </Text>
+                <Text allowFontScaling style={styles.eligibilityMessage}>
+                  The code must belong to an open or active shift at {company.name}.
+                </Text>
+              </View>
+            </View>
 
             {successMessage ? (
               <Feedback
@@ -245,9 +298,14 @@ const styles = StyleSheet.create({
   },
   header: {
     flexShrink: 1,
-    gap: theme.space[2],
+    gap: theme.space[3],
     maxWidth: "100%",
     width: "100%"
+  },
+  headerCopy: {
+    flexShrink: 1,
+    gap: theme.space[2],
+    maxWidth: "100%"
   },
   backAction: {
     alignSelf: "flex-start"
@@ -258,26 +316,71 @@ const styles = StyleSheet.create({
     flexShrink: 1
   },
   title: {
-    ...theme.typography.screenTitle,
+    ...theme.typography.display,
     color: theme.colors.ink.primary,
     flexShrink: 1
   },
   subtitle: {
+    ...theme.typography.body,
+    color: theme.colors.ink.secondary,
+    flexShrink: 1
+  },
+  cardIntro: {
+    alignItems: "flex-start",
+    flexDirection: "row",
+    flexShrink: 1,
+    gap: theme.space[3],
+    maxWidth: "100%"
+  },
+  cardIcon: {
+    alignItems: "center",
+    backgroundColor: theme.colors.brand.tint,
+    borderRadius: theme.radius.md,
+    justifyContent: "center",
+    padding: theme.space[2]
+  },
+  cardCopy: {
+    flex: 1,
+    flexShrink: 1,
+    gap: theme.space[1],
+    minWidth: 0
+  },
+  cardTitle: {
+    ...theme.typography.sectionTitle,
+    color: theme.colors.ink.primary,
+    flexShrink: 1
+  },
+  cardDescription: {
     ...theme.typography.supporting,
     color: theme.colors.ink.secondary,
     flexShrink: 1
   },
-  companyContext: {
-    alignItems: "center",
+  eligibility: {
+    alignItems: "flex-start",
+    backgroundColor: theme.colors.info.bg,
+    borderColor: theme.colors.info.fg,
+    borderRadius: theme.radius.md,
+    borderWidth: theme.border.default,
     flexDirection: "row",
     flexShrink: 1,
-    flexWrap: "wrap",
     gap: theme.space[2],
-    maxWidth: "100%"
+    maxWidth: "100%",
+    padding: theme.space[3]
   },
-  companyName: {
+  eligibilityCopy: {
+    flex: 1,
+    flexShrink: 1,
+    gap: theme.space[1],
+    minWidth: 0
+  },
+  eligibilityTitle: {
+    ...theme.typography.label,
+    color: theme.colors.info.fg,
+    flexShrink: 1
+  },
+  eligibilityMessage: {
     ...theme.typography.supporting,
-    color: theme.colors.ink.secondary,
+    color: theme.colors.info.fg,
     flexShrink: 1
   },
   form: {

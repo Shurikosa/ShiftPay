@@ -25,7 +25,7 @@ import { Feedback } from "../../components/Feedback";
 import { FormField } from "../../components/FormField";
 import { Screen } from "../../components/Screen";
 import { useAuth } from "../../context/AuthContext";
-import { useWorkerShiftHistory } from "../../hooks/useWorkerShiftHistory";
+import { useWorkerShiftHistoryPagesContext } from "../../context/WorkerShiftHistoryPagesContext";
 import {
   clearSession,
   loadSession,
@@ -51,8 +51,8 @@ jest.mock("@expo/vector-icons/Ionicons", () => {
 });
 jest.mock("../../api/shifts", () => ({ joinShiftByCode: jest.fn() }));
 jest.mock("../../context/AuthContext", () => ({ useAuth: jest.fn() }));
-jest.mock("../../hooks/useWorkerShiftHistory", () => ({
-  useWorkerShiftHistory: jest.fn()
+jest.mock("../../context/WorkerShiftHistoryPagesContext", () => ({
+  useWorkerShiftHistoryPagesContext: jest.fn()
 }));
 jest.mock("../../storage/sessionStorage", () => ({
   clearSession: jest.fn(),
@@ -62,7 +62,9 @@ jest.mock("../../storage/sessionStorage", () => ({
 
 const mockedJoinShiftByCode = jest.mocked(joinShiftByCode);
 const mockedUseAuth = jest.mocked(useAuth);
-const mockedUseWorkerShiftHistory = jest.mocked(useWorkerShiftHistory);
+const mockedUseWorkerShiftHistoryPagesContext = jest.mocked(
+  useWorkerShiftHistoryPagesContext
+);
 
 const worker: User = {
   company: {
@@ -93,7 +95,7 @@ type Deferred<TValue> = {
 };
 
 const authenticatedRequest = jest.fn();
-const refresh = jest.fn();
+const refreshAfterMutation = jest.fn();
 const goBack = jest.fn();
 const navigate = jest.fn();
 const popTo = jest.fn();
@@ -170,10 +172,19 @@ async function renderScreen(user: User | null = worker): Promise<void> {
     status: "authenticated",
     user
   } as unknown as ReturnType<typeof useAuth>);
-  mockedUseWorkerShiftHistory.mockReturnValue({
-    error: null,
-    loading: false,
-    refresh,
+  mockedUseWorkerShiftHistoryPagesContext.mockReturnValue({
+    continuationError: null,
+    continuationLoading: false,
+    hasMore: false,
+    initialError: null,
+    initialLoading: false,
+    loadMore: jest.fn().mockResolvedValue(undefined),
+    nextCursor: null,
+    refresh: jest.fn().mockResolvedValue(undefined),
+    refreshAfterMutation,
+    refreshError: null,
+    refreshing: false,
+    retryContinuation: jest.fn().mockResolvedValue(undefined),
     shifts: []
   });
 
@@ -209,7 +220,7 @@ describe("JoinShiftScreen", () => {
       (request: (token: string) => Promise<unknown>) => request("worker-token")
     );
     mockedJoinShiftByCode.mockResolvedValue(joinedShift);
-    refresh.mockResolvedValue([]);
+    refreshAfterMutation.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -256,10 +267,18 @@ describe("JoinShiftScreen", () => {
       leadingIcon: "join"
     });
     expect(
-      rendered!.root.findByProps({
-        children: "A returned company name that remains readable on a narrow screen"
-      }).props
+      rendered!.root.findByProps({ children: "Enter shift code" }).props
     ).toMatchObject({ allowFontScaling: true });
+    const eligibilityMessage = rendered!.root
+      .findAllByType(Text)
+      .find(
+        (node) =>
+          Array.isArray(node.props.children) &&
+          node.props.children.includes(
+            "A returned company name that remains readable on a narrow screen"
+          )
+      );
+    expect(eligibilityMessage?.props).toMatchObject({ allowFontScaling: true });
     expect(rendered!.root.findAllByType(Image)).toHaveLength(0);
 
     const output = JSON.stringify(rendered!.toJSON());
@@ -328,8 +347,10 @@ describe("JoinShiftScreen", () => {
     const scrollView = rendered!.root.findByType(ScrollView);
     expect(scrollView.props).toMatchObject({
       horizontal: false,
+      keyboardDismissMode: "on-drag",
       keyboardShouldPersistTaps: "handled",
-      scrollEnabled: true
+      scrollEnabled: true,
+      testID: "join-shift-scroll"
     });
     expect(StyleSheet.flatten(scrollView.props.contentContainerStyle)).toMatchObject({
       flexGrow: 1
@@ -340,8 +361,11 @@ describe("JoinShiftScreen", () => {
 
     const pageStyle = StyleSheet.flatten(findView("join-shift-content").props.style);
     const headerStyle = StyleSheet.flatten(findView("join-shift-header").props.style);
-    const contextStyle = StyleSheet.flatten(
-      findView("join-shift-company-context").props.style
+    const introStyle = StyleSheet.flatten(
+      findView("join-shift-card-intro").props.style
+    );
+    const eligibilityStyle = StyleSheet.flatten(
+      findView("join-shift-eligibility").props.style
     );
     const cardStyle = StyleSheet.flatten(findView("join-shift-card").props.style);
     const formStyle = StyleSheet.flatten(findView("join-shift-form").props.style);
@@ -351,16 +375,24 @@ describe("JoinShiftScreen", () => {
       maxWidth: "100%",
       width: "100%"
     });
-    expect(contextStyle).toMatchObject({
+    expect(introStyle).toMatchObject({
       flexDirection: "row",
       flexShrink: 1,
-      flexWrap: "wrap",
-      gap: theme.space[2],
+      gap: theme.space[3],
+      maxWidth: "100%"
+    });
+    expect(eligibilityStyle).toMatchObject({
+      backgroundColor: theme.colors.info.bg,
+      borderColor: theme.colors.info.fg,
+      borderRadius: theme.radius.md,
+      borderWidth: theme.border.default,
+      flexDirection: "row",
+      flexShrink: 1,
       maxWidth: "100%"
     });
     expect(headerStyle).toMatchObject({
       flexShrink: 1,
-      gap: theme.space[2],
+      gap: theme.space[3],
       maxWidth: "100%",
       width: "100%"
     });
@@ -377,7 +409,14 @@ describe("JoinShiftScreen", () => {
       gap: theme.space[4],
       maxWidth: "100%"
     });
-    for (const style of [pageStyle, headerStyle, contextStyle, cardStyle, formStyle]) {
+    for (const style of [
+      pageStyle,
+      headerStyle,
+      introStyle,
+      eligibilityStyle,
+      cardStyle,
+      formStyle
+    ]) {
       expectNoFixedOrClippingStyle(style);
     }
     for (const text of rendered!.root.findAllByType(Text)) {
@@ -388,7 +427,7 @@ describe("JoinShiftScreen", () => {
     }
   });
 
-  it("provides one visible Back control that delegates to goBack", async () => {
+  it("provides one visible Back control that selects the existing Dashboard shell", async () => {
     await renderScreen();
 
     expect(findBackButton().props).toMatchObject({
@@ -401,8 +440,10 @@ describe("JoinShiftScreen", () => {
     act(() => {
       findBackButton().props.onPress();
     });
-    expect(goBack).toHaveBeenCalledTimes(1);
-    expect(popTo).not.toHaveBeenCalled();
+    expect(popTo).toHaveBeenCalledWith("WorkerTabs", {
+      screen: "WorkerDashboard"
+    });
+    expect(goBack).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -432,7 +473,24 @@ describe("JoinShiftScreen", () => {
     act(() => {
       findBackButton().props.onPress();
     });
-    expect(goBack).toHaveBeenCalledTimes(1);
+    expect(popTo).toHaveBeenCalledWith("WorkerTabs", {
+      screen: "WorkerDashboard"
+    });
+    expect(goBack).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a non-worker reaches the route", async () => {
+    await renderScreen({ ...worker, role: "FOREMAN" });
+
+    expect(rendered!.root.findAllByType(FormField)).toHaveLength(0);
+    expect(rendered!.root.findAllByType(Card)).toHaveLength(0);
+    expect(findFeedback("Worker access required").props).toMatchObject({
+      message: "This action is available only in the worker company flow.",
+      mode: "screen",
+      tone: "error"
+    });
+    expect(authenticatedRequest).not.toHaveBeenCalled();
+    expect(mockedJoinShiftByCode).not.toHaveBeenCalled();
   });
 
   it("validates blank input locally without a request", async () => {
@@ -469,8 +527,18 @@ describe("JoinShiftScreen", () => {
       "Worker already joined this shift."
     ],
     [
-      "other lifecycle conflict",
+      "closed shift",
       new ApiError("Shift is closed.", 409),
+      "This shift can no longer be joined."
+    ],
+    [
+      "cancelled shift",
+      new ApiError("Shift is cancelled.", 409),
+      "This shift can no longer be joined."
+    ],
+    [
+      "discarded shift",
+      new ApiError("Shift is discarded.", 409),
       "This shift can no longer be joined."
     ],
     ["unknown shift", new ApiError("Shift not found.", 404), "Shift not found."],
@@ -531,7 +599,7 @@ describe("JoinShiftScreen", () => {
 
     await pressJoin();
     expect(mockedJoinShiftByCode).toHaveBeenCalledTimes(2);
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refreshAfterMutation).toHaveBeenCalledTimes(1);
     expect(popTo).toHaveBeenCalledTimes(1);
   });
 
@@ -605,22 +673,27 @@ describe("JoinShiftScreen", () => {
       message: "Joined shift 501. Waiting for foreman approval.",
       tone: "success"
     });
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refreshAfterMutation).toHaveBeenCalledTimes(1);
     expect(popTo).toHaveBeenCalledTimes(1);
     expect(popTo).toHaveBeenCalledWith("WorkerTabs", {
       screen: "WorkerDashboard"
     });
     expect(goBack).not.toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
+    expect(refreshAfterMutation.mock.invocationCallOrder[0]).toBeLessThan(
+      popTo.mock.invocationCallOrder[0]!
+    );
   });
 
   it.each(["reject", "throw"] as const)(
     "keeps successful navigation handled when history refresh will %s",
     async (refreshFailure) => {
       if (refreshFailure === "reject") {
-        refresh.mockRejectedValueOnce(new Error("History refresh failed."));
+        refreshAfterMutation.mockRejectedValueOnce(
+          new Error("History refresh failed.")
+        );
       } else {
-        refresh.mockImplementationOnce(() => {
+        refreshAfterMutation.mockImplementationOnce(() => {
           throw new Error("History refresh failed synchronously.");
         });
       }
@@ -628,7 +701,7 @@ describe("JoinShiftScreen", () => {
       enterCode("success2");
       await pressJoin();
 
-      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(refreshAfterMutation).toHaveBeenCalledTimes(1);
       expect(popTo).toHaveBeenCalledTimes(1);
       expect(findFeedback("Shift joined").props.message).toContain("501");
       expect(rendered!.root.findAllByProps({ testID: "join-shift-error" })).toHaveLength(
@@ -650,7 +723,7 @@ describe("JoinShiftScreen", () => {
       await flushPromises();
     });
 
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(refreshAfterMutation).toHaveBeenCalledTimes(1);
     expect(popTo).toHaveBeenCalledTimes(1);
     expect(popTo).toHaveBeenCalledWith("WorkerTabs", {
       screen: "WorkerDashboard"
@@ -683,7 +756,7 @@ describe("JoinShiftScreen", () => {
     });
 
     expect(readMessage).not.toHaveBeenCalled();
-    expect(refresh).not.toHaveBeenCalled();
+    expect(refreshAfterMutation).not.toHaveBeenCalled();
     expect(popTo).not.toHaveBeenCalled();
   });
 
@@ -715,7 +788,7 @@ describe("JoinShiftScreen", () => {
     });
 
     expect(readShiftId).not.toHaveBeenCalled();
-    expect(refresh).not.toHaveBeenCalled();
+    expect(refreshAfterMutation).not.toHaveBeenCalled();
     expect(popTo).not.toHaveBeenCalled();
   });
 
@@ -751,8 +824,6 @@ describe("JoinShiftScreen", () => {
     expect(loadSession).not.toHaveBeenCalled();
     expect(saveSession).not.toHaveBeenCalled();
     expect(clearSession).not.toHaveBeenCalled();
-    expect(mockedUseWorkerShiftHistory).toHaveBeenCalledWith({
-      loadOnFocus: false
-    });
+    expect(mockedUseWorkerShiftHistoryPagesContext).toHaveBeenCalled();
   });
 });

@@ -55,13 +55,22 @@ function uniqueAttendances(
   return uniqueItems;
 }
 
-export function useWorkerShiftHistoryPages(enabled: boolean) {
+type WorkerShiftHistoryPagesOptions = {
+  loadOnMount?: boolean;
+};
+
+export function useWorkerShiftHistoryPages(
+  enabled: boolean,
+  { loadOnMount = true }: WorkerShiftHistoryPagesOptions = {}
+) {
   const { authenticatedRequest } = useAuth();
   const [state, setState] = useState<WorkerShiftHistoryPagesState>(() => ({
     ...emptyState,
     initialLoading: enabled
   }));
-  const mountedRef = useRef(false);
+  // The shared provider's child screen effects run before this hook's passive
+  // effect, so refresh must already be callable during that first commit.
+  const mountedRef = useRef(true);
   const enabledRef = useRef(enabled);
   const generationRef = useRef(0);
   const refreshPromiseRef = useRef<Promise<void> | null>(null);
@@ -71,11 +80,11 @@ export function useWorkerShiftHistoryPages(enabled: boolean) {
 
   enabledRef.current = enabled;
 
-  const refresh = useCallback((): Promise<void> => {
+  const runRefresh = useCallback((replaceInFlight: boolean): Promise<void> => {
     if (!mountedRef.current || !enabledRef.current) {
       return Promise.resolve();
     }
-    if (refreshPromiseRef.current) {
+    if (!replaceInFlight && refreshPromiseRef.current) {
       return refreshPromiseRef.current;
     }
 
@@ -144,6 +153,15 @@ export function useWorkerShiftHistoryPages(enabled: boolean) {
     refreshPromiseRef.current = request;
     return request;
   }, [authenticatedRequest]);
+
+  const refresh = useCallback(
+    (): Promise<void> => runRefresh(false),
+    [runRefresh]
+  );
+  const refreshAfterMutation = useCallback(
+    (): Promise<void> => runRefresh(true),
+    [runRefresh]
+  );
 
   const loadMore = useCallback(async (): Promise<void> => {
     if (
@@ -221,7 +239,9 @@ export function useWorkerShiftHistoryPages(enabled: boolean) {
   useEffect(() => {
     mountedRef.current = true;
     if (enabled) {
-      void refresh().catch(() => undefined);
+      if (loadOnMount) {
+        void refresh().catch(() => undefined);
+      }
     } else {
       generationRef.current += 1;
       nextCursorRef.current = null;
@@ -235,11 +255,12 @@ export function useWorkerShiftHistoryPages(enabled: boolean) {
       refreshPromiseRef.current = null;
       continuationInFlightRef.current = false;
     };
-  }, [enabled, refresh]);
+  }, [enabled, loadOnMount, refresh]);
 
   return {
     ...state,
     refresh,
+    refreshAfterMutation,
     loadMore,
     retryContinuation: loadMore
   };

@@ -1,3 +1,4 @@
+import Ionicons from "@expo/vector-icons/Ionicons";
 import type { ComponentProps } from "react";
 import {
   act,
@@ -14,6 +15,7 @@ import { FormField } from "../../components/FormField";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { useAuth } from "../../context/AuthContext";
 import type { PayPolicy } from "../../types/payPolicy";
+import type { User } from "../../types/auth";
 import type { CompanySettingsResponse } from "../../types/company";
 import { ForemanPayRulesScreen } from "../ForemanPayRulesScreen";
 
@@ -23,6 +25,16 @@ let mockFocusLifecycle:
       cleanup: (() => void) | undefined;
     }
   | null = null;
+
+jest.mock("@expo/vector-icons/Ionicons", () => {
+  const React = jest.requireActual<typeof import("react")>("react");
+  const { Text: NativeText } = jest.requireActual<typeof import("react-native")>(
+    "react-native"
+  );
+  const MockIonicons = (props: Record<string, unknown>) =>
+    React.createElement(NativeText, props as ComponentProps<typeof NativeText>);
+  return { __esModule: true, default: MockIonicons };
+});
 
 jest.mock("@react-navigation/native", () => {
   const actualReact = jest.requireActual<typeof import("react")>("react");
@@ -66,6 +78,8 @@ const mockedGetMyPayPolicy = jest.mocked(getMyPayPolicy);
 const mockedUpdateMyPayPolicy = jest.mocked(updateMyPayPolicy);
 const mockedGetMyCompany = jest.mocked(getMyCompany);
 const mockedUseAuth = jest.mocked(useAuth);
+
+void Ionicons;
 
 type ScreenProps = ComponentProps<typeof ForemanPayRulesScreen>;
 
@@ -184,6 +198,13 @@ function findFields(renderer: ReactTestRenderer, label: string): ReactTestInstan
     .filter((candidate) => candidate.props.label === label);
 }
 
+function editFirstRuleName(
+  renderer: ReactTestRenderer,
+  value = "Edited policy draft"
+): void {
+  findFields(renderer, "Rule name")[0]?.props.onChangeText(value);
+}
+
 function findSegmentedControl(
   renderer: ReactTestRenderer,
   accessibilityLabel: string
@@ -218,6 +239,16 @@ function authResult(authenticatedRequest: jest.Mock) {
     signOut: jest.fn(),
     clearError: jest.fn()
   } as unknown as ReturnType<typeof useAuth>;
+}
+
+function authResultForUser(
+  authenticatedRequest: jest.Mock,
+  user: User | null
+): ReturnType<typeof useAuth> {
+  return {
+    ...authResult(authenticatedRequest),
+    user
+  } as ReturnType<typeof useAuth>;
 }
 
 describe("ForemanPayRulesScreen", () => {
@@ -307,6 +338,191 @@ describe("ForemanPayRulesScreen", () => {
     expect(findFields(renderer, "Rule name")[0]?.props.value).toBe("Night");
   });
 
+  it.each([
+    [
+      "worker",
+      {
+        id: 6,
+        email: "worker@example.com",
+        firstName: "Wendy",
+        lastName: "Worker",
+        role: "WORKER",
+        company: {
+          id: 10,
+          name: "Acme Construction",
+          joinCode: "CMP123",
+          currencyLabel: "EUR",
+          timeZone: "Europe/Berlin"
+        }
+      } as User,
+      "Foreman access required"
+    ],
+    [
+      "admin",
+      {
+        id: 7,
+        email: "admin@example.com",
+        firstName: "Ada",
+        lastName: "Admin",
+        role: "ADMIN",
+        company: {
+          id: 10,
+          name: "Acme Construction",
+          joinCode: "CMP123",
+          currencyLabel: "EUR",
+          timeZone: "Europe/Berlin"
+        }
+      } as User,
+      "Foreman access required"
+    ],
+    [
+      "companyless foreman",
+      {
+        id: 5,
+        email: "foreman@example.com",
+        firstName: "Frank",
+        lastName: "Foreman",
+        role: "FOREMAN",
+        company: null
+      } as User,
+      "Company required"
+    ],
+    ["missing user", null, "Foreman access required"]
+  ])("blocks %s before any policy or company request", async (_case, user, title) => {
+    mockedUseAuth.mockReturnValue(authResultForUser(authenticatedRequest, user));
+    const renderer = await renderScreen();
+
+    expect(renderedOutput(renderer)).toContain(title);
+    expect(mockedGetMyPayPolicy).not.toHaveBeenCalled();
+    expect(mockedGetMyCompany).not.toHaveBeenCalled();
+    expect(mockedUpdateMyPayPolicy).not.toHaveBeenCalled();
+  });
+
+  it("remounts state synchronously for a new user/company scope and ignores the old response", async () => {
+    const oldPolicy = deferred<PayPolicy>();
+    const oldSettings = deferred<CompanySettingsResponse>();
+    const nextPolicy = deferred<PayPolicy>();
+    const nextSettings = deferred<CompanySettingsResponse>();
+    mockedGetMyPayPolicy.mockReturnValueOnce(oldPolicy.promise).mockReturnValueOnce(nextPolicy.promise);
+    mockedGetMyCompany.mockReturnValueOnce(oldSettings.promise).mockReturnValueOnce(nextSettings.promise);
+    const renderer = await renderScreen();
+    const nextRequest = jest.fn((request: (token: string) => Promise<unknown>) => request("next-token"));
+    mockedUseAuth.mockReturnValue(
+      authResultForUser(nextRequest, {
+        id: 8,
+        email: "next@example.com",
+        firstName: "Nora",
+        lastName: "Foreman",
+        role: "FOREMAN",
+        company: {
+          id: 20,
+          name: "Next Company",
+          joinCode: "NEXT20",
+          currencyLabel: "NEXT",
+          timeZone: "Europe/Berlin"
+        }
+      })
+    );
+
+    act(() => {
+      renderer.update(<ForemanPayRulesScreen {...screenProps} />);
+      expect(renderedOutput(renderer)).toContain("Loading pay rules");
+      expect(renderedOutput(renderer)).not.toContain("Acme Construction");
+    });
+
+    await act(async () => {
+      oldPolicy.resolve(policyFixture({ version: 99 }));
+      oldSettings.resolve(companySettingsFixture({ currencyLabel: "OLD_SCOPE" }));
+      await flushPromises();
+    });
+    expect(renderedOutput(renderer)).not.toContain("Version 99");
+    expect(renderedOutput(renderer)).not.toContain("OLD_SCOPE");
+
+    await act(async () => {
+      nextPolicy.resolve(policyFixture({ companyId: 20, version: 4 }));
+      nextSettings.resolve(
+        companySettingsFixture({ id: 20, name: "Next Company", currencyLabel: "NEXT" })
+      );
+      await flushPromises();
+    });
+    expect(renderedOutput(renderer)).toContain("Next Company");
+    expect(renderedOutput(renderer)).toContain("Version 4");
+    expect(renderedOutput(renderer)).toContain("NEXT");
+  });
+
+  it("does not publish a policy/settings pair returned for another company", async () => {
+    mockedGetMyPayPolicy.mockResolvedValueOnce(
+      policyFixture({ companyId: 99, version: 99 })
+    );
+    mockedGetMyCompany.mockResolvedValueOnce(
+      companySettingsFixture({ id: 99, name: "Other Company", currencyLabel: "PRIVATE" })
+    );
+    const renderer = await renderScreen();
+
+    expect(renderedOutput(renderer)).toContain("Could not load pay rules");
+    expect(renderedOutput(renderer)).not.toContain("Other Company");
+    expect(renderedOutput(renderer)).not.toContain("PRIVATE");
+    expect(renderedOutput(renderer)).not.toContain("Version 99");
+  });
+
+  it("keeps edits made after a manual reload starts instead of hydrating its late pair", async () => {
+    const latePolicy = deferred<PayPolicy>();
+    const lateSettings = deferred<CompanySettingsResponse>();
+    mockedGetMyPayPolicy.mockResolvedValueOnce(policyFixture({ version: 3 }));
+    mockedGetMyCompany.mockResolvedValueOnce(companySettingsFixture({ currencyLabel: "CURRENT" }));
+    const renderer = await renderScreen();
+    mockedGetMyPayPolicy.mockReturnValueOnce(latePolicy.promise);
+    mockedGetMyCompany.mockReturnValueOnce(lateSettings.promise);
+
+    await act(async () => {
+      findButton(renderer, "Reload current policy").props.onPress();
+      await flushPromises();
+    });
+    act(() => {
+      findFields(renderer, "Rule name")[0]?.props.onChangeText("My local draft");
+    });
+    expect(renderedOutput(renderer)).toContain("Unsaved pay-rule changes");
+
+    await act(async () => {
+      latePolicy.resolve(policyFixture({ version: 4 }));
+      lateSettings.resolve(companySettingsFixture({ currencyLabel: "LATE" }));
+      await flushPromises();
+    });
+
+    expect(findFields(renderer, "Rule name")[0]?.props.value).toBe("My local draft");
+    expect(renderedOutput(renderer)).toContain("Version 3");
+    expect(renderedOutput(renderer)).toContain("CURRENT");
+    expect(renderedOutput(renderer)).not.toContain("LATE");
+  });
+
+  it("preserves a dirty draft across the required blur/refocus freshness load", async () => {
+    mockedGetMyPayPolicy.mockResolvedValueOnce(policyFixture({ version: 3 }));
+    mockedGetMyCompany.mockResolvedValueOnce(companySettingsFixture({ currencyLabel: "CURRENT" }));
+    const renderer = await renderScreen();
+
+    act(() => {
+      findFields(renderer, "Rule name")[0]?.props.onChangeText("Draft kept across focus");
+      blurPayRulesScreen();
+    });
+    mockedGetMyPayPolicy.mockResolvedValueOnce(policyFixture({ version: 4 }));
+    mockedGetMyCompany.mockResolvedValueOnce(
+      companySettingsFixture({ currencyLabel: "REFRESHED", defaultWorkerHourlyRate: 44 })
+    );
+
+    await act(async () => {
+      refocusPayRulesScreen();
+      await flushPromises();
+    });
+
+    expect(findFields(renderer, "Rule name")[0]?.props.value).toBe(
+      "Draft kept across focus"
+    );
+    expect(renderedOutput(renderer)).toContain("Version 4");
+    expect(renderedOutput(renderer)).toContain("REFRESHED");
+    expect(renderedOutput(renderer)).toContain("Unsaved pay-rule changes");
+    expect(findButton(renderer, "Save as new version").props.disabled).toBe(false);
+  });
+
   it("keeps an already rendered policy visible during a manual background refresh", async () => {
     const refreshedPolicy = deferred<PayPolicy>();
     const refreshedSettings = deferred<CompanySettingsResponse>();
@@ -343,6 +559,7 @@ describe("ForemanPayRulesScreen", () => {
     mockedUpdateMyPayPolicy.mockReturnValueOnce(savedPolicy.promise);
     const renderer = await renderScreen();
 
+    act(() => editFirstRuleName(renderer, "Draft saved during refocus"));
     await act(async () => {
       findButton(renderer, "Save as new version").props.onPress();
       await flushPromises();
@@ -376,7 +593,7 @@ describe("ForemanPayRulesScreen", () => {
       await flushPromises();
     });
     expect(renderedOutput(renderer)).toContain("Version 9");
-    expect(findButton(renderer, "Save as new version").props.disabled).toBe(false);
+    expect(findButton(renderer, "Save as new version").props.disabled).toBe(true);
     expect(findFields(renderer, "Rule name")[0]?.props.editable).toBe(true);
   });
 
@@ -408,7 +625,7 @@ describe("ForemanPayRulesScreen", () => {
       await flushPromises();
     });
     expect(renderedOutput(renderer)).toContain("Version 4");
-    expect(findButton(renderer, "Save as new version").props.disabled).toBe(false);
+    expect(findButton(renderer, "Save as new version").props.disabled).toBe(true);
     expect(findFields(renderer, "Rule name")[0]?.props.editable).toBe(true);
   });
 
@@ -534,6 +751,7 @@ describe("ForemanPayRulesScreen", () => {
     mockedGetMyCompany.mockResolvedValueOnce(companySettingsFixture({ currencyLabel: "BEFORE_SAVE" }));
     mockedUpdateMyPayPolicy.mockReturnValueOnce(savedPolicy.promise);
     const renderer = await renderScreen();
+    act(() => editFirstRuleName(renderer, "Pre-save draft"));
     const save = findButton(renderer, "Save as new version").props.onPress;
     mockedGetMyPayPolicy.mockReturnValueOnce(stalePolicy.promise);
     mockedGetMyCompany.mockReturnValueOnce(staleSettings.promise);
@@ -548,6 +766,7 @@ describe("ForemanPayRulesScreen", () => {
     expect(renderedOutput(renderer)).toContain("Version 8");
     expect(renderedOutput(renderer)).toContain("BEFORE_SAVE");
     expect(findFields(renderer, "Threshold hours")[0]?.props.value).toBe("8.2");
+    act(() => editFirstRuleName(renderer, "New edit after confirmed save"));
 
     await act(async () => {
       stalePolicy.resolve(policyFixture({ version: 4, rules: [{ id: 4, name: "Stale", type: "DAILY_OVERTIME", enabled: true, premiumPercent: 25, condition: { thresholdMinutes: 31 } }] }));
@@ -558,6 +777,10 @@ describe("ForemanPayRulesScreen", () => {
     expect(renderedOutput(renderer)).toContain("BEFORE_SAVE");
     expect(renderedOutput(renderer)).not.toContain("STALE");
     expect(findFields(renderer, "Threshold hours")[0]?.props.value).toBe("8.2");
+    expect(findFields(renderer, "Rule name")[0]?.props.value).toBe(
+      "New edit after confirmed save"
+    );
+    expect(renderedOutput(renderer)).toContain("Unsaved pay-rule changes");
   });
 
   it("ignores a pre-save reload rejection and finalization after save success", async () => {
@@ -566,6 +789,7 @@ describe("ForemanPayRulesScreen", () => {
     mockedGetMyPayPolicy.mockResolvedValueOnce(policyFixture({ version: 3 }));
     mockedUpdateMyPayPolicy.mockReturnValueOnce(savedPolicy.promise);
     const renderer = await renderScreen();
+    act(() => editFirstRuleName(renderer, "Pre-save rejected load draft"));
     const save = findButton(renderer, "Save as new version").props.onPress;
     mockedGetMyPayPolicy.mockReturnValueOnce(stalePolicy.promise);
 
@@ -595,6 +819,7 @@ describe("ForemanPayRulesScreen", () => {
     const renderer = await renderScreen();
     const reload = findButton(renderer, "Reload current policy").props.onPress;
 
+    act(() => editFirstRuleName(renderer, "Queued load draft"));
     await act(async () => {
       findButton(renderer, "Save as new version").props.onPress();
       reload();
@@ -633,6 +858,7 @@ describe("ForemanPayRulesScreen", () => {
     mockedGetMyPayPolicy.mockReturnValueOnce(queuedPolicy.promise);
     mockedGetMyCompany.mockReturnValueOnce(queuedSettings.promise);
 
+    act(() => editFirstRuleName(renderer, "Same version draft"));
     await act(async () => {
       findButton(renderer, "Save as new version").props.onPress();
       reload();
@@ -665,6 +891,7 @@ describe("ForemanPayRulesScreen", () => {
     mockedGetMyPayPolicy.mockReturnValueOnce(queuedPolicy.promise);
     mockedGetMyCompany.mockReturnValueOnce(queuedSettings.promise);
 
+    act(() => editFirstRuleName(renderer, "Pending refresh draft"));
     await act(async () => {
       findButton(renderer, "Save as new version").props.onPress();
       reload();
@@ -682,7 +909,7 @@ describe("ForemanPayRulesScreen", () => {
     expect(findFields(renderer, "Threshold hours")[0]?.props.value).toBe("8.2");
   });
 
-  it("retains a saved result after a queued refresh fails and leaves save/reload available", async () => {
+  it("keeps Save clean after a foreground confirmed save and failed queued refresh", async () => {
     const savedPolicy = deferred<PayPolicy>();
     const queuedPolicy = deferred<PayPolicy>();
     mockedGetMyPayPolicy.mockResolvedValueOnce(policyFixture({ version: 3 }));
@@ -691,6 +918,7 @@ describe("ForemanPayRulesScreen", () => {
     const reload = findButton(renderer, "Reload current policy").props.onPress;
     mockedGetMyPayPolicy.mockReturnValueOnce(queuedPolicy.promise);
 
+    act(() => editFirstRuleName(renderer, "Failed queued refresh draft"));
     await act(async () => {
       findButton(renderer, "Save as new version").props.onPress();
       reload();
@@ -709,7 +937,11 @@ describe("ForemanPayRulesScreen", () => {
     expect(renderedOutput(renderer)).toContain("Could not refresh pay rules");
     expect(renderedOutput(renderer)).not.toContain("Loading pay rules");
     expect(findButton(renderer, "Save as new version").props.loading).toBe(false);
+    expect(findButton(renderer, "Save as new version").props.disabled).toBe(true);
     expect(findButton(renderer, "Reload current policy").props.disabled).toBe(false);
+    const cleanSave = findButton(renderer, "Save as new version").props.onPress;
+    act(() => void cleanSave());
+    expect(mockedUpdateMyPayPolicy).toHaveBeenCalledTimes(1);
 
     mockedGetMyPayPolicy.mockResolvedValueOnce(policyFixture({ version: 9 }));
     mockedGetMyCompany.mockResolvedValueOnce(companySettingsFixture({ currencyLabel: "RETRIED" }));
@@ -732,6 +964,7 @@ describe("ForemanPayRulesScreen", () => {
     const renderer = await renderScreen();
     const reload = findButton(renderer, "Reload current policy").props.onPress;
 
+    act(() => editFirstRuleName(renderer, "Coalesced draft"));
     await act(async () => {
       findButton(renderer, "Save as new version").props.onPress();
       reload();
@@ -766,17 +999,16 @@ describe("ForemanPayRulesScreen", () => {
     expect(findButton(renderer, "Save as new version").props.loading).toBe(false);
   });
 
-  it("discards a blurred focus instance's queued reload before a later save", async () => {
+  it("keeps a blurred confirmed save clean after refocus reconciliation", async () => {
     const blurredSave = deferred<PayPolicy>();
     const refocusedPolicy = deferred<PayPolicy>();
     const refocusedSettings = deferred<CompanySettingsResponse>();
     mockedGetMyPayPolicy.mockResolvedValueOnce(policyFixture({ version: 3 }));
     mockedGetMyCompany.mockResolvedValueOnce(companySettingsFixture({ currencyLabel: "INITIAL" }));
-    mockedUpdateMyPayPolicy
-      .mockReturnValueOnce(blurredSave.promise)
-      .mockResolvedValueOnce(policyFixture({ version: 10 }));
+    mockedUpdateMyPayPolicy.mockReturnValueOnce(blurredSave.promise);
     const renderer = await renderScreen();
 
+    act(() => editFirstRuleName(renderer, "Blurred draft"));
     await act(async () => {
       findButton(renderer, "Save as new version").props.onPress();
       findButton(renderer, "Reload current policy").props.onPress();
@@ -807,16 +1039,84 @@ describe("ForemanPayRulesScreen", () => {
       await flushPromises();
     });
     expect(renderedOutput(renderer)).toContain("Version 9");
+    expect(renderedOutput(renderer)).not.toContain("Unsaved pay-rule changes");
+    expect(findButton(renderer, "Save as new version").props.disabled).toBe(true);
 
+    const cleanSave = findButton(renderer, "Save as new version").props.onPress;
     await act(async () => {
+      cleanSave();
+      await flushPromises();
+    });
+    expect(mockedUpdateMyPayPolicy).toHaveBeenCalledTimes(1);
+    expect(mockedGetMyPayPolicy).toHaveBeenCalledTimes(2);
+    expect(mockedGetMyCompany).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a blurred confirmed save clean through failed reconciliation and GET-only Retry", async () => {
+    const blurredSave = deferred<PayPolicy>();
+    const failedReconciliation = deferred<PayPolicy>();
+    const saved = policyFixture({
+      version: 8,
+      rules: [
+        {
+          id: 8001,
+          name: "Confirmed while blurred",
+          type: "TIME_OF_DAY",
+          enabled: true,
+          premiumPercent: 30,
+          condition: { startTime: "21:00", endTime: "05:00" }
+        }
+      ]
+    });
+    mockedGetMyPayPolicy.mockResolvedValueOnce(policyFixture({ version: 3 }));
+    mockedUpdateMyPayPolicy.mockReturnValueOnce(blurredSave.promise);
+    const renderer = await renderScreen();
+
+    act(() => editFirstRuleName(renderer, "Submitted while blurred"));
+    act(() => {
       findButton(renderer, "Save as new version").props.onPress();
+      blurPayRulesScreen();
+    });
+    await act(async () => {
+      blurredSave.resolve(saved);
+      await flushPromises();
+    });
+
+    mockedGetMyPayPolicy.mockReturnValueOnce(failedReconciliation.promise);
+    await act(async () => {
+      refocusPayRulesScreen();
+      await flushPromises();
+    });
+    expect(renderedOutput(renderer)).toContain("Version 8");
+    expect(findFields(renderer, "Rule name")[0]?.props.value).toBe(
+      "Confirmed while blurred"
+    );
+    await act(async () => {
+      failedReconciliation.reject(new Error("reconciliation offline"));
       await flushPromises();
       await flushPromises();
     });
-    expect(mockedUpdateMyPayPolicy).toHaveBeenCalledTimes(2);
-    expect(renderedOutput(renderer)).toContain("Version 10");
-    expect(mockedGetMyPayPolicy).toHaveBeenCalledTimes(2);
-    expect(mockedGetMyCompany).toHaveBeenCalledTimes(2);
+
+    expect(renderedOutput(renderer)).toContain("Could not refresh pay rules");
+    expect(renderedOutput(renderer)).not.toContain("Unsaved pay-rule changes");
+    expect(findButton(renderer, "Save as new version").props.disabled).toBe(true);
+    const cleanSave = findButton(renderer, "Save as new version").props.onPress;
+    act(() => void cleanSave());
+    expect(mockedUpdateMyPayPolicy).toHaveBeenCalledTimes(1);
+
+    mockedGetMyPayPolicy.mockResolvedValueOnce(saved);
+    mockedGetMyCompany.mockResolvedValueOnce(
+      companySettingsFixture({ currencyLabel: "RECONCILED" })
+    );
+    await act(async () => {
+      findButton(renderer, "Retry refresh").props.onPress();
+      await flushPromises();
+    });
+    expect(mockedUpdateMyPayPolicy).toHaveBeenCalledTimes(1);
+    expect(mockedGetMyPayPolicy).toHaveBeenCalledTimes(3);
+    expect(renderedOutput(renderer)).toContain("RECONCILED");
+    expect(renderedOutput(renderer)).not.toContain("Unsaved pay-rule changes");
+    expect(findButton(renderer, "Save as new version").props.disabled).toBe(true);
   });
 
   it("runs one queued refresh after a save failure without losing the actionable save error", async () => {
@@ -831,6 +1131,7 @@ describe("ForemanPayRulesScreen", () => {
     const renderer = await renderScreen();
     const reload = findButton(renderer, "Reload current policy").props.onPress;
 
+    act(() => editFirstRuleName(renderer, "Failed save draft"));
     await act(async () => {
       findButton(renderer, "Save as new version").props.onPress();
       reload();
@@ -854,6 +1155,7 @@ describe("ForemanPayRulesScreen", () => {
     expect(renderedOutput(renderer)).toContain("Version 9");
     expect(findButton(renderer, "Save as new version").props.loading).toBe(false);
 
+    act(() => editFirstRuleName(renderer, "Edited after failed save refresh"));
     await act(async () => {
       findButton(renderer, "Save as new version").props.onPress();
       await flushPromises();
@@ -875,6 +1177,7 @@ describe("ForemanPayRulesScreen", () => {
     const renderer = await renderScreen();
     const reload = findButton(renderer, "Reload current policy").props.onPress;
 
+    act(() => editFirstRuleName(renderer, "Mapped error draft"));
     await act(async () => {
       findButton(renderer, "Save as new version").props.onPress();
       reload();
@@ -924,6 +1227,7 @@ describe("ForemanPayRulesScreen", () => {
     mockedUpdateMyPayPolicy.mockReturnValueOnce(savedPolicy.promise);
     const renderer = await renderScreen();
 
+    act(() => editFirstRuleName(renderer, "Refocused authoritative draft"));
     await act(async () => {
       findButton(renderer, "Save as new version").props.onPress();
       await flushPromises();
@@ -961,6 +1265,7 @@ describe("ForemanPayRulesScreen", () => {
     const renderer = await renderScreen();
     const goBack = screenProps.navigation.goBack as jest.Mock;
 
+    act(() => editFirstRuleName(renderer, "Unmounted draft"));
     await act(async () => {
       findButton(renderer, "Save as new version").props.onPress();
       findButton(renderer, "Reload current policy").props.onPress();
@@ -985,6 +1290,7 @@ describe("ForemanPayRulesScreen", () => {
       .mockResolvedValueOnce(policyFixture({ version: 8 }));
     const renderer = await renderScreen();
 
+    act(() => editFirstRuleName(renderer, "Retryable draft"));
     await act(async () => {
       findButton(renderer, "Save as new version").props.onPress();
       await flushPromises();
@@ -997,6 +1303,76 @@ describe("ForemanPayRulesScreen", () => {
       await flushPromises();
     });
     expect(mockedUpdateMyPayPolicy).toHaveBeenCalledTimes(2);
+    expect(renderedOutput(renderer)).toContain("Version 8 is now current");
+  });
+
+  it("requires an authoritative reload after a backend version conflict", async () => {
+    mockedGetMyPayPolicy
+      .mockResolvedValueOnce(policyFixture({ version: 3 }))
+      .mockRejectedValueOnce(new Error("conflict reload offline"));
+    mockedUpdateMyPayPolicy.mockRejectedValueOnce(
+      new ApiError("Pay policy version conflict. Reload current policy.", 409)
+    );
+    const renderer = await renderScreen();
+
+    act(() => editFirstRuleName(renderer, "Conflict draft retained"));
+    await act(async () => {
+      findButton(renderer, "Save as new version").props.onPress();
+      await flushPromises();
+      await flushPromises();
+    });
+
+    expect(mockedUpdateMyPayPolicy).toHaveBeenCalledTimes(1);
+    expect(mockedGetMyPayPolicy).toHaveBeenCalledTimes(2);
+    expect(renderedOutput(renderer)).toContain(
+      "Pay policy version conflict. Reload current policy."
+    );
+    expect(renderedOutput(renderer)).toContain("Could not refresh pay rules");
+    expect(findButton(renderer, "Retry refresh")).toBeDefined();
+    expect(findButton(renderer, "Save as new version").props.disabled).toBe(true);
+
+    mockedGetMyPayPolicy.mockResolvedValueOnce(policyFixture({ version: 4 }));
+    mockedGetMyCompany.mockResolvedValueOnce(
+      companySettingsFixture({ currencyLabel: "CONFLICT_RELOADED" })
+    );
+    await act(async () => {
+      findButton(renderer, "Retry refresh").props.onPress();
+      await flushPromises();
+    });
+
+    expect(mockedUpdateMyPayPolicy).toHaveBeenCalledTimes(1);
+    expect(renderedOutput(renderer)).toContain("Version 4");
+    expect(renderedOutput(renderer)).toContain("CONFLICT_RELOADED");
+    expect(findFields(renderer, "Rule name")[0]?.props.value).toBe(
+      "Conflict draft retained"
+    );
+    expect(renderedOutput(renderer)).toContain("Unsaved pay-rule changes");
+    expect(findButton(renderer, "Save as new version").props.disabled).toBe(false);
+  });
+
+  it("blocks rapid duplicate saves and a stored callback after authoritative success", async () => {
+    const savedPolicy = deferred<PayPolicy>();
+    mockedGetMyPayPolicy.mockResolvedValueOnce(policyFixture());
+    mockedUpdateMyPayPolicy.mockReturnValueOnce(savedPolicy.promise);
+    const renderer = await renderScreen();
+    act(() => editFirstRuleName(renderer, "Duplicate-locked draft"));
+    const staleSave = findButton(renderer, "Save as new version").props.onPress;
+
+    act(() => {
+      staleSave();
+      staleSave();
+    });
+    expect(mockedUpdateMyPayPolicy).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      savedPolicy.resolve(policyFixture({ version: 8 }));
+      await flushPromises();
+    });
+    act(() => {
+      staleSave();
+    });
+
+    expect(mockedUpdateMyPayPolicy).toHaveBeenCalledTimes(1);
     expect(renderedOutput(renderer)).toContain("Version 8 is now current");
   });
 
@@ -1077,6 +1453,171 @@ describe("ForemanPayRulesScreen", () => {
     expect(output).toContain("Earlier versions remain unchanged");
   });
 
+  it("edits every canonical rule type and sends the exact PUT contract", async () => {
+    mockedGetMyPayPolicy.mockResolvedValueOnce(
+      policyFixture({
+        weekStartsOn: "SUNDAY",
+        stackingStrategy: "HIGHEST_ONLY",
+        rules: [
+          {
+            id: 1,
+            name: "Night",
+            type: "TIME_OF_DAY",
+            enabled: true,
+            premiumPercent: 25,
+            condition: { startTime: "22:00", endTime: "06:00" }
+          },
+          {
+            id: 2,
+            name: "Daily",
+            type: "DAILY_OVERTIME",
+            enabled: true,
+            premiumPercent: 50,
+            condition: { thresholdMinutes: 510 }
+          },
+          {
+            id: 3,
+            name: "Weekly",
+            type: "WEEKLY_OVERTIME",
+            enabled: false,
+            premiumPercent: 75.125,
+            condition: { thresholdMinutes: 2400 }
+          },
+          {
+            id: 4,
+            name: "Weekend",
+            type: "DAY_OF_WEEK",
+            enabled: true,
+            premiumPercent: 37.5,
+            condition: { weekdays: ["SATURDAY", "SUNDAY"] }
+          },
+          {
+            id: 5,
+            name: "Manual holidays",
+            type: "HOLIDAY",
+            enabled: true,
+            premiumPercent: 100,
+            condition: {
+              dates: [
+                { date: "2026-12-25", label: "Company holiday" },
+                { date: "2026-12-31" }
+              ]
+            }
+          }
+        ]
+      })
+    );
+    mockedUpdateMyPayPolicy.mockResolvedValueOnce(policyFixture({ version: 4 }));
+    const renderer = await renderScreen();
+
+    expect(findFields(renderer, "Start local time")).toHaveLength(1);
+    expect(findFields(renderer, "End local time")).toHaveLength(1);
+    expect(findFields(renderer, "Threshold hours").map((field) => field.props.value)).toEqual([
+      "8.5",
+      "40"
+    ]);
+    expect(findFields(renderer, "Date (YYYY-MM-DD)")).toHaveLength(2);
+    expect(findFields(renderer, "Label (optional)")).toHaveLength(2);
+    expect(renderedOutput(renderer)).toContain("Choose every company-local weekday");
+    expect(renderedOutput(renderer)).toContain("no automatic legal or country calendar");
+
+    act(() => {
+      findSegmentedControl(renderer, "Week starts on").props.onChange("THURSDAY");
+      findSegmentedControl(renderer, "Stacking strategy").props.onChange("ADD");
+      const switches = renderer.root.findAllByType(Switch);
+      switches[0]?.props.onValueChange(false);
+      switches[2]?.props.onValueChange(true);
+    });
+    act(() => {
+      const percentages = findFields(renderer, "Premium percent");
+      percentages[0]?.props.onChangeText("26.5");
+      percentages[1]?.props.onChangeText("51.25");
+      percentages[2]?.props.onChangeText("76");
+      percentages[3]?.props.onChangeText("38.125");
+      percentages[4]?.props.onChangeText("110");
+    });
+    act(() => {
+      findFields(renderer, "Start local time")[0]?.props.onChangeText("21:30");
+      const thresholds = findFields(renderer, "Threshold hours");
+      thresholds[0]?.props.onChangeText("9");
+      thresholds[1]?.props.onChangeText("42.5");
+      renderer.root.findByProps({ accessibilityLabel: "Mon weekday" }).props.onPress();
+      findFields(renderer, "Date (YYYY-MM-DD)")[0]?.props.onChangeText("2027-01-01");
+    });
+    act(() => {
+      findFields(renderer, "End local time")[0]?.props.onChangeText("05:15");
+      renderer.root.findByProps({ accessibilityLabel: "Sun weekday" }).props.onPress();
+      findFields(renderer, "Label (optional)")[0]?.props.onChangeText("New Year");
+    });
+    act(() => {
+      const removeDates = renderer.root
+        .findAllByType(Button)
+        .filter((button) => button.props.label === "Remove date");
+      removeDates[1]?.props.onPress();
+    });
+    act(() => {
+      findButton(renderer, "Add holiday date").props.onPress();
+    });
+    act(() => {
+      findFields(renderer, "Date (YYYY-MM-DD)")[1]?.props.onChangeText("2027-05-01");
+    });
+    act(() => {
+      findFields(renderer, "Label (optional)")[1]?.props.onChangeText("Labour Day");
+    });
+
+    await act(async () => {
+      findButton(renderer, "Save as new version").props.onPress();
+      await flushPromises();
+    });
+
+    expect(mockedUpdateMyPayPolicy).toHaveBeenCalledWith("foreman-token", {
+      weekStartsOn: "THURSDAY",
+      stackingStrategy: "ADD",
+      rules: [
+        {
+          name: "Night",
+          type: "TIME_OF_DAY",
+          enabled: false,
+          premiumPercent: 26.5,
+          condition: { startTime: "21:30", endTime: "05:15" }
+        },
+        {
+          name: "Daily",
+          type: "DAILY_OVERTIME",
+          enabled: true,
+          premiumPercent: 51.25,
+          condition: { thresholdMinutes: 540 }
+        },
+        {
+          name: "Weekly",
+          type: "WEEKLY_OVERTIME",
+          enabled: true,
+          premiumPercent: 76,
+          condition: { thresholdMinutes: 2550 }
+        },
+        {
+          name: "Weekend",
+          type: "DAY_OF_WEEK",
+          enabled: true,
+          premiumPercent: 38.125,
+          condition: { weekdays: ["MONDAY", "SATURDAY"] }
+        },
+        {
+          name: "Manual holidays",
+          type: "HOLIDAY",
+          enabled: true,
+          premiumPercent: 110,
+          condition: {
+            dates: [
+              { date: "2027-01-01", label: "New Year" },
+              { date: "2027-05-01", label: "Labour Day" }
+            ]
+          }
+        }
+      ]
+    });
+  });
+
   it("clears only a corrected field error and preserves an unrelated validation error", async () => {
     mockedGetMyPayPolicy.mockResolvedValueOnce(policyFixture());
     const renderer = await renderScreen();
@@ -1139,6 +1680,7 @@ describe("ForemanPayRulesScreen", () => {
     );
     const renderer = await renderScreen();
 
+    act(() => editFirstRuleName(renderer, "Holiday validation draft"));
     await act(async () => {
       findButton(renderer, "Save as new version").props.onPress();
       await flushPromises();
@@ -1291,6 +1833,7 @@ describe("ForemanPayRulesScreen", () => {
     mockedUpdateMyPayPolicy.mockResolvedValueOnce(policyFixture());
     const renderer = await renderScreen();
     expect(findFields(renderer, "Threshold hours")[0]?.props.value).toBe(String(31 / 60));
+    act(() => editFirstRuleName(renderer, "Keep loaded threshold"));
     await act(async () => {
       void findButton(renderer, "Save as new version").props.onPress();
       await flushPromises();
@@ -1322,6 +1865,7 @@ describe("ForemanPayRulesScreen", () => {
       await flushPromises();
     });
     expect(findFields(renderer, "Threshold hours")[0]?.props.value).toBe("8.2");
+    act(() => editFirstRuleName(renderer, "Save reloaded threshold"));
     await act(async () => {
       void findButton(renderer, "Save as new version").props.onPress();
       await flushPromises();

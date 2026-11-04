@@ -9,7 +9,10 @@
       "**/*"
     ],
     "plugins": [
-      "./plugins/withAndroidAutofillHighlight"
+      "./plugins/withAndroidAutofillHighlight",
+      "expo-font",
+      "expo-secure-store",
+      "expo-status-bar"
     ],
     "ios": {
       "supportsTablet": true
@@ -17,8 +20,7 @@
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#ffffff"
-      },
-      "edgeToEdgeEnabled": true
+      }
     },
     "extra": {
       "apiBaseUrl": "http://localhost:8080"

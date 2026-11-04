@@ -7,6 +7,7 @@ import { Button } from "../../components/Button";
 import { StatusBadge } from "../../components/StatusBadge";
 import { WorkerShiftHistoryCard } from "../../components/WorkerShiftHistoryCard";
 import { useAuth } from "../../context/AuthContext";
+import { WorkerShiftHistoryPagesProvider } from "../../context/WorkerShiftHistoryPagesContext";
 import type {
   WorkerShiftHistoryItem,
   WorkerShiftHistoryPageResponse
@@ -183,7 +184,11 @@ describe("MyShiftHistoryScreen paged WORKER history", () => {
 
   async function renderScreen() {
     act(() => {
-      view = create(<MyShiftHistoryScreen {...props} />);
+      view = create(
+        <WorkerShiftHistoryPagesProvider>
+          <MyShiftHistoryScreen {...props} />
+        </WorkerShiftHistoryPagesProvider>
+      );
     });
     await act(async () => {
       await flushPromises();

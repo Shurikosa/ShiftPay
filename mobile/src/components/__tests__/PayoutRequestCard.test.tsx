@@ -124,7 +124,7 @@ describe("PayoutRequestCard field guard", () => {
 
     const rendered = JSON.stringify(renderer?.toJSON());
     expect(rendered).toContain("John");
-    expect(rendered).toContain("PENDING");
+    expect(rendered).toContain("Pending approval");
     expect(rendered).toContain("Sunday night shift");
     expect(rendered).toContain("Raw payable time");
     expect(rendered).toContain("7 h 47 min");
