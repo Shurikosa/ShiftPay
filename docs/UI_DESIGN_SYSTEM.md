@@ -229,7 +229,7 @@ detail transitions while adding the specified role shell:
 | Context | Planned route and nesting contract |
 | --- | --- |
 | Session gate | `RestoreSessionScreen` while the stored session is resolved; it is not a new stack destination. |
-| Unauthenticated | `Login`, `Register`, and their existing forward/back transitions |
+| Unauthenticated | `Login`, `Register`, and `ForgotPassword` email/code steps with visible Back to Login; no session is created by password reset |
 | WORKER without company | role gate renders `JoinCompany` before the worker stack and exposes Settings; close/back from Settings returns to `JoinCompany` |
 | WORKER | Bottom `Dashboard` (`WorkerDashboard`), `Shifts` (full `MyShiftHistory`), `Payroll` (`WorkerPayroll`), empty `More`; separate visible Settings button; stack details `JoinShift` and `WorkerShiftDetails` |
 | FOREMAN without company | role gate renders `CreateCompany` before the foreman stack and exposes Settings; close/back from Settings returns to `CreateCompany` |
@@ -374,7 +374,8 @@ not authorization for new routes.
 
 | Screen/component (route where applicable) | Required reference-driven composition |
 | --- | --- |
-| `LoginScreen` (`Login`) | Compact ShiftPay brand area; large `Welcome back` title and product sentence; separately approved construction hero; elevated form card that visually overlaps/layers with the hero; icon-supported email/password fields; visible password action; primary Log in; `or` separator; secondary Create account. |
+| `LoginScreen` (`Login`) | Compact ShiftPay brand area; large `Welcome back` title and product sentence; separately approved construction hero; elevated form card that visually overlaps/layers with the hero; icon-supported email/password fields; visible password action; primary Log in; visible Forgot password; `or` separator; secondary Create account. |
+| `ForgotPassword` | Shared branded auth shell; elevated email request form, then code/new-password form; visible Back, resend countdown, accessible errors and busy state, and explicit return to Login after success. |
 | `RegisterScreen` (`Register`) | Shared branded auth/onboarding shell, concise intro, elevated form surface, grouped identity/account/role fields, and clear primary/secondary action hierarchy. |
 | `RestoreSessionScreen` | Branded system-state shell with compact identity, intentional protected-session loading/progress feedback, legacy unprotected-token deletion/forced-login handling, protected-storage failure without fallback, and no blank transitional canvas. |
 | `UnsupportedRoleScreen` | Branded system-state shell, clear unsupported-role explanation, and only the existing recovery/logout action. |
@@ -406,8 +407,8 @@ screen. They must not fabricate values or imply unsupported navigation.
 - Use the full Login composition in the table above: compact brand, `Welcome back`,
   one product sentence, construction hero, overlapping elevated form
   card, labelled icon-supported email/password fields, `or` separator,
-  accessible password-visibility action, primary Log in, and secondary Create
-  account.
+  accessible password-visibility action, primary Log in, visible Forgot
+  password action, and secondary Create account.
 - Preserve values and field errors; show invalid credentials/network feedback;
   block duplicate submit. Keyboard and increased text must not hide submit.
 - Do not add reference-image Terms/Privacy links without real routes and
@@ -419,6 +420,25 @@ screen. They must not fabricate values or imply unsupported navigation.
   contain no third-party text/branding or recognizable person, and use a
   portrait-responsive crop that preserves form reachability on narrow/short
   screens and at increased font scale.
+
+### Forgot password
+
+- Place the Forgot password action near the Login password field with a clear
+  text label and touch target. It opens a public two-step flow for WORKER and
+  FOREMAN: email request, then six-digit code and new password. Use the shared
+  branded auth shell and form surfaces; the hero is not required on these
+  steps. Keep a visible labelled Back action on each step and support Android
+  hardware Back.
+- The request result uses conditional copy that does not confirm an account or
+  delivery. Present resend/cooldown and temporary 429 `Retry-After` as time
+  feedback, wrong-code remaining attempts as error feedback, and fifth failure
+  or 410 expiry as a clear new-request state. Success leads to Login without
+  an authenticated dashboard transition. A network failure uses a generic
+  retry state and does not claim success.
+- Keep email, code, new-password, Back, resend, and submit controls reachable
+  above the keyboard on narrow phones and at font scale 1.5. Let labels and
+  guidance wrap, preserve safe-area spacing, announce validation and countdown
+  changes accessibly, and hide only decorative artwork from accessibility.
 
 ### Foreman dashboard
 

@@ -267,7 +267,8 @@ become new navigation destinations.
 
 | Screen/component | Composition outcome |
 | --- | --- |
-| `LoginScreen` (`Login`) | Compact ShiftPay brand, `Welcome back`, product sentence, separately approved construction hero, overlapping elevated form card, icon-supported credentials, primary Log in, `or`, secondary Create account. |
+| `LoginScreen` (`Login`) | Compact ShiftPay brand, `Welcome back`, product sentence, separately approved construction hero, overlapping elevated form card, icon-supported credentials, primary Log in, visible Forgot password, `or`, secondary Create account. |
+| Forgot password | Public email request, six-digit code and new-password confirmation, then Login; shared branded auth form shell with reachable Back and no automatic session. |
 | `RegisterScreen` (`Register`) | Shared branded auth/onboarding shell, clear intro, elevated grouped account/role form, and reference-like action hierarchy. |
 | `RestoreSessionScreen` | Branded system-state shell with intentional loading feedback. |
 | `UnsupportedRoleScreen` | Branded system-state shell with clear explanation and only existing recovery/logout behavior. |
@@ -310,6 +311,7 @@ Fields:
 Actions:
 
 - log in
+- open Forgot password for WORKER and FOREMAN
 - navigate to register
 
 API calls:
@@ -340,6 +342,56 @@ Rules:
   third-party text/branding or recognizable person, and use a
   portrait-responsive crop that preserves keyboard/form reachability
 - do not add the reference image's Terms/Privacy copy or legal routes
+
+### Forgot password
+
+Purpose: recover a WORKER or FOREMAN account from Login without an existing
+session. Use `POST /api/v1/auth/password-reset/request` for the initial send
+and every resend, then `POST /api/v1/auth/password-reset/confirm` with the
+returned opaque `requestId`, six-digit code, and new password. This route is
+available from unauthenticated Login and has a labelled Back action to Login
+on both steps; Android hardware Back follows the same route. Back never
+submits or silently signs in.
+
+- Email step: trim email for submission, require a well-formed address and the
+  255-character limit, disable duplicate submit, and show progress. After
+  202, show the API's conditional copy: “If this address can be recovered,
+  check your email for a code.” Do not state that an account or message exists.
+  Keep the `requestId` only in active navigation state, never persistent
+  storage. A network timeout leaves delivery uncertain; allow retry, without
+  claiming a code was sent. A fresh accepted request replaces the active id.
+- Code/new-password step: require six ASCII digits and a nonblank 8-to-72-
+  character new password before submit. Provide accessible password visibility
+  and keyboard type/return behavior. Keep confirm disabled while submitting;
+  clear both secret fields on Back, screen exit, success, or reset restart.
+  Never log, persist, or send them to analytics. Do not repopulate secrets from
+  navigation state or after a rejected request.
+- Resend uses the request endpoint with the same email. Disable it during a
+  successful 60-second local cooldown and while submitting. Honor 429
+  `Retry-After` for a server cooldown/rolling limit; show a retry countdown
+  without asserting whether the address is eligible. The 429 response has no
+  new id, so keep the previous id and any unexpired code. A 202 replaces the
+  id and starts a new 10-minute window and five-attempt budget. Delivery
+  failure is not publicly distinguishable; explain that users can retry after
+  the cooldown if no email arrives.
+- Wrong code before the fifth failure: show the generic invalid-code error and
+  `attemptsRemaining`; clear the code input. The fifth failure is terminal 409
+  `PASSWORD_RESET_ATTEMPTS_EXHAUSTED`, with no `Retry-After`; offer a new request.
+  An expired, reused, or superseded request is 410
+  `PASSWORD_RESET_REQUEST_EXPIRED`, with no `Retry-After`; clear secrets and
+  offer a new request. Password validation errors do not consume an attempt.
+  Use a generic network error for transport failures, keep nonsecret email/id
+  in active memory for retry, and do not claim the reset succeeded.
+- On 204, clear transient code, password, id, and email, show a brief success
+  state, and return to Login. Do not create, restore, or persist a session; the
+  user enters the new credentials in Login. An ambiguous confirm timeout may
+  mean the server committed; explain that the user can try logging in with
+  the new password or request a new code, without asserting success.
+- Keep the branded form scrollable above the keyboard, with safe-area insets,
+  reachable Back, resend, and submit controls on a narrow viewport and at
+  system font scale 1.5. Long translated text wraps without clipping. The
+  code entry, countdown, errors, busy state, and password visibility have
+  accessible labels and announcements; disabled actions remain understandable.
 
 ### RestoreSessionScreen
 
@@ -1171,7 +1223,8 @@ Show success feedback for:
 
 | Screen | Required state coverage before visual acceptance |
 | --- | --- |
-| Login | Initial/content, local field errors, invalid credentials/backend error, network error, submitting/disabled, keyboard, retained input, long text, font scale 1.5, narrow viewport, and approved hero crop. |
+| Login | Initial/content, local field errors, invalid credentials/backend error, network error, submitting/disabled, keyboard, retained input, visible Forgot password navigation, long text, font scale 1.5, narrow viewport, and approved hero crop. |
+| Forgot password | Both roles; email validity, conditional 202 copy, unknown/ineligible-address privacy, request/resend cooldown and `Retry-After`, wrong/fifth/expired/reused code, password validation, network ambiguity, 204 return to Login without session, Back and secret clearing, keyboard, narrow viewport, and font scale 1.5. |
 | Register | Initial/content, role selection, local/backend validation, duplicate email, submitting/disabled, keyboard, long text, font scale 1.5, and narrow viewport. |
 | Restore Session | Loading with real protected-session restore; invalid/expired-session transition; deletion and forced-login handling for a legacy AsyncStorage-only token; removal of a duplicate legacy copy; protected-storage unavailable/read/write failure with no fallback; long text/font scale; and narrow viewport where applicable. |
 | Unsupported Role | Real unsupported role, existing recovery/logout action and busy/error behavior where applicable, long text/font scale, and narrow viewport. |

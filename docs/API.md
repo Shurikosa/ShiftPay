@@ -164,6 +164,140 @@ Status: 401 Unauthorized
   "path": "/api/v1/auth/login"
 }
 
+Forgot password: request or resend a code (planned)
+
+POST /api/v1/auth/password-reset/request
+
+Public; no bearer token or company membership is required. This flow is for
+WORKER and FOREMAN accounts. ADMIN, unknown, and otherwise ineligible addresses
+receive the same public request behavior as eligible addresses. It is separate
+from authenticated `PUT /api/v1/users/me/password`.
+
+Request DTO: `RequestPasswordResetRequest`
+
+{
+  "email": "worker@example.com"
+}
+
+`email` is required, `@Email`, and at most 255 characters. Normalize it exactly
+as registration/login do: Java `String.trim()` then lowercase with
+`Locale.ROOT`. Unknown JSON properties return 400. A malformed address returns
+the standard 400 field-validation error; a syntactically valid address never
+receives an account-existence or role-specific response.
+
+Every accepted request, including a repeat request, creates a fresh opaque,
+unguessable `requestId` and invalidates the previous reset request for that
+normalized address. It starts a 10-minute code window and a five-failed-attempt
+budget. The backend sends a cryptographically random six-ASCII-digit code only
+if the address currently belongs to an eligible WORKER or FOREMAN. For unknown
+or ineligible addresses it maintains indistinguishable dummy request state with
+the same expiry and attempt budget, but sends no message. No code or password
+is returned. The response for every accepted request is identical in shape
+and wording, including when delivery cannot be accepted or later fails:
+
+Status: 202 Accepted
+
+{
+  "requestId": "9d715ab2-960a-4ac3-a600-1b965902795d",
+  "message": "If this address can be recovered, check your email for a code."
+}
+
+The message is intentionally conditional and does not confirm delivery. A
+failed delivery makes the new request unusable; it does not expose an error or
+restore a previous code. Delivery failures are recorded only in redacted
+operational telemetry. Do not make an SMTP/provider failure, disabled delivery
+configuration, response time, or address eligibility observable through this
+API. The release configuration must have working delivery; the generic 202
+response is not evidence that email was delivered.
+
+Apply all limits to eligible, unknown, and ineligible normalized addresses in
+the same way. An accepted request starts a 60-second per-address cooldown;
+allow at most three accepted requests per normalized address in a rolling
+60-minute window, five in a rolling 24-hour window, and 20 per trusted client
+IP in a rolling 60-minute window. Every accepted request counts even if mail
+delivery fails. A throttled request creates no new `requestId`, sends no mail,
+and does not invalidate a previously issued code. Return 429 Too Many Requests
+with code `PASSWORD_RESET_RATE_LIMITED`, a generic message, and HTTP
+`Retry-After` equal to the ceiling of the longest active limit's remaining
+seconds (minimum 1). The error uses the standard API error object with
+`code: "PASSWORD_RESET_RATE_LIMITED"` and the same generic `message` for
+every address; it contains no email, role, or request id. For example, if the
+longest active limit has 61.2 seconds remaining, return `Retry-After: 62`:
+
+Status: 429 Too Many Requests
+
+{
+  "timestamp": "2026-11-04T10:00:00Z",
+  "status": 429,
+  "error": "Too Many Requests",
+  "code": "PASSWORD_RESET_RATE_LIMITED",
+  "message": "Please try again later.",
+  "path": "/api/v1/auth/password-reset/request"
+}
+
+Rate-limit state and error wording never disclose eligibility. Trust
+forwarded IP headers only from configured reverse proxies.
+
+Forgot password: confirm reset (planned)
+
+POST /api/v1/auth/password-reset/confirm
+
+Public; no bearer token is required. Request DTO: `ConfirmPasswordResetRequest`:
+
+{
+  "requestId": "9d715ab2-960a-4ac3-a600-1b965902795d",
+  "code": "483921",
+  "newPassword": "new-password-456"
+}
+
+All three properties are required; unknown properties return 400. A missing
+or malformed `requestId`, missing `newPassword`, or invalid new-password
+syntax returns standard 400 validation without consuming an attempt. A missing
+`code` counts as a malformed code attempt if the supplied `requestId` refers
+to an active request and `newPassword` passes syntax validation. The new
+password uses registration's `@NotBlank` and `@Size(min = 8, max = 72)` rules.
+New-password syntax validation runs before a code attempt is counted. Once the code is
+verified, the new password must differ from the current password; equality
+returns 400 `PASSWORD_UNCHANGED` without consuming the code. The code must be six
+ASCII decimal digits; malformed codes against an active request count as
+failed attempts. An unknown `requestId` or incorrect code returns 400 with
+code `PASSWORD_RESET_CODE_INVALID`; for a known active request include
+`attemptsRemaining` (4 through 1). This response is the same for eligible and
+dummy requests. The fifth failed attempt consumes the request and returns 409
+`PASSWORD_RESET_ATTEMPTS_EXHAUSTED` with `attemptsRemaining: 0`, without
+`Retry-After`; a new request is required and remains subject to request limits.
+Later submissions of that exhausted id return 410
+`PASSWORD_RESET_REQUEST_EXPIRED`, without `Retry-After`. An expired request,
+an already consumed successful code, or a request made stale by a later reset
+request returns the same 410 without `Retry-After`. Retain expired, consumed,
+and superseded request-id tombstones for 24 hours after their terminal event;
+after purging a tombstone, the id is unknown and returns 400
+`PASSWORD_RESET_CODE_INVALID`. Expiry is checked before code comparison and
+does not consume an attempt. A code is single use and never valid after 10
+minutes.
+
+Status: 204 No Content on success. The response contains no password, code,
+JWT, or user profile. One serialized transaction verifies that the user's
+current normalized email matches the keyed email lookup digest and that its
+`credentialVersion` still equals the captured value, compares the protected
+code digest, stores the new BCrypt password
+hash, increments `credentialVersion` exactly once, and consumes the request.
+The user must explicitly return to Login and sign in with the new password;
+reset does not create a session. If email or password changed after issuance,
+the request is invalid and returns 410 `PASSWORD_RESET_REQUEST_EXPIRED`
+without modifying the password. Concurrent reset, confirmed email change, and
+authenticated password change serialize on the user credential row: only one
+mutation based on the old version can commit. A losing reset returns the same
+410 stale-request response and never issues a token. All older JWTs are revoked
+by the successful version increment.
+
+Password-reset codes and passwords must not appear in API responses, logs,
+analytics, traces, or mobile persistence. Store only a keyed digest (or a
+protected slow hash) of the six-digit code, bound to `requestId`; protect the
+digest key outside the database. The plain code exists only transiently for
+mail delivery and comparison. Request identifiers, normalized addresses, and
+rate-limit state must not be used as an account-existence oracle.
+
 2. Current User
 Get current user
 GET /api/v1/users/me
@@ -399,7 +533,7 @@ Rules:
 - Both properties are required. Any additional JSON property returns 400 Bad Request and is not ignored or bound.
 - `currentPassword` is `@NotBlank`, has the implemented BCrypt input maximum of 72 characters, and must match the current BCrypt hash. A mismatch returns 400 `CURRENT_PASSWORD_INCORRECT`, participates in the shared five-failures-per-15-minutes throttle, and does not clear the valid bearer session.
 - `newPassword` uses the implemented registration constraints: `@NotBlank` and `@Size(min = 8, max = 72)`. It must differ from the current password; equality returns 400 `PASSWORD_UNCHANGED`. It is hashed with the existing BCrypt `PasswordEncoder`; neither plain password nor either hash is returned or logged.
-- A password-reset/forgot-password flow is not created by this endpoint. A user who cannot supply the current password needs a separately specified recovery flow.
+- This endpoint does not perform password recovery. A user who cannot supply the current password uses the public `POST /api/v1/auth/password-reset/request` and `/confirm` flow above.
 - ADMIN receives 403 Forbidden. Missing, invalid, or expired bearer authentication returns 401 Unauthorized.
 
 On success, status is 200 OK: one transaction stores the new BCrypt hash, increments the user's persisted `credentialVersion`, and returns the existing `LoginResponse` shape with a replacement token at the new version. Every previously issued token immediately fails protected-request validation. Mobile replaces its stored session with the response, clears both password fields, and remains authorized on the current phone. Names, email, role, company, rates, and history do not change.
@@ -408,7 +542,7 @@ Credential-version and session-revocation contract
 
 - Add a non-negative persisted `User.credentialVersion`, initialized to 0. New access tokens include a `credentialVersion` claim. For rollout compatibility, an otherwise valid pre-migration token without this claim is interpreted as version 0.
 - Every protected request validates signature and expiry, loads the current user by the JWT `sub`, and requires the token version to equal the persisted user version. A missing subject user, version mismatch, or token role inconsistent with the persisted role returns 401 Unauthorized with code `SESSION_REVOKED`; authorization rules for WORKER, FOREMAN, and ADMIN remain unchanged.
-- Password change and confirmed email change each increment the version exactly once in the same transaction as the credential mutation. This is the revocation event: tokens from every other device and the old token on the current phone lose access immediately. A replacement token at the new version is returned only to the current request, so that phone can continue.
+- Authenticated password change, confirmed email change, and successful public password reset each increment the version exactly once in the same transaction as the credential mutation. This is the revocation event: tokens from every device lose access immediately. The authenticated password/email caller receives a replacement token at the new version so that phone can continue; public reset returns no token and requires a new Login.
 - Each confirmed-email or password mutation takes the authenticated token's credential version as its expected version and rechecks it against `User.credentialVersion` inside the serialized credential-write transaction. The credential write and increment succeed only when they still match. Of two concurrent mutations authenticated with the same old version, exactly one may change credentials and receive a usable replacement token. The transaction that observes a changed version performs no credential or pending-email mutation, issues no token, and returns 409 Conflict with code `CREDENTIAL_VERSION_CONFLICT` and no `Retry-After`. The database locking or compare-and-set technique is an implementation choice as long as this invariant holds. A request rejected before entering the mutation because its token is already stale receives 401 `SESSION_REVOKED`; both errors use the same mobile reconciliation described below.
 - Name changes, email initiation/resend/cancel/expiry, and failed credential mutations do not increment the version or revoke sessions.
 - Mobile must persist the replacement token and returned user as one protected session value before reporting final success. On `CREDENTIAL_VERSION_CONFLICT` or `SESSION_REVOKED`, it first checks whether another in-flight operation already stored a newer protected session: if so, it retains that session and validates it through `GET /api/v1/users/me`; otherwise it clears the stale session and routes to login. If the response is lost after the server committed, or protected storage fails, the server mutation and revocation are not rolled back. Recovery login uses the unchanged email plus new password after password change, or the new email plus current password after confirmed email change.
