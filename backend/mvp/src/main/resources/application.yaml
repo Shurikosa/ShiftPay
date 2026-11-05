@@ -53,3 +53,6 @@ shiftpay:
     from: ${SHIFTPAY_EMAIL_FROM:no-reply@shiftpay.invalid}
     smtp:
       enabled: ${SHIFTPAY_EMAIL_SMTP_ENABLED:false}
+  password-reset:
+    digest-secret: ${SHIFTPAY_PASSWORD_RESET_DIGEST_SECRET:shiftpay-dev-reset-secret-change-me}
+    trusted-proxies: ${SHIFTPAY_PASSWORD_RESET_TRUSTED_PROXIES:}

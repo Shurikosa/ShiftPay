@@ -16,4 +16,10 @@ public class EmailDeliveryConfig {
 	EmailChangeDelivery unavailableEmailChangeDelivery() {
 		return message -> false;
 	}
+
+	@Bean
+	@ConditionalOnProperty(name = "shiftpay.email.smtp.enabled", havingValue = "false", matchIfMissing = true)
+	PasswordResetDelivery unavailablePasswordResetDelivery() {
+		return message -> false;
+	}
 }

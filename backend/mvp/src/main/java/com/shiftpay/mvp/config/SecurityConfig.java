@@ -63,6 +63,8 @@ public class SecurityConfig {
 						.requestMatchers(HttpMethod.GET, "/swagger-ui/**").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
 						.requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
+						.requestMatchers(HttpMethod.POST, "/api/v1/auth/password-reset/request").permitAll()
+						.requestMatchers(HttpMethod.POST, "/api/v1/auth/password-reset/confirm").permitAll()
 						.requestMatchers(HttpMethod.PUT, "/api/v1/users/me")
 						.hasAnyRole("WORKER", "FOREMAN")
 						.requestMatchers("/api/v1/users/me/email-change/**")

@@ -16,6 +16,7 @@ public class ProductionSecuritySecretsValidator implements InitializingBean {
 
 	static final String DEVELOPMENT_JWT_SECRET = "shiftpay-dev-secret-change-me";
 	static final String DEVELOPMENT_CURSOR_SECRET = "shiftpay-dev-cursor-secret-change-me";
+	static final String DEVELOPMENT_RESET_SECRET = "shiftpay-dev-reset-secret-change-me";
 	private static final Set<String> DEVELOPMENT_PROFILES = Set.of(
 			"dev", "development", "local", "test"
 	);
@@ -23,15 +24,18 @@ public class ProductionSecuritySecretsValidator implements InitializingBean {
 	private final Environment environment;
 	private final String jwtSecret;
 	private final String cursorSecret;
+	private final String resetSecret;
 
 	public ProductionSecuritySecretsValidator(
 			Environment environment,
 			@Value("${security.jwt.secret:}") String jwtSecret,
-			@Value("${shiftpay.cursor.secret:}") String cursorSecret
+			@Value("${shiftpay.cursor.secret:}") String cursorSecret,
+			@Value("${shiftpay.password-reset.digest-secret:}") String resetSecret
 	) {
 		this.environment = environment;
 		this.jwtSecret = jwtSecret;
 		this.cursorSecret = cursorSecret;
+		this.resetSecret = resetSecret;
 	}
 
 	@Override
@@ -45,6 +49,7 @@ public class ProductionSecuritySecretsValidator implements InitializingBean {
 
 		validateProductionSecret("security.jwt.secret", jwtSecret, DEVELOPMENT_JWT_SECRET);
 		validateProductionSecret("shiftpay.cursor.secret", cursorSecret, DEVELOPMENT_CURSOR_SECRET);
+		validateProductionSecret("shiftpay.password-reset.digest-secret", resetSecret, DEVELOPMENT_RESET_SECRET);
 	}
 
 	private void validateProductionSecret(String property, String value, String developmentValue) {
