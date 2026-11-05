@@ -118,7 +118,10 @@ class MvpApplicationTests {
 		assertThat(countColumn("payout_request_items", "rounded_item_amount_exact")).isEqualTo(1);
 		assertThat(countColumn("payout_request_items", "total_base_amount")).isEqualTo(1);
 		assertThat(countColumn("payout_request_items", "total_premium_amount")).isEqualTo(1);
-		assertThat(latestFlywayVersion()).isEqualTo("15");
+		assertThat(countRows("password_reset_requests")).isNotNegative();
+		assertThat(countRows("password_reset_events")).isNotNegative();
+		assertThat(countColumn("password_reset_requests", "delivery_accepted")).isEqualTo(1);
+		assertThat(latestFlywayVersion()).isEqualTo("16");
 	}
 
 	/**

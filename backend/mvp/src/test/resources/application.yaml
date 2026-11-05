@@ -28,3 +28,5 @@ spring:
 
 shiftpay:
   default-time-zone: Europe/Berlin
+  password-reset:
+    digest-secret: shiftpay-dev-reset-secret-change-me

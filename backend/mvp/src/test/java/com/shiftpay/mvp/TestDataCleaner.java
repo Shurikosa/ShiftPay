@@ -23,6 +23,8 @@ public final class TestDataCleaner {
 	 * @param jdbcTemplate JDBC helper connected to the test database
 	 */
 	public static void clean(JdbcTemplate jdbcTemplate) {
+		jdbcTemplate.update("delete from password_reset_requests");
+		jdbcTemplate.update("delete from password_reset_events");
 		jdbcTemplate.update("delete from credential_security_events");
 		jdbcTemplate.update("delete from pending_email_changes");
 		jdbcTemplate.update("delete from email_identity_locks");

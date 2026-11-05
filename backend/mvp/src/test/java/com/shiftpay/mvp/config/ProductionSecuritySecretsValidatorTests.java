@@ -12,6 +12,8 @@ class ProductionSecuritySecretsValidatorTests {
 			"test-only-explicit-jwt-secret-with-more-than-enough-entropy-2026";
 	private static final String STRONG_CURSOR_SECRET =
 			"test-only-explicit-cursor-secret-with-more-than-enough-entropy-2026";
+	private static final String STRONG_RESET_SECRET =
+			"test-only-explicit-reset-secret-with-more-than-enough-entropy-2026";
 
 	private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
 			.withUserConfiguration(ValidatorConfiguration.class);
@@ -59,8 +61,22 @@ class ProductionSecuritySecretsValidatorTests {
 				.withPropertyValues(
 						"spring.profiles.active=prod",
 						"security.jwt.secret=" + STRONG_JWT_SECRET,
-						"shiftpay.cursor.secret=" + STRONG_CURSOR_SECRET)
+						"shiftpay.cursor.secret=" + STRONG_CURSOR_SECRET,
+						"shiftpay.password-reset.digest-secret=" + STRONG_RESET_SECRET)
 				.run(context -> assertThat(context).hasNotFailed());
+	}
+
+	@Test
+	void nonDevelopmentProfileRequiresIndependentPasswordResetDigestSecret() {
+		contextRunner.withPropertyValues(
+				"spring.profiles.active=prod",
+				"security.jwt.secret=" + STRONG_JWT_SECRET,
+				"shiftpay.cursor.secret=" + STRONG_CURSOR_SECRET)
+				.run(context -> {
+					assertThat(context).hasFailed();
+					assertThat(context.getStartupFailure())
+							.hasStackTraceContaining("shiftpay.password-reset.digest-secret");
+				});
 	}
 
 	@Test
@@ -78,7 +94,8 @@ class ProductionSecuritySecretsValidatorTests {
 		contextRunner
 				.withPropertyValues(
 						"security.jwt.secret=" + STRONG_JWT_SECRET,
-						"shiftpay.cursor.secret=" + STRONG_CURSOR_SECRET)
+						"shiftpay.cursor.secret=" + STRONG_CURSOR_SECRET,
+						"shiftpay.password-reset.digest-secret=" + STRONG_RESET_SECRET)
 				.run(context -> assertThat(context).hasNotFailed());
 	}
 

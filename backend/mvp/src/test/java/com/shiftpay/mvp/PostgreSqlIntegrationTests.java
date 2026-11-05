@@ -1,6 +1,9 @@
 package com.shiftpay.mvp;
 
 import com.shiftpay.mvp.dto.ConfirmMyEmailChangeRequest;
+import com.shiftpay.mvp.dto.ConfirmPasswordResetRequest;
+import com.shiftpay.mvp.dto.RequestPasswordResetResponse;
+import com.shiftpay.mvp.dto.UpdateMyPasswordRequest;
 import com.shiftpay.mvp.dto.StartMyEmailChangeRequest;
 import com.shiftpay.mvp.entity.CredentialSecurityEvent;
 import com.shiftpay.mvp.entity.CredentialSecurityEventType;
@@ -25,6 +28,9 @@ import com.shiftpay.mvp.security.JwtService;
 import com.shiftpay.mvp.service.EmailChangeDelivery;
 import com.shiftpay.mvp.service.EmailChangeService;
 import com.shiftpay.mvp.service.EmailIdentityLockInitializer;
+import com.shiftpay.mvp.service.PasswordResetDelivery;
+import com.shiftpay.mvp.service.PasswordResetService;
+import com.shiftpay.mvp.service.UserService;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.BeforeEach;
@@ -121,6 +127,9 @@ class PostgreSqlIntegrationTests {
 	@Autowired PasswordEncoder passwordEncoder;
 	@Autowired PlatformTransactionManager transactionManager;
 	@Autowired CapturingDelivery delivery;
+	@Autowired CapturingPasswordResetDelivery resetDelivery;
+	@Autowired PasswordResetService passwordResetService;
+	@Autowired UserService userService;
 
 	@BeforeEach
 	void cleanApplicationSchema() {
@@ -128,6 +137,8 @@ class PostgreSqlIntegrationTests {
 		delivery.accept.set(true);
 		delivery.acceptedDeliveries.set(0);
 		delivery.deliveredCodes.clear();
+		resetDelivery.deliveredCodes.clear();
+		resetDelivery.release = null;
 	}
 
 	@Test
@@ -288,23 +299,23 @@ class PostgreSqlIntegrationTests {
 	}
 
 	@Test
-	void cleanPostgreSqlMigratesFromV1ThroughV15() {
-		String schema = "clean_v1_to_v15";
+	void cleanPostgreSqlMigratesFromV1ThroughV16() {
+		String schema = "clean_v1_to_v16";
 		Flyway flyway = flyway(schema, null);
 
-		assertThat(flyway.migrate().migrationsExecuted).isEqualTo(15);
+		assertThat(flyway.migrate().migrationsExecuted).isEqualTo(16);
 		JdbcTemplate isolated = isolatedJdbc(schema);
 		assertThat(isolated.queryForObject(
 				"select version from flyway_schema_history where success order by installed_rank desc limit 1",
-				String.class)).isEqualTo("15");
+				String.class)).isEqualTo("16");
 		assertThat(isolated.queryForObject(
 				"select count(*) from information_schema.columns where table_schema = ? and table_name = 'users' and column_name = 'credential_version'",
 				Long.class, schema)).isEqualTo(1);
 	}
 
 	@Test
-	void representativeV14DataSurvivesUpgradeToV15() {
-		String schema = "upgrade_v14_to_v15";
+	void representativeV14DataSurvivesUpgradeToV16() {
+		String schema = "upgrade_v14_to_v16";
 		Flyway v14 = flyway(schema, MigrationVersion.fromVersion("14"));
 		v14.migrate();
 		JdbcTemplate isolated = isolatedJdbc(schema);
@@ -332,7 +343,7 @@ class PostgreSqlIntegrationTests {
 				values (?, ?, 'JOINED', 20.00, 0)
 				""", shiftId, userId);
 
-		assertThat(flyway(schema, null).migrate().migrationsExecuted).isEqualTo(1);
+		assertThat(flyway(schema, null).migrate().migrationsExecuted).isEqualTo(2);
 		assertThat(isolated.queryForObject("select count(*) from users", Long.class)).isEqualTo(2);
 		assertThat(isolated.queryForObject("select count(*) from shift_sessions", Long.class)).isEqualTo(1);
 		assertThat(isolated.queryForObject("select count(*) from shift_attendance", Long.class)).isEqualTo(1);
@@ -341,6 +352,140 @@ class PostgreSqlIntegrationTests {
 		assertThat(isolated.queryForObject(
 				"select count(*) from email_identity_locks where normalized_email = 'existing@example.com'",
 				Long.class)).isEqualTo(1);
+		assertThat(isolated.queryForObject("select count(*) from password_reset_requests", Long.class)).isZero();
+	}
+
+	@Test
+	void resetAndAuthenticatedPasswordChangeSerializeOnPostgreSql() throws Exception {
+		User user = createUser("reset-race@example.com");
+		String oldToken = jwtService.generateAccessToken(user);
+		RequestPasswordResetResponse request = passwordResetService.request(user.getEmail(), "192.0.2.11");
+		String code = awaitResetCode(user.getEmail());
+		AuthenticatedUserPrincipal principal = principal(user);
+		List<Outcome> outcomes = runConcurrently(
+				() -> { passwordResetService.confirm(new ConfirmPasswordResetRequest(
+						request.requestId(), code, "reset-password-456")); return null; },
+				() -> userService.updateMyPassword(
+						new UpdateMyPasswordRequest("password123", "auth-password-456"), principal));
+		assertThat(outcomes).filteredOn(Outcome::success).hasSize(1);
+		assertThat(outcomes.get(0).success() ? outcomes.get(1).errorCode() : outcomes.get(0).errorCode())
+				.isEqualTo(outcomes.get(0).success()
+						? "CREDENTIAL_VERSION_CONFLICT" : "PASSWORD_RESET_REQUEST_EXPIRED");
+		assertThat(userRepository.findById(user.getId()).orElseThrow().getCredentialVersion()).isEqualTo(1);
+		mockMvc.perform(get("/api/v1/users/me").header("Authorization", "Bearer " + oldToken))
+				.andExpect(status().isUnauthorized());
+		assertThat(jdbcTemplate.queryForObject(
+				"select code_digest from password_reset_requests where request_id = ?", String.class,
+				request.requestId())).doesNotContain(code);
+	}
+
+	@Test
+	void resetAndConfirmedEmailChangeSerializeOnPostgreSql() throws Exception {
+		User user = createUser("reset-email-race@example.com");
+		PendingEmailChange pending = pending(user, "reset-email-new@example.com", "483921");
+		pendingRepository.saveAndFlush(pending);
+		RequestPasswordResetResponse request = passwordResetService.request(user.getEmail(), "192.0.2.12");
+		String resetCode = awaitResetCode(user.getEmail());
+		AuthenticatedUserPrincipal principal = principal(user);
+		List<Outcome> outcomes = runConcurrently(
+				() -> { passwordResetService.confirm(new ConfirmPasswordResetRequest(
+						request.requestId(), resetCode, "reset-password-456")); return null; },
+				() -> emailChangeService.confirm(new ConfirmMyEmailChangeRequest("483921"), principal));
+		assertThat(outcomes).filteredOn(Outcome::success).hasSize(1);
+		assertThat(outcomes.get(0).success() ? outcomes.get(1).errorCode() : outcomes.get(0).errorCode())
+				.isEqualTo(outcomes.get(0).success()
+						? "CREDENTIAL_VERSION_CONFLICT" : "PASSWORD_RESET_REQUEST_EXPIRED");
+		User stored = userRepository.findById(user.getId()).orElseThrow();
+		assertThat(stored.getCredentialVersion()).isEqualTo(1);
+		if (outcomes.get(0).success()) {
+			assertThat(stored.getEmail()).isEqualTo("reset-email-race@example.com");
+			assertThat(pendingRepository.findByUserId(user.getId())).isPresent();
+		}
+		else {
+			assertThat(stored.getEmail()).isEqualTo("reset-email-new@example.com");
+			assertThat(passwordEncoder.matches("password123", stored.getPasswordHash())).isTrue();
+		}
+	}
+
+	@Test
+	void confirmationWaitingOnCredentialRowCannotCommitAfterExpiry() throws Exception {
+		User user = createUser("reset-expiry-lock@example.com");
+		RequestPasswordResetResponse request = passwordResetService.request(user.getEmail(), "192.0.2.13");
+		String code = awaitResetCode(user.getEmail());
+		jdbcTemplate.update("update password_reset_requests set expires_at = ? where request_id = ?",
+				java.sql.Timestamp.from(Instant.now().plusMillis(900)), request.requestId());
+		CountDownLatch locked = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+			Future<?> holder = executor.submit(() -> new TransactionTemplate(transactionManager).execute(status -> {
+				jdbcTemplate.queryForObject("select id from users where id = ? for update", Long.class, user.getId());
+				locked.countDown();
+				await(release);
+				return null;
+			}));
+			assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
+			Future<String> confirmation = executor.submit(() -> {
+				try {
+					passwordResetService.confirm(new ConfirmPasswordResetRequest(
+							request.requestId(), code, "new-password-456"));
+					return "success";
+				}
+				catch (ApiErrorException exception) {
+					return exception.getCode();
+				}
+			});
+			Thread.sleep(1200);
+			release.countDown();
+			holder.get(5, TimeUnit.SECONDS);
+			assertThat(confirmation.get(5, TimeUnit.SECONDS)).isEqualTo("PASSWORD_RESET_REQUEST_EXPIRED");
+		}
+		assertThat(passwordEncoder.matches("password123",
+				userRepository.findById(user.getId()).orElseThrow().getPasswordHash())).isTrue();
+	}
+
+	@Test
+	void correctCodeWaitsForPendingDeliveryOnPostgreSqlWithoutUsingLastAttempt() throws Exception {
+		User user = createUser("postgres-pending-reset@example.com");
+		CountDownLatch release = new CountDownLatch(1);
+		resetDelivery.release = release;
+		RequestPasswordResetResponse request = passwordResetService.request(user.getEmail(), "192.0.2.14");
+		String code = awaitResetCode(user.getEmail());
+		jdbcTemplate.update("update password_reset_requests set failed_attempts = 4 where request_id = ?",
+				request.requestId());
+		ExecutorService executor = Executors.newSingleThreadExecutor();
+		try {
+			Future<Outcome> confirmation = executor.submit(() -> {
+				try {
+					passwordResetService.confirm(new ConfirmPasswordResetRequest(
+							request.requestId(), code, "new-password-456"));
+					return new Outcome(true, null);
+				}
+				catch (ApiErrorException exception) {
+					return new Outcome(false, exception.getCode());
+				}
+			});
+			assertThatThrownBy(() -> confirmation.get(200, TimeUnit.MILLISECONDS))
+					.isInstanceOf(TimeoutException.class);
+			assertThat(jdbcTemplate.queryForObject(
+					"select failed_attempts from password_reset_requests where request_id = ?",
+					Integer.class, request.requestId())).isEqualTo(4);
+			release.countDown();
+			assertThat(confirmation.get(5, TimeUnit.SECONDS).success()).isTrue();
+		}
+		finally {
+			release.countDown();
+			executor.shutdownNow();
+		}
+		assertThat(userRepository.findById(user.getId()).orElseThrow().getCredentialVersion()).isEqualTo(1);
+	}
+
+	private String awaitResetCode(String email) throws Exception {
+		for (int attempt = 0; attempt < 100; attempt++) {
+			String code = resetDelivery.deliveredCodes.get(email);
+			if (code != null) return code;
+			Thread.sleep(10);
+		}
+		throw new AssertionError("Password reset delivery not observed");
 	}
 
 	@Test
@@ -629,6 +774,12 @@ class PostgreSqlIntegrationTests {
 		CapturingDelivery postgresGateDelivery() {
 			return new CapturingDelivery();
 		}
+
+		@Bean
+		@Primary
+		CapturingPasswordResetDelivery postgresResetDelivery() {
+			return new CapturingPasswordResetDelivery();
+		}
 	}
 
 	static final class CapturingDelivery implements EmailChangeDelivery {
@@ -643,6 +794,25 @@ class PostgreSqlIntegrationTests {
 			}
 			deliveredCodes.put(message.recipient(), message.code());
 			acceptedDeliveries.incrementAndGet();
+			return true;
+		}
+	}
+
+	static final class CapturingPasswordResetDelivery implements PasswordResetDelivery {
+		private final Map<String, String> deliveredCodes = new ConcurrentHashMap<>();
+		private volatile CountDownLatch release;
+		@Override
+		public boolean deliver(Message message) {
+			deliveredCodes.put(message.recipient(), message.code());
+			if (release != null) {
+				try {
+					if (!release.await(5, TimeUnit.SECONDS)) return false;
+				}
+				catch (InterruptedException exception) {
+					Thread.currentThread().interrupt();
+					return false;
+				}
+			}
 			return true;
 		}
 	}
