@@ -163,7 +163,7 @@ public class AttendanceService {
 		OffsetDateTime joinedAt = decoded == null ? null : decoded.timestamp().atOffset(ZoneOffset.UTC);
 		Long attendanceId = decoded == null ? null : decoded.id();
 		List<MyHistoryReadRow> rows = shiftAttendanceRepository.findMyHistoryPageByWorkerId(
-				principal.id(), joinedAt, attendanceId, PageRequest.of(0, limit + 1));
+				principal.id(), decoded != null, joinedAt, attendanceId, PageRequest.of(0, limit + 1));
 		boolean hasMore = rows.size() > limit;
 		List<MyHistoryReadRow> visibleRows = hasMore ? rows.subList(0, limit) : rows;
 		List<MyShiftHistoryResponse> items = mapHistoryRows(visibleRows, principal);

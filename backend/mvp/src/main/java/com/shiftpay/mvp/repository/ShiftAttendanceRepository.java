@@ -250,13 +250,14 @@ public interface ShiftAttendanceRepository extends JpaRepository<ShiftAttendance
 				com.shiftpay.mvp.entity.ShiftStatus.DISCARDED,
 				com.shiftpay.mvp.entity.ShiftStatus.CANCELLED
 			  )
-			  and (:cursorJoinedAt is null
+			  and (:cursorPresent = false
 			       or attendance.joinedAt < :cursorJoinedAt
 			       or (attendance.joinedAt = :cursorJoinedAt and attendance.id < :cursorId))
 			order by attendance.joinedAt desc, attendance.id desc
 			""")
 	List<MyHistoryReadRow> findMyHistoryPageByWorkerId(
 			@Param("workerId") Long workerId,
+			@Param("cursorPresent") boolean cursorPresent,
 			@Param("cursorJoinedAt") OffsetDateTime cursorJoinedAt,
 			@Param("cursorId") Long cursorId,
 			Pageable pageable
